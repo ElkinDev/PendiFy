@@ -26,9 +26,11 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 
 def _user_agent():
     try:
-        return f"pcnotify/{importlib.metadata.version('pcnotify')}"
-    except importlib.metadata.PackageNotFoundError:  # a source-tree run: the tests, a checkout
-        return "pcnotify/source"
+        version = importlib.metadata.version("pcnotify")
+    except Exception:  # never stop the import: not installed (the tests, a checkout) or a half-written dist-info
+        version = None
+    # The fallback when the lookup failed or read no version (None or blank from a broken dist-info).
+    return f"pcnotify/{version.strip()}" if isinstance(version, str) and version.strip() else "pcnotify/source"
 
 
 # The program names itself in every request: the edge in front of the Worker refuses urllib's default

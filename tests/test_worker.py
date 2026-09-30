@@ -5,6 +5,7 @@ import json
 import socket
 import time
 import unittest
+from unittest import mock
 
 import support
 from support import LINK_ID, SECRET, error
@@ -72,6 +73,16 @@ class LinkWorkerClientTest(unittest.TestCase):
                 agent = request["headers"].get("user-agent", "")
                 self.assertTrue(agent.startswith("pcnotify/"), agent)
                 self.assertFalse(agent.startswith("Python-urllib"), agent)
+
+    def test_a_broken_or_empty_version_lookup_falls_back_to_source(self):
+        # Mutation: the broad except restored to PackageNotFoundError only. Red: the KeyError subtest raises.
+        def raise_key_error(name):
+            raise KeyError(name)
+
+        for label, replacement in (("None", lambda name: None), ("KeyError", raise_key_error)):
+            with self.subTest(lookup=label):
+                with mock.patch.object(worker.importlib.metadata, "version", replacement):
+                    self.assertEqual(worker._user_agent(), "pcnotify/source")
 
     def test_each_ping_answer_maps_to_its_result_as_s_reads_it(self):
         # Mutation: a 200 with sent 0 read as Sent. Red: Sent where NotDelivered(200) is expected (S:303).
