@@ -61,6 +61,9 @@ WORDS = {
         "alert_loading": "empezó la pantalla de carga",
         "alert_queue": "partida encontrada",
         "alert_started": "la partida empezó",
+        "quit": "Salir",
+        "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
+        "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta python -m pcnotify.",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -93,6 +96,9 @@ WORDS = {
         "alert_loading": "the loading screen started",
         "alert_queue": "match found",
         "alert_started": "the match started",
+        "quit": "Quit",
+        "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
+        "start_again": "To start it again, open the shortcut on the Desktop or run python -m pcnotify.",
     },
 }
 
@@ -133,10 +139,12 @@ def _form(action, token, inner):
 
 
 class PairingPage:
-    def __init__(self, state, watch=None):
-        """`watch` answers the watcher's snapshot; without it the page shows no watcher line."""
+    def __init__(self, state, watch=None, on_quit=None):
+        """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
+        the program; without it the page shows no quit button and /quit is no route."""
         self.state = state
         self.watch = watch
+        self.on_quit = on_quit
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None

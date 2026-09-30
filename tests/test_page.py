@@ -413,6 +413,38 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(answers, [(path, False, 303, True, True, " [page] a request failed: ConfigError\n", True)
                                    for path, _, _ in roads])
 
+    def test_quit_is_fenced_like_every_post_route_and_answers_the_stopped_page_in_both_languages(self):
+        # Mutation: /quit answered before the token check. Red: a POST with no token stops the program.
+        self.assertNotIn('action="/quit"', self.html())  # a page with nothing to stop has no quit
+        self.assertEqual(self.call("POST", "/quit")[0], 404)
+        quits = []
+        self.page = page.PairingPage(self.state, on_quit=lambda: quits.append(True))
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+        hosts = ["evil.example", f"evil.example:{self.port}", f"127.0.0.1:{self.port + 1}", "127.0.0.1",
+                 f"localhost.evil.example:{self.port}", f"[::1]:{self.port}", f"127.0.0.2:{self.port}", ""]
+        refused = [self.call("POST", "/quit", host=host)[0] for host in hosts]
+        refused += [self.call("POST", "/quit", token=token)[0]
+                    for token in (False, "wrong", self.page.token[:-1], self.page.token + "x")]
+        self.assertEqual((refused, quits), ([403] * 12, []))
+        self.assertEqual((page.WORDS["es"]["quit"], page.WORDS["en"]["quit"]), ("Salir", "Quit"))
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                words = page.WORDS[lang]
+                self.assertIn(f'<button type="submit">{words["quit"]}</button></form>', self.html(accept))
+                status, headers, body = self.call("POST", "/quit", headers={"Accept-Language": accept})
+                self.assertEqual((status, headers["content-type"], headers["connection"]),
+                                 (200, "text/html; charset=utf-8", "close"))
+                for name, value in FENCE.items():
+                    self.assertEqual(headers.get(name), value)
+                self.assertIn(f'<html lang="{lang}">', body)
+                for key in ("stopped", "start_again"):
+                    self.assertIn(html.escape(words[key]), body)
+                self.assertIsNone(GAME_WORDS.search(body), body)
+                self.assertNotIn(self.page.token, body)
+        self.assertEqual(quits, [True, True])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -146,7 +146,7 @@ def _break_as_interrupt():
     return signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
 
-def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None):
+def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None, beep=None):
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)

@@ -46,6 +46,10 @@ def package_dir():
     return SRC / PACKAGE
 
 
+def silent_beep():
+    """The beep every test run of the entry point passes in place of the sound: it plays nothing."""
+
+
 def temp_dir():
     """A TemporaryDirectory under build/tmp, so no test writes outside the repository."""
     base = BUILD / "tmp"

@@ -1,12 +1,19 @@
 """MainCommandTest: the two commands, `ping <kind>` for the bench and the page with its driver."""
 import contextlib
+import html
+import http.client
 import io
 import json
 import os
+import re
+import signal
+import socket
 import subprocess
 import sys
 import threading
+import time
 import unittest
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -15,12 +22,26 @@ from support import LINK_ID, SECRET, error
 
 config = support.module("config")
 entry = support.module("__main__")
+page = support.module("page")
 watcher = support.module("watcher")
 worker = support.module("worker")
 
 SENT = (200, {"result": "sent", "devices": 1, "sent": 1, "reasons": {"sent": 1}})
 TOKEN = "fake-Token_0123"  # a test vector, never a client's
 RUN_FILE = "run.json"
+RACE_WINDOWS_ONLY = ("a remove refused while another handle holds the file, a sharing violation, is a Windows "
+                     "behavior; elsewhere the remove succeeds and this race does not arise")
+NO_SIGBREAK = "Ctrl+Break is a Windows console signal: this platform has no signal.SIGBREAK"
+QUIT_TOKEN = re.compile(r'<form method="post" action="/quit"><input type="hidden" name="token" value="([^"]+)">')
+
+
+def answers(port):
+    """True when something accepts a connection on 127.0.0.1:port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
 
 
 class MainCommandTest(unittest.TestCase):
@@ -33,6 +54,7 @@ class MainCommandTest(unittest.TestCase):
         # A lockfile that is never written: every run of the entry point watches a client that is not there,
         # never the real one, unless a case points it at a fake.
         self.no_client = Path(tmp.name) / "no client" / "lockfile"
+        self.beeps = []  # what the entry point's beep seam heard: every run passes it, so no test run beeps
 
     def fake(self, answer):
         fake = support.FakeWorker(answer)
@@ -41,6 +63,7 @@ class MainCommandTest(unittest.TestCase):
 
     def run_main(self, *argv, **kwargs):
         out, err = io.StringIO(), io.StringIO()
+        kwargs.setdefault("beep", lambda: self.beeps.append("beep"))
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -218,6 +241,108 @@ class MainCommandTest(unittest.TestCase):
                 for value in (TOKEN, SECRET, LINK_ID):
                     self.assertNotIn(value, out)
                 self.assertFalse(self.run_file.exists())
+
+    def test_the_entry_point_beeps_through_its_seam_and_a_test_run_beeps_nothing(self):
+        # Mutation: main ignores its beep seam, the Alerter keeps the sounding default. Red: the seam hears
+        # no beep.
+        self.store.set_typed(LINK_ID, SECRET)
+        fake = self.fake(lambda path, body: SENT)
+        client_fake = support.FakeClient(phase="ReadyCheck")
+        self.addCleanup(client_fake.close)
+        lockfile = self.no_client.parent.parent / "a client" / "lockfile"
+        lockfile.parent.mkdir(parents=True)
+        lockfile.write_text(f"LeagueClient:4242:{client_fake.port}:{TOKEN}:https", encoding="utf-8")
+        stop = threading.Event()
+        thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
+                                            "--client-lockfile", str(lockfile), "--dry", opener=None, stop=stop)
+        fake.wait_for(1, limit=3)
+        stop.set()
+        thread.join(5)
+        self.assertEqual((result["run"][0], fake.bodies(), self.beeps),
+                         (0, [{"linkId": LINK_ID, "secret": SECRET, "kind": "lol_queue_found"}], ["beep"]))
+
+    @unittest.skipIf(os.name != "nt", RACE_WINDOWS_ONLY)
+    def test_a_start_that_loses_the_race_for_the_run_file_says_already_running_and_exits_0(self):
+        # Mutation: claim lets the PermissionError of the remove out. Red: "cannot start" and exit 1.
+        self.run_file.parent.mkdir(parents=True)
+        opened, stop = [], threading.Event()
+        stop.set()  # a start that wrongly goes on ends at its first tick
+        with open(self.run_file, "w", encoding="utf-8"):  # the winner's handle, its record not written yet
+            code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                           opener=opened.append, stop=stop)
+            kept = self.run_file.exists()
+        self.assertEqual((code, out, err, opened, kept), (0, entry.ALREADY_RUNNING_LINE + "\n", "", [], True))
+        self.assertFalse(self.store.path.exists())  # no page, so no first load of the config
+        # A folder in the run file's place is no race: that start still cannot go on.
+        self.run_file.unlink()
+        self.run_file.mkdir()
+        self.assertEqual(self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                       opener=opened.append, stop=stop), (1, entry.CLAIM_FAILED_LINE + "\n", ""))
+
+    @unittest.skipUnless(hasattr(signal, "SIGBREAK"), NO_SIGBREAK)
+    def test_ctrl_break_stops_the_page_and_the_watcher_and_removes_the_run_file(self):
+        # Mutation: _break_as_interrupt installs no handler. Red: the break reaches this case's guard and the
+        # program runs on until the case stops it.
+        guard, returned, seen, stop = [], threading.Event(), {}, threading.Event()
+        previous = signal.signal(signal.SIGBREAK, lambda number, frame: guard.append(number))
+        self.addCleanup(signal.signal, signal.SIGBREAK, previous)
+        baseline = threading.active_count()
+
+        def breaker():
+            deadline = time.monotonic() + 5
+            while (self.read_run() or {}).get("port") is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            seen["port"] = (self.read_run() or {}).get("port")
+            signal.raise_signal(signal.SIGBREAK)
+            if not returned.wait(4):  # the break never reached the program: end it so the case can say so
+                seen["fallback"] = True
+                stop.set()
+
+        breaking = threading.Thread(target=breaker)
+        breaking.start()
+        code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                       opener=lambda url: True, stop=stop)
+        returned.set()
+        breaking.join(5)
+        deadline = time.monotonic() + 2
+        while threading.active_count() > baseline and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual((code, err, guard, seen.get("fallback", False)), (0, "", [], False))
+        self.assertEqual((self.run_file.exists(), answers(seen["port"]), threading.active_count() <= baseline),
+                         (False, False, True))
+
+    def test_quit_on_the_page_stops_the_program_removes_the_run_file_and_exits_0(self):
+        # Mutation: the run file kept at the stop. Red: the run file is still there after the exit.
+        opened, stop = [], threading.Event()
+        thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                            opener=lambda url: opened.append(url) or True, stop=stop)
+        deadline = time.monotonic() + 5
+        while not opened and time.monotonic() < deadline:
+            time.sleep(0.02)
+        port = int(opened[0].split(":")[2].strip("/"))
+
+        def request(method, path, body=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                headers = {"Host": f"127.0.0.1:{port}", "Accept-Language": "en"}
+                if body is not None:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                return response.status, response.read().decode("utf-8")
+            finally:
+                connection.close()
+
+        token = QUIT_TOKEN.search(request("GET", "/")[1])
+        status, body = request("POST", "/quit", urllib.parse.urlencode({"token": token.group(1) if token else ""}))
+        thread.join(5)
+        outcome = (status, thread.is_alive(), self.run_file.exists(), answers(port))
+        stop.set()
+        thread.join(5)
+        self.assertEqual(outcome, (200, False, False, False))
+        self.assertEqual(result["run"], (0, f"page: {opened[0]}\n", ""))
+        for key in ("stopped", "start_again"):
+            self.assertIn(html.escape(page.WORDS["en"][key]), body)
 
 
 if __name__ == "__main__":
