@@ -39,10 +39,16 @@ class PairingState:
         self._typed_refused = False
         self._refused_pings = 0
         self._relink_offered = False
+        self._config_failed = False
 
     def page_seen(self):
         with self._lock:
             self._page_seen = self._clock()
+
+    def config_failed(self):
+        """A POST met a config file that could not be read or replaced; the page says so until a write succeeds."""
+        with self._lock:
+            self._config_failed = True
 
     def tick(self):
         """One automatic check when one is due; the check's result, or None when none was made."""
@@ -119,7 +125,8 @@ class PairingState:
                 state = self._last_answer
             return {"state": state, "linked": self._linked, "showCode": not self._linked,
                     "relinkOffered": self._linked and self._relink_offered,
-                    "buttonRefused": self._button_refused, "typedRefused": self._typed_refused}
+                    "buttonRefused": self._button_refused, "typedRefused": self._typed_refused,
+                    "configFailed": self._config_failed}
 
     def _window_open(self, now):
         while self._recent and self._recent[0] <= now - RATE_WINDOW:
@@ -142,6 +149,7 @@ class PairingState:
             if isinstance(result, worker.Linked):
                 self._secret = self._store.set_link_id(result.link_id).secret
                 self._linked = True
+                self._config_failed = False
             elif isinstance(result, worker.Throttled):
                 self._last_answer = WAIT
             elif isinstance(result, worker.Refused):
@@ -155,4 +163,4 @@ class PairingState:
         self._secret, self._linked = pair.secret, pair.link_id is not None
         self._series, self._last_check, self._last_answer = 0, None, WAITING
         self._refused_pings, self._relink_offered = 0, False
-        self._button_refused = self._typed_refused = False
+        self._button_refused = self._typed_refused = self._config_failed = False

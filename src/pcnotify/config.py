@@ -112,9 +112,10 @@ class ConfigStore:
             return self._write(Pairing(self._current().secret))
 
     def _current(self):
+        """The stored pair whose secret a write keeps; a file gone mid-run is the one sentence, as a held one is."""
         current = self.read()
         if current is None:
-            raise RuntimeError("the config file is missing or unreadable")
+            raise self._unavailable()
         return current
 
     def _unavailable(self):
