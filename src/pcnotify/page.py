@@ -104,16 +104,140 @@ WORDS = {
     },
 }
 
-_STYLE = ("body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;line-height:1.4}"
-          ".code{font-family:monospace;font-size:1.4rem;letter-spacing:.1em}label{display:block;margin:.4rem 0}"
-          "form{margin:.8rem 0}")
-# Polls the state; reloads when what the page shows changes; says so when the program is gone.
+# The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
+# fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
+# action="/relink" or action="/quit" of a form it does not show.
+_STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
+          "--line:#D8D0EA;--hair:#ECE6F7;--brand:#6D28D9;--on-brand:#FFFFFF;--tonal:#E9DEFB;--on-tonal:#4C1D95;"
+          "--danger:#C21F45;--danger-bg:#F6DDE3;--on-danger-bg:#671025;--ring:rgba(109,40,217,.24);--hover:rgba(30,21,"
+          "51,.06);--px-line:#1E1533;--shadow:0 1px 2px rgba(30,21,51,.05),0 12px 32px rgba(30,21,51,.07);}\n"
+          "@media (prefers-color-scheme:dark){:root{--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
+          "--ink2:#A79FC2;--line:#3A3452;--hair:#2B2740;--brand:#C3B1F7;--on-brand:#24124F;--tonal:#40277C;"
+          "--on-tonal:#E9DEFB;--danger:#FB7196;--danger-bg:#853C50;--on-danger-bg:#FEEAEF;--ring:rgba(195,177,247,.30);"
+          "--hover:rgba(255,255,255,.08);--px-line:#0D0A18;--shadow:0 1px 2px rgba(0,0,0,.30),0 16px 40px rgba(0,0,0,"
+          ".32);}}\n"
+          "*{box-sizing:border-box}\n"
+          "body{margin:0;padding:32px 16px 40px;background:var(--bg);color:var(--ink);font:400 16px/24px system-ui,"
+          "sans-serif;-webkit-font-smoothing:antialiased}\n"
+          "body>h1,body>p{max-width:40rem;margin-inline:auto}\n"
+          ".page{max-width:1040px;margin:0 auto}\n"
+          "h1{margin:0 0 8px;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.01em}\n"
+          ".intro{margin:0 0 24px;max-width:46ch;color:var(--ink2)}\n"
+          "#state{display:flex;gap:12px;align-items:flex-start;max-width:40rem;margin:0;padding:12px 16px;"
+          "border-radius:12px;background:var(--tint);font-weight:500}\n"
+          '#state::before{content:"";flex:none;width:10px;height:10px;margin-top:7px;border-radius:50%;'
+          "background:var(--brand)}\n"
+          '#state[data-shown="falsefalse"]{padding:16px 20px;background:var(--tonal);color:var(--on-tonal);'
+          "font-size:20px;line-height:28px;font-weight:600}\n"
+          '#state[data-shown="falsefalse"]::before{width:8px;height:15px;margin:3px 4px 0 6px;border-radius:0;'
+          "background:none;border:solid currentColor;border-width:0 3px 3px 0;transform:rotate(45deg)}\n"
+          '#state[data-shown="falsetrue"]{background:var(--danger-bg);color:var(--on-danger-bg)}\n'
+          '#state[data-shown="falsetrue"]::before{background:none;border:2px solid currentColor}\n'
+          "#watch{margin:12px 0 0;max-width:40rem;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+          ".scan{margin:24px 0 16px;max-width:40ch}\n"
+          ".note{margin:12px 0 0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+          ".note.warn{color:var(--danger)}\n"
+          ".key-card{display:grid;justify-items:center;gap:16px;margin:0 0 16px;padding:20px;border-radius:16px;"
+          "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
+          ".qr{display:block;width:100%;max-width:288px;height:auto;border-radius:12px;"
+          "box-shadow:0 0 0 1px var(--hair)}\n"
+          ".key-card figcaption{display:grid;gap:2px;text-align:center}\n"
+          ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
+          '.code{font:600 22px/28px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.12em;'
+          "font-variant-numeric:tabular-nums}\n"
+          ".party{display:flex;justify-content:center;align-items:flex-end;gap:18px;width:100%;padding-top:4px;"
+          "border-bottom:2px solid var(--line)}\n"
+          ".px{display:block;width:48px;height:48px}\n"
+          ".pl{fill:var(--px-line)}\n"
+          "form{margin:0}\n"
+          "button{min-height:44px;padding:10px 24px;border:1px solid transparent;border-radius:999px;"
+          "background:var(--tonal);color:var(--on-tonal);font:500 14px/20px system-ui,sans-serif;cursor:pointer;"
+          "transition:transform 160ms cubic-bezier(.23,1,.32,1),box-shadow 160ms ease}\n"
+          "button:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
+          "button:active{transform:scale(.97)}\n"
+          "button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          "form[action='/check'] button,form[action='/relink'] button{width:100%;background:var(--brand);"
+          "color:var(--on-brand)}\n"
+          "form[action='/forget'] button{background:transparent;border-color:var(--line);color:var(--danger)}\n"
+          "form[action='/quit'] button{padding-inline:16px;background:transparent;color:var(--ink2)}\n"
+          ".more{display:grid;gap:16px;margin-top:32px}\n"
+          ".panel{padding:20px;border-radius:16px;background:var(--card);border:1px solid var(--hair)}\n"
+          ".panel h2{margin:0 0 16px;font-size:16px;line-height:24px;font-weight:600}\n"
+          ".panel p{margin:0 0 16px;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+          "form[action='/typed']{display:grid;gap:12px}\n"
+          "label{display:grid;gap:6px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink2)}\n"
+          "input{width:100%;height:44px;padding:0 14px;border:1px solid var(--line);border-radius:12px;"
+          'background:var(--bg);color:var(--ink);font:500 16px/24px ui-monospace,"Cascadia Mono",Consolas,monospace;'
+          "letter-spacing:.08em;text-transform:uppercase}\n"
+          "input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--ring)}\n"
+          "form[action='/typed'] button{justify-self:start;margin-top:4px}\n"
+          ".foot{display:flex;justify-content:flex-end;margin-top:24px;padding-top:12px;"
+          "border-top:1px solid var(--hair)}\n"
+          '@media (prefers-reduced-motion:no-preference){#state[data-shown^="true"]::before{animation:breathe 2.4s '
+          "ease-in-out infinite}.px{animation:hop .5s steps(1,end) 4}.px:nth-child(2){animation-delay:.12s}"
+          ".px:nth-child(3){animation-delay:.24s}.px:nth-child(4){animation-delay:.36s}}\n"
+          "@keyframes breathe{50%{opacity:.3}}\n"
+          "@keyframes hop{50%{transform:translateY(-3px)}}\n"
+          "@media (min-width:880px){body{padding:56px 32px 48px}h1{font-size:36px;line-height:44px}"
+          ".link:has(.key-card){display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:repeat(9,"
+          "auto) 1fr;column-gap:64px}.link>*{grid-column:1}.link>.key-card{grid-column:2;grid-row:1/-1;"
+          "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
+          ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
+          "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n")
+# Polls the state; reloads when what the page shows changes; says so when the program is gone. While the program
+# is gone the state line's data-shown is a value no style rule names, so the look of what the page showed (the
+# linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
            "const shown=s.dataset.shown;"
-           "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;"
+           "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown)location.reload();})"
-           ".catch(()=>{s.textContent=s.dataset.closed;}),5000);")
+           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);")
+
+# Four original 16 by 16 pixel figures under the key (an archer, a knight, a mage and a small winged creature), in
+# the app's colours; 'o' is the outline, drawn in the theme's outline colour, and '.' is empty.
+_FIGURE_COLOURS = {"p": "#8E3D96", "d": "#40277C", "w": "#E9DEFB", "v": "#6D28D9", "l": "#C3B1F7", "s": "#A79FC2",
+                   "h": "#ECE8F6", "a": "#A5510B", "y": "#FBBE3C", "b": "#2A5AD6", "c": "#6BA6FB", "q": "#D8A9E0"}
+_FIGURES = (
+    ("....oooo........", "...oppppo....a..", "..opppppo....la.", "..oppppppo...l.a", ".oppdddddpo..l.a",
+     ".opdwdddwdo..l.a", ".opdddddddo..l.a", ".oppdddddpo..l.a", "..oopppppoo..l.a", ".opovvvvvopwwl.a",
+     ".opovvvvvoo..l.a", ".opoaaaaaoo..la.", ".opovvvvvop..a..", "..oovvvvvoo.....", "...odo.odo......",
+     "...ooo.ooo......"),
+    (".......pp.......", "......ppp.......", "....oooooooo....", "...ohhsssssso...", "...ohssssssso...",
+     "...osolooloso...", "...ohssssssso...", "....osssssso....", "..ossssssooooooo", ".ohssssssovvvvvo",
+     ".ohssssssovvyvvo", ".odddddddovydyvo", ".ohssssssovvyvvo", "..ossssssoovvvo.", "...oso.oso.ovo..",
+     "...ooo.ooo..o..."),
+    ("........oo......", ".......ovvo..oo.", "......ovvvo.oqyo", "......ovvvvooyyo", ".....ovvvvvo.oo.",
+     "..oollllllllo.a.", "...owwwwwwo...a.", "...owdwwdwo...a.", "...ohhhhhho..wa.", "..oddhhhhddddwa.",
+     "..odddhhdddoo.a.", "..oddddddddo..a.", "..oddllllddo..a.", ".oddddddddddo.a.", ".oddddddddddo.a.",
+     ".oooooooooooo.a."),
+    ("................", "................", "................", "........y.y.....", ".......oooooo...",
+     "......occcbbo...", "..o...obbwobo...", ".oco..obbbbbbo..", ".occo.obbboooo..", ".ocllobbbbo.....",
+     "..occobbwwbo....", "...oobwwwwbo....", ".o..obwwwwbbo...", ".ob.obwwwwbbo...", "..obobbbbbbbo...",
+     "...ooooooooo...."),
+)
+
+
+def _figure(rows):
+    """One figure as an inline svg of 48 px: a path per colour, each a run of same-colour pixels per row."""
+    runs = {}
+    for y, row in enumerate(rows):
+        x = 0
+        while x < len(row):
+            if row[x] == ".":
+                x += 1
+                continue
+            start = x
+            while x < len(row) and row[x] == row[start]:
+                x += 1
+            runs.setdefault(row[start], []).append(f"M{start} {y}h{x - start}v1h-{x - start}z")
+    paths = "".join(f'<path class="pl" d="{"".join(d)}"/>' if key == "o" else
+                    f'<path fill="{_FIGURE_COLOURS[key]}" d="{"".join(d)}"/>' for key, d in runs.items())
+    return (f'<svg class="px" viewBox="0 0 {len(rows[0])} 16" width="48" height="48" shape-rendering="crispEdges">'
+            f"{paths}</svg>")
+
+
+_PARTY = '<div class="party" aria-hidden="true">' + "".join(_figure(rows) for rows in _FIGURES) + "</div>"
 
 
 def language(accept_language):
@@ -193,37 +317,44 @@ class PairingPage:
         snapshot = self.state.snapshot()
         secret = self.state.secret_for_display() if snapshot["showCode"] else None
         token = html.escape(self.token)
-        parts = [f"<h1>{words['title']}</h1>", f"<p>{words['intro']}</p>",
-                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                 f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
-                 f'{words["state_" + snapshot["state"]]}</p>']
+        # What this is and what to do, with the QR card beside it on a wide window; the two other roads in their
+        # own cards under it; quit at the foot. The words and their order are the page's before the design.
+        link = [f"<h1>{words['title']}</h1>", f'<p class="intro">{words["intro"]}</p>',
+                f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
+                f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
+                f'{words["state_" + snapshot["state"]]}</p>']
         if snapshot["configFailed"]:
-            parts.append(f"<p>{words['config_failed']}</p>")
+            link.append(f'<p class="note warn">{words["config_failed"]}</p>')
         watch = self.watch_text(lang)
         if watch is not None:
-            parts.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
+            link.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
         if secret is not None:
-            parts += [f"<p>{words['scan']}</p>", qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules),
-                      f'<p>{words["code_label"]} <span class="code">{codes.display(secret)}</span></p>',
-                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]
+            drawn = qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules, labelledby="scan")
+            link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
+                     f'<figure class="key-card">{drawn}<figcaption><span class="key-label">{words["code_label"]}</span>'
+                     f' <span class="code">{codes.display(secret)}</span></figcaption>{_PARTY}</figure>',
+                     _form("check", token, f'<button type="submit">{words["check"]}</button>')]
             if snapshot["buttonRefused"]:
-                parts.append(f"<p>{words['button_wait']}</p>")
+                link.append(f'<p class="note">{words["button_wait"]}</p>')
         if snapshot["relinkOffered"]:
-            parts.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
-        parts += [f"<h2>{words['typed_title']}</h2>",
-                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
-                                        f'autocomplete="off"></label><label>{words["secret_label"]} <input '
-                                        f'name="secret" maxlength="32" autocomplete="off"></label>'
-                                        f'<button type="submit">{words["save"]}</button>')]
+            link.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
+        typed = [f"<h2>{words['typed_title']}</h2>",
+                 _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
+                                       f'autocomplete="off"></label><label>{words["secret_label"]} <input '
+                                       f'name="secret" maxlength="32" autocomplete="off"></label>'
+                                       f'<button type="submit">{words["save"]}</button>')]
         if snapshot["typedRefused"]:
-            parts.append(f"<p>{words['typed_refused']}</p>")
-        parts += [f"<h2>{words['forget']}</h2>", f"<p>{words['forget_sentence']}</p>",
+            typed.append(f'<p class="note warn">{words["typed_refused"]}</p>')
+        forget = [f"<h2>{words['forget']}</h2>", f"<p>{words['forget_sentence']}</p>",
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
-        if self.on_quit is not None:
-            parts.append(_form("quit", token, f'<button type="submit">{words["quit"]}</button>'))
+        quit_button = f'<button type="submit">{words["quit"]}</button>'
+        foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
+        body = (f'<main class="page"><section class="link">{"".join(link)}</section><section class="more">'
+                f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
+                f"{foot}</main>")
         return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
-                f"</style></head><body>{''.join(parts)}<script>{_SCRIPT}</script></body></html>")
+                f"</style></head><body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def render_stopped(self, lang):
         """The one small page /quit answers: the program stopped, and how to start it again."""
