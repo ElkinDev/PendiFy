@@ -346,10 +346,14 @@ def _handler(page):
             if not hmac.compare_digest(form.get("token", "").encode(), page.token.encode()):
                 return self._refuse(403)
             if path == "/quit":
-                # Answered before the stop, so the exit that follows never cuts the answer short.
-                self._send(200, "text/html; charset=utf-8",
-                           page.render_stopped(language(self.headers.get("Accept-Language"))))
-                return page.on_quit()
+                # Answered before the stop, so the exit that follows never cuts the answer short; stopped even
+                # when the answer cannot be written, and that failure goes on to the server's handle_error.
+                try:
+                    self._send(200, "text/html; charset=utf-8",
+                               page.render_stopped(language(self.headers.get("Accept-Language"))))
+                finally:
+                    page.on_quit()
+                return
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
 
