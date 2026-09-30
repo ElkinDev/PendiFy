@@ -442,6 +442,32 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(self.store.path.read_bytes(), before)
         self.assertIn(' data-theme="dark"><head>', self.html())
 
+    def test_a_theme_post_whose_write_fails_is_answered_as_a_failed_save_and_the_kept_theme_stays(self):
+        # Mutation: the ConfigError of /theme answered 204. Red: the answer is 204, not 303 to the page.
+        self.assertEqual(self.call("POST", "/theme", {"theme": "light"})[0], 204)
+        before = self.store.path.read_bytes()
+
+        def refuse(choice):  # the way a config.json held by another program refuses the replace
+            raise config.ConfigError("held")
+
+        self.store.set_theme = refuse
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            status, headers, _ = self.call("POST", "/theme", {"theme": "dark"})
+        shown = self.html("es")
+        self.assertEqual((status, headers.get("location"), err.getvalue()),
+                         (303, "/", " [page] a request failed: ConfigError\n"))
+        self.assertIn('<html lang="es" data-theme="light"><head>', shown)
+        self.assertIn(CONFIG_WORDS["es"], shown)
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_the_stopped_page_carries_the_kept_theme_as_the_pairing_page_does(self):
+        # Mutation: render_stopped without the config's theme. Red: its <html> carries no data-theme="dark".
+        self.assertNotIn("data-theme=", self.page.render_stopped("es").split("<head>")[0])
+        self.assertEqual(self.call("POST", "/theme", {"theme": "dark"})[0], 204)
+        self.assertIn('<html lang="es" data-theme="dark"><head>', self.page.render_stopped("es"))
+        self.assertIn('<html lang="en" data-theme="dark"><head>', self.page.render_stopped("en"))
+
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.
         snapshot = {"client": "waiting", "alert": None, "at": None}

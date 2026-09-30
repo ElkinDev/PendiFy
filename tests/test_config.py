@@ -1,4 +1,5 @@
-"""ConfigStoreTest: the one JSON file holding exactly secret and linkId (design P1, P6, residual e)."""
+"""ConfigStoreTest: the one JSON file holding secret and linkId, plus the optional theme (design P1, P6,
+residual e)."""
 import contextlib
 import io
 import json
@@ -92,7 +93,7 @@ class ConfigStoreTest(unittest.TestCase):
         loaded = self.store.load()
         self.assertEqual((loaded.secret, loaded.link_id), (SECRET, None))
 
-    def test_every_write_holds_two_keys_and_leaves_one_file(self):
+    def test_every_write_holds_two_keys_plus_the_optional_theme_and_leaves_one_file(self):
         # Mutation: the temp file is renamed with a copy instead of os.replace. Red: a .tmp remains beside it.
         self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "extra": "kept?"}))
         self.store.load()

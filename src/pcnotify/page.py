@@ -266,7 +266,10 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});"
            # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
            # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
-           # its localStorage is a new origin each time. A post that fails leaves localStorage as the fallback.
+           # its localStorage is a new origin each time. The server's value, served as data-theme, wins on the next
+           # page: localStorage is the fallback only while config.json holds no theme. A post whose write fails is
+           # answered as a failed save is (303 to the page, which says the file could not be written), and the
+           # choice then lasts until the next page, which keeps the config's theme.
            "(function(){var btn=document.getElementById('theme-toggle');if(!btn)return;"
            "function current(){var t=document.documentElement.getAttribute('data-theme');"
            "if(t==='light'||t==='dark')return t;return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}"
@@ -482,22 +485,26 @@ class PairingPage:
     def render_stopped(self, lang):
         """The one small page /quit answers: the program stopped, and how to start it again."""
         words = {key: html.escape(value) for key, value in WORDS[lang].items()}
-        return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
+        theme = self.state.theme()
+        kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
+        return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
                 f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
 
     def set_theme(self, choice):
-        """/theme: the theme button's choice kept in the config file; False for a value that is not light, dark
-        or system, which changes nothing. A config file that cannot be replaced is said as act() says it."""
+        """/theme: the theme button's choice kept in the config file; "kept", or "refused" for a value that is
+        not light, dark or system, which changes nothing, or "failed" for a config file that cannot be replaced,
+        said as act() says it and answered as a failed save is."""
         try:
             self.state.set_theme(choice)
         except ValueError:
-            return False
+            return "refused"
         except config.ConfigError as failure:
             _say_failure(failure)
             self.state.config_failed()
-        return True
+            return "failed"
+        return "kept"
 
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
@@ -622,9 +629,12 @@ def _handler(page):
                     page.on_quit()
                 return
             if path == "/theme":  # the page's script posts it and reads no page back
-                if not page.set_theme(form.get("theme", "")):
+                outcome = page.set_theme(form.get("theme", ""))
+                if outcome == "refused":
                     return self._refuse(400)
-                return self._send(204, "text/plain; charset=utf-8", "")
+                if outcome == "kept":
+                    return self._send(204, "text/plain; charset=utf-8", "")
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
 
