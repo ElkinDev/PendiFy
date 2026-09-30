@@ -162,12 +162,13 @@ class SceneDecodeTest(unittest.TestCase):
 
     def test_the_plate_is_the_design_lane_webp_and_every_other_version_falls_back(self):
         # Mutation: scene_svg drawn for any size. Red: a version 4 symbol gets the version 3 plate.
+        # The plate is pcpg-r4-plate-75-576.webp of the design lane pcpg round 4, redrawn for the 75 floor.
         prefix = "data:image/webp;base64,"
         self.assertTrue(plate_almena.PLATE_DATA_URI.startswith(prefix))
         plate = base64.b64decode(plate_almena.PLATE_DATA_URI[len(prefix):], validate=True)
-        self.assertEqual((len(plate), plate[:4], plate[8:12]), (28992, b"RIFF", b"WEBP"))
+        self.assertEqual((len(plate), plate[:4], plate[8:12]), (28132, b"RIFF", b"WEBP"))
         self.assertEqual(hashlib.sha256(plate).hexdigest(),
-                         "dd92c402e7e5364f12d02add757a19c401716f90a844dab498167d31105d52e4")
+                         "0124c2124d66e79e35e8f4fc03ffed082263a22929397aef6c2957babf702329")
         texts = [("v1 " * 5)[:14], ("v2 " * 9)[:26]] + MULTI_BLOCK
         for text in texts:
             self.assertIsNone(qr.scene_svg(qr.encode(text.encode("ascii")).modules, plate_almena.PLATE_DATA_URI))
