@@ -36,6 +36,7 @@ WORDS = {
                  "con tu cuenta.",
         "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
+        "show_key": "Mostrar la clave",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -69,7 +70,7 @@ WORDS = {
         "phase_inprogress": "En partida",
         "phase_endofgame": "Fin de la partida",
         "phase_other": "Otro estado",
-        "ping_sent": "enviado al teléfono",
+        "ping_sent": "enviado",
         "ping_refused": "rechazado por tu cuenta",
         "ping_not_delivered": "no entregado",
         "ping_failed": "falló el envío",
@@ -86,6 +87,7 @@ WORDS = {
                  "account.",
         "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
+        "show_key": "Show the key",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -119,7 +121,7 @@ WORDS = {
         "phase_inprogress": "In a game",
         "phase_endofgame": "Game over",
         "phase_other": "Other state",
-        "ping_sent": "sent to the phone",
+        "ping_sent": "sent",
         "ping_refused": "refused by your account",
         "ping_not_delivered": "not delivered",
         "ping_failed": "sending failed",
@@ -177,6 +179,10 @@ _STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFE
           "box-shadow:0 0 0 1px var(--hair)}\n"
           ".key-card figcaption{display:grid;gap:2px;text-align:center}\n"
           ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
+          ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
+          ".key-card summary::-webkit-details-marker{display:none}\n"
+          ".key-card details[open] summary{margin-bottom:12px}\n"
+          ".key-card details>span{display:block}\n"
           '.code{font:600 22px/28px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.12em;'
           "font-variant-numeric:tabular-nums}\n"
           ".party{display:flex;justify-content:center;align-items:flex-end;gap:18px;width:100%;padding-top:4px;"
@@ -184,12 +190,12 @@ _STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFE
           ".px{display:block;width:48px;height:48px}\n"
           ".pl{fill:var(--px-line)}\n"
           "form{margin:0}\n"
-          "button{min-height:44px;padding:10px 24px;border:1px solid transparent;border-radius:999px;"
-          "background:var(--tonal);color:var(--on-tonal);font:500 14px/20px system-ui,sans-serif;cursor:pointer;"
-          "transition:transform 160ms cubic-bezier(.23,1,.32,1),box-shadow 160ms ease}\n"
-          "button:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
-          "button:active{transform:scale(.97)}\n"
-          "button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          "button,.key-card summary{min-height:44px;padding:10px 24px;border:1px solid transparent;"
+          "border-radius:999px;background:var(--tonal);color:var(--on-tonal);font:500 14px/20px system-ui,"
+          "sans-serif;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1),box-shadow 160ms ease}\n"
+          "button:hover,.key-card summary:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
+          "button:active,.key-card summary:active{transform:scale(.97)}\n"
+          "button:focus-visible,.key-card summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
           "form[action='/check'] button,form[action='/relink'] button{width:100%;background:var(--brand);"
           "color:var(--on-brand)}\n"
           "form[action='/forget'] button{background:transparent;border-color:var(--line);color:var(--danger)}\n"
@@ -333,16 +339,17 @@ class PairingPage:
         return (host or "").strip().lower() in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
 
     def watch_text(self, lang):
-        """The watcher's line in `lang`: waiting or connected, then the phase while connected, then the last
-        alert and its time, then the last ping's result and its time when a ping was made; None when no watcher
-        runs beside the page. It names no game, no maker and no product."""
+        """The watcher's line in `lang`: waiting or connected, then the phase while connected once one is read,
+        then the last alert and its time, then the last ping's result and its time when a ping was made; None when
+        no watcher runs beside the page. It names no game, no maker and no product."""
         if self.watch is None:
             return None
         snapshot, words = self.watch(), WORDS[lang]
         connected = snapshot.get("client") == "connected"
         parts = [words["watch_connected" if connected else "watch_waiting"]]
-        if connected:
-            phase = PHASE_WORDS.get(snapshot.get("phase"), "phase_other")
+        # Connected with nothing read yet (None) prints no phase clause; the client's own "None" reads phase_none.
+        if connected and snapshot.get("phase") is not None:
+            phase = PHASE_WORDS.get(snapshot["phase"], "phase_other")
             parts.append(words["watch_phase"].format(phase=words[phase]))
         if snapshot.get("alert") in ("loading", "queue", "started") and snapshot.get("at") is not None:
             parts.append(words["watch_last"].format(what=words["alert_" + snapshot["alert"]],
@@ -379,8 +386,11 @@ class PairingPage:
         if secret is not None:
             drawn = qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules, labelledby="scan")
             link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
-                     f'<figure class="key-card">{drawn}<figcaption><span class="key-label">{words["code_label"]}</span>'
-                     f' <span class="code">{codes.display(secret)}</span></figcaption>{_PARTY}</figure>',
+                     # The key is hidden until its person asks (a page shown on a stream prints none): a native
+                     # details, closed, its summary the one control; no script.
+                     f'<figure class="key-card">{drawn}<figcaption><details><summary>{words["show_key"]}</summary>'
+                     f'<span class="key-label">{words["code_label"]}</span> <span class="code">'
+                     f'{codes.display(secret)}</span></details></figcaption>{_PARTY}</figure>',
                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]
             if snapshot["buttonRefused"]:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
