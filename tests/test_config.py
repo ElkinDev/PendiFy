@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import unittest
+import urllib.request
 from pathlib import Path
 
 import support
@@ -241,6 +242,40 @@ class ConfigStoreTest(unittest.TestCase):
         self.assertEqual(pauses, [0.2] * 5)  # five retries over one second
         self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
         self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+
+    def test_a_config_file_deleted_mid_run_raises_the_one_sentence_and_the_page_driver_exits_1(self):
+        # Mutation: _current raises RuntimeError again. Red: RuntimeError in place of ConfigError and of exit 1.
+        self.store.load()
+        self.store.path.unlink()
+        outcomes = []
+        for store_it in (lambda: self.store.set_link_id(LINK_ID), self.store.clear_link_id):
+            try:
+                outcomes.append(store_it() and None)
+            except Exception as failure:  # the red: whatever leaves the store in place of ConfigError
+                outcomes.append((type(failure).__name__, str(failure)))
+        self.assertEqual(outcomes, [("ConfigError", self.unavailable())] * 2)
+        fake = support.FakeWorker(lambda path, body: (200, {"linkId": LINK_ID}))
+        self.addCleanup(fake.close)
+        stop, opened = threading.Event(), []
+
+        def opener(url):  # the browser's first fetch opens the check window, then the file goes
+            opened.append(url)
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url + "state", timeout=5):
+                pass
+            self.store.path.unlink()
+            stop.set()  # one tick at most: a driver that swallows the failure ends, never hangs
+            return True
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = entry.main(["--data-dir", str(self.base), "--worker", fake.base], opener=opener, stop=stop)
+            except Exception as failure:  # the red: what leaves main in place of the exit code
+                code = type(failure).__name__
+        self.assertEqual((code, out.getvalue(), err.getvalue()),
+                         (1, f"page: {opened[0]}\n{self.unavailable()}\n", ""))
+        self.assertEqual(len(fake.bodies()), 1)
+        self.assertFalse(self.store.path.exists())
 
 
 if __name__ == "__main__":
