@@ -1,23 +1,176 @@
-"""Inert seam: WatcherTest is committed before the watcher."""
-ALERT_PHASES = ()
-ACCEPT_DELAY = (0.0, 0.0)
-STEP_PAUSE = NO_CLIENT_PAUSE = 0.0
-CONNECTED_LINE = ACCEPTED_LINE = LOST_LINE = ""
+"""The watcher of the game client: the loop of S:728-800 as a class.
+
+Everything that touches the world is injected: the credentials reader, the address builder, the HTTP
+getter and poster, the clock, the wall clock, the sleep, the random delay, the alert and the console.
+One step() is one turn of the script's loop and answers the pause before the next; run() is the loop
+around it. The script's 15 s sleep after a ready check (S:778, S:793) is a hold on the injected clock, so
+a stop never waits for it. The console gets fixed lines only: no phase, no port, no token.
+"""
+import json
+import random
+import threading
+import time
+
+from . import client, worker
+
+# S:103-105: the phases whose arrival alerts, with no kind, so a beep and no ping. The script's two
+# sentences are not carried: no channel here shows them.
+ALERT_PHASES = ("InProgress",)
+IN_PROGRESS, READY_CHECK = "InProgress", "ReadyCheck"
+ACCEPT_DELAY = (1.0, 2.5)  # S:136
+HOLD_SECONDS = 15.0  # S:778, S:793
+STEP_PAUSE = 0.3  # S:799
+NO_CLIENT_PAUSE = 3.0  # S:739
+CLOCK_READ_INTERVAL = 1.0  # S:764
+QUEUE_FOUND, MATCH_STARTED = worker.KINDS
+
+CONNECTED_LINE = "connected to the game client"
+LOST_LINE = "lost the game client, looking for it again"
+ACCEPTING_LINE = "match found: accepting"
+ACCEPTED_LINE = "match found: accepted"
+DRY_LINE = "match found: not accepting (--dry)"
+STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client again"
+
+WAITING, CONNECTED = "waiting", "connected"
+_ALERT_NAMES = {None: "loading", QUEUE_FOUND: "queue", MATCH_STARTED: "started"}
 
 
 def accept_delay():
-    return 0.0
+    """A delay drawn inside the script's two bounds (S:780)."""
+    return random.uniform(*ACCEPT_DELAY)
+
+
+def _print(line):
+    print(line, flush=True)
+
+
+def _phase(raw):
+    """The phase the client answered, a JSON string, or None for anything else."""
+    try:
+        phase = json.loads(raw.decode("utf-8"))
+    except ValueError:  # a body that is not JSON; UnicodeDecodeError is a ValueError
+        return None
+    return phase if isinstance(phase, str) else None
 
 
 class Watcher:
-    def __init__(self, credentials, alert, **kwargs):
-        pass
+    def __init__(self, credentials, alert, *, accept=True, addresses=client.real_addresses, get=client.get,
+                 post=client.post, clock=time.monotonic, wall=time.time, sleep=None, delay=accept_delay,
+                 log=None, stop=None):
+        self._credentials, self._alert, self._accept = credentials, alert, accept
+        self._addresses, self._get, self._post = addresses, get, post
+        self._clock, self._wall, self._delay = clock, wall, delay
+        self._stop = stop if stop is not None else threading.Event()
+        self._sleep = sleep if sleep is not None else self._stop.wait
+        self._log = log if log is not None else _print
+        self._lock = threading.Lock()
+        self._found = None
+        self._last_phase = None
+        self._start_alerted = False
+        self._last_clock_read = None
+        self._hold_until = None
+        self._client_state = WAITING
+        self._last_alert = None
 
-    def step(self):
-        return 0.0
+    def stop(self):
+        self._stop.set()
 
     def run(self):
-        pass
+        """The loop: a step, then its pause, until stopped. A step that breaks is said by its type and the
+        client is looked for again, so the watcher never ends while the page says it runs."""
+        while not self._stop.is_set():
+            try:
+                pause = self.step()
+            except Exception as failure:
+                self._log(STEP_FAILED_LINE.format(type(failure).__name__))
+                self._forget()
+                pause = NO_CLIENT_PAUSE
+            if self._stop.is_set():
+                break
+            self._sleep(pause)
+
+    def step(self):
+        """One turn of S:733-799; the pause before the next turn."""
+        if self._hold_until is not None:
+            if self._clock() < self._hold_until:
+                return STEP_PAUSE
+            self._hold_until = None
+        if self._found is None:
+            found = self._credentials.read()
+            if found is None:
+                return NO_CLIENT_PAUSE
+            self._found = found
+            self._set_client(CONNECTED)
+            self._log(CONNECTED_LINE)
+        base, clock_url = self._addresses(self._found.port)
+        token = self._found.token
+        try:
+            status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
+            if status == 200:
+                phase = _phase(raw)
+                if phase is None:  # requests raises a RequestException on a body that is not JSON (S:750)
+                    raise client.ClientUnreachable("ValueError")
+                self._on_phase(phase, base, token, clock_url)
+        except client.ClientUnreachable:  # S:796-798
+            self._log(LOST_LINE)
+            self._forget()
+        return STEP_PAUSE
 
     def snapshot(self):
-        return {"client": None, "alert": None, "at": None}
+        """The watcher's state in plain values: the client waiting or connected, the last alert and when."""
+        with self._lock:
+            name, at = self._last_alert or (None, None)
+            return {"client": self._client_state, "alert": name, "at": at}
+
+    def _on_phase(self, phase, base, token, clock_url):
+        if phase != self._last_phase:
+            # The first read is not a change: an alert for something already under way says nothing (S:755-757).
+            if self._last_phase is not None and phase in ALERT_PHASES:
+                self._fire(None)  # S:759
+            self._last_phase = phase
+        if phase == IN_PROGRESS:
+            now = self._clock()
+            due = self._last_clock_read is None or now - self._last_clock_read > CLOCK_READ_INTERVAL
+            if not self._start_alerted and due:
+                self._last_clock_read = now
+                if client.game_really_started(self._get, clock_url):
+                    self._start_alerted = True
+                    self._fire(MATCH_STARTED)  # S:769
+        else:
+            self._start_alerted = False
+        if phase == READY_CHECK:
+            self._ready_check(base, token)
+
+    def _ready_check(self, base, token):
+        if not self._accept:  # the script's --dry (S:773-777)
+            self._log(DRY_LINE)
+            self._fire(QUEUE_FOUND)  # S:776
+            self._hold()
+            return
+        wait = self._delay() if ACCEPT_DELAY[1] else 0
+        self._log(ACCEPTING_LINE)
+        if wait:
+            self._sleep(wait)
+        if self._stop.is_set():  # stopped during the delay: the script's Ctrl+C posts nothing either
+            return
+        status = self._post(base + client.ACCEPT_PATH, token, client.CLIENT_TIMEOUT)
+        if status in (200, 204):
+            self._log(ACCEPTED_LINE)
+            self._fire(QUEUE_FOUND)  # S:790
+            self._hold()
+
+    def _hold(self):
+        self._hold_until = self._clock() + HOLD_SECONDS
+
+    def _fire(self, kind):
+        with self._lock:
+            self._last_alert = (_ALERT_NAMES[kind], self._wall())
+        self._alert(kind)
+
+    def _forget(self):
+        self._found = None
+        self._set_client(WAITING)
+
+    def _set_client(self, value):
+        with self._lock:
+            self._client_state = value
