@@ -24,6 +24,7 @@ except ImportError:  # not Windows
 codes = support.module("codes")
 config = support.module("config")
 page = support.module("page")
+plate_almena = support.module("plate_almena")
 pairing = support.module("pairing")
 qr = support.module("qr")
 worker = support.module("worker")
@@ -55,9 +56,9 @@ PING_TEXTS = {"sent": ("enviado", "sent"),
               "not_delivered": ("no entregado", "not delivered"), "failed": ("falló el envío", "sending failed")}
 WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
 # The words of a waiting page with a watcher and a quit button, in the order the page before the design showed
-# them (page.py at 8f6b90661), with the key's summary before its label (brief pcpg-hide, change 1); None is the key
+# them (page.py at 8f6b90661), with the key's summary before its label (brief pcpg-hide, change 1; the summary shows the code since brief pcpg-port); None is the key
 # as codes.display prints it.
-PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "scan", "show_key", "code_label", None,
+PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "scan", "show_code", "code_label", None,
               "check", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence", "forget",
               "quit")
 
@@ -83,17 +84,28 @@ class PageText(HTMLParser):
             self.texts.append(data.strip())
 
 
+def outside_references(document):
+    """Every href and url() of a page that is neither a fragment of the page itself nor the QR plate's data URI."""
+    found = re.findall(r'\bhref\s*=\s*"([^"]*)"', document) + re.findall(r"url\(([^)]*)\)", document)
+    return [ref for ref in found if not ref.startswith("#") and ref != plate_almena.PLATE_DATA_URI]
+
+
 class KeyPlace(HTMLParser):
     """Where a page prints `key`: for each text node that holds it, the attributes of every <details> around it
-    (an empty list when none is), and each <details> start tag's attributes in document order."""
+    (an empty list when none is), and each <details> start tag's attributes in document order. The same for the
+    QR (`qr_places`, each <svg class="qr">) and for every attribute that carries a data URI (`data_places`)."""
 
     def __init__(self, document, key):
         super().__init__()
         self.key, self.open_details, self.details, self.places = key, [], [], []
+        self.qr_places, self.data_places = [], []
         self.feed(document)
         self.close()
 
     def handle_starttag(self, tag, attrs):
+        if tag == "svg" and ("class", "qr") in attrs:
+            self.qr_places.append(list(self.open_details))
+        self.data_places += [list(self.open_details) for _, value in attrs if (value or "").startswith("data:")]
         if tag == "details":
             self.open_details.append(dict(attrs))
             self.details.append(dict(attrs))
@@ -208,8 +220,13 @@ class PairingPageTest(unittest.TestCase):
             with self.subTest(status=status):
                 for name, value in FENCE.items():
                     self.assertEqual(headers.get(name), value)
+                self.assertEqual(headers["content-security-policy"],
+                                 "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src "
+                                 "'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+                                 "base-uri 'none'")
                 policy = dict(part.strip().split(" ", 1) for part in headers["content-security-policy"].split(";"))
                 self.assertEqual(policy.pop("default-src"), "'none'")
+                self.assertEqual(policy.pop("img-src"), "data:")
                 self.assertEqual(policy.pop("style-src"), "'unsafe-inline'")
                 self.assertEqual(policy.pop("script-src"), "'unsafe-inline'")
                 self.assertEqual(policy.pop("connect-src"), "'self'")
@@ -231,11 +248,12 @@ class PairingPageTest(unittest.TestCase):
         # Mutation: the QR drawn whatever the state. Red: an svg on the linked page.
         secret = self.secret()
         shown = self.html()
-        self.assertIn("<svg", shown)
+        self.assertIn('<svg class="qr"', shown)
         self.assertIn(codes.display(secret), shown)
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": secret})
         linked = self.html()
-        for value in ("<svg", secret, codes.display(secret), LINK_ID, codes.display(LINK_ID), 'action="/relink"'):
+        for value in ('<svg class="qr"', "data:", secret, codes.display(secret), LINK_ID, codes.display(LINK_ID),
+                      'action="/relink"'):
             self.assertNotIn(value, linked)
         self.call("POST", "/relink")  # nothing offered: a no-op
         self.assertEqual(self.store.read().link_id, LINK_ID)
@@ -243,10 +261,10 @@ class PairingPageTest(unittest.TestCase):
             self.state.record_ping(worker.Refused())
         offered = self.html()
         self.assertIn('action="/relink"', offered)
-        self.assertNotIn("<svg", offered)
+        self.assertNotIn('<svg class="qr"', offered)
         self.assertEqual(self.call("POST", "/relink")[0], 303)
         again = self.html()
-        self.assertIn("<svg", again)
+        self.assertIn('<svg class="qr"', again)
         self.assertIn(codes.display(secret), again)
         self.assertEqual(self.store.read(), config.Pairing(secret, None))
 
@@ -298,7 +316,8 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(page.WORDS[expected]["forget"], shown)
                 self.assertIsNone(GAME_WORDS.search(shown))
                 self.assertNotIn("http", shown)
-                self.assertIsNone(re.search(r"\b(src|href)\s*=|<img|<link|@import|url\(", shown))
+                self.assertIsNone(re.search(r"\bsrc\s*=|<img|<link|@import", shown))
+                self.assertEqual(outside_references(shown), [])
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
                                              else None)[2])
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
@@ -318,21 +337,23 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual(PageText(shown).texts,
                                  [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER])
                 self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
-                for outside in ("<link", "src=", "@import", "@font-face", "url(", "http"):
+                for outside in ("<link", "src=", "@import", "@font-face", "http"):
                     self.assertNotIn(outside, shown)
-                # The pairing address is only in the QR's own modules: each drawn centre is the encoder's.
+                self.assertEqual(outside_references(shown), [])
+                # The pairing address is only in the QR's own modules: the page draws the scene of the encoder's
+                # symbol over the one plate (SceneDecodeTest reads it with ZXing).
                 drawn = re.findall(r'<svg class="qr".*?</svg>', shown, re.S)
-                self.assertEqual(len(drawn), 1)
-                self.assertEqual(support.svg_samples(drawn[0], 1), support.quiet_padded(symbol, qr.QUIET_ZONE))
+                self.assertEqual(drawn, [qr.scene_svg(symbol, plate_almena.PLATE_DATA_URI, labelledby="scan")])
         self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
         refused = list(PAGE_ORDER)
         refused.insert(refused.index("save") + 1, "typed_refused")
         self.assertEqual(PageText(self.html()).texts,
                          [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused])
 
-    def test_the_key_is_printed_only_inside_a_closed_details_whose_summary_asks_to_show_it(self):
-        # Mutation: the key back beside its label in the figcaption, outside the details. Red: a place with no
-        # details around it. Mutation: the details rendered open. Red: its attributes hold "open".
+    def test_the_qr_and_the_key_are_served_only_inside_one_closed_details_whose_summary_shows_the_code(self):
+        # Mutation: the QR drawn before the details, as on main. Red: the svg and its data URI have no details
+        # around them. Mutation: the details rendered open. Red: its attributes hold "open". Mutation: the timer's
+        # 60000 turned to 600000. Red: the script pin misses it.
         secret = self.secret()
         for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
             with self.subTest(lang=lang):
@@ -341,11 +362,23 @@ class PairingPageTest(unittest.TestCase):
                 self.assertNotIn(secret, shown)
                 place = KeyPlace(shown, codes.display(secret))
                 self.assertEqual(place.places, [[{}]])
+                self.assertEqual(place.qr_places, [[{}]])
+                self.assertEqual(place.data_places, [[{}]])
                 self.assertEqual(place.details, [{}])
-                self.assertIn(f"<details><summary>{html.escape(page.WORDS[lang]['show_key'])}</summary>", shown)
+                self.assertEqual(shown.count("data:image/webp;base64,"), 1)
+                self.assertIn(f'<figure class="key-card"><details><summary>'
+                              f"{html.escape(page.WORDS[lang]['show_code'])}</summary>", shown)
                 self.assertIn(".key-card summary::-webkit-details-marker{display:none}", shown)
-        self.assertEqual((page.WORDS["es"]["show_key"], page.WORDS["en"]["show_key"]),
-                         ("Mostrar la clave", "Show the key"))
+        self.assertEqual((page.WORDS["es"]["show_code"], page.WORDS["en"]["show_code"]),
+                         ("Mostrar el código", "Show the code"))
+        self.assertNotIn("show_key", page.WORDS["es"])
+        self.assertNotIn("show_key", page.WORDS["en"])
+        # The one timer: opened, the details closes 60 s later; any toggle clears the timer first.
+        self.assertIn("const d=document.querySelector('.key-card details');let hide;"
+                      "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
+                      "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});", page._SCRIPT)
+        self.assertEqual(page._SCRIPT.count("setTimeout("), 1)
+
 
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.

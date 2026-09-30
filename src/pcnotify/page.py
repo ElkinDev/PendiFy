@@ -15,7 +15,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, config, qr
+from . import codes, config, plate_almena, qr
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
@@ -24,7 +24,8 @@ MAX_FORM_BYTES = 4096
 DRAIN_BYTES = 64 * 1024
 # With no usable length the socket is read up to DRAIN_BYTES while bytes keep coming, each read waiting this long.
 DRAIN_WAIT = 0.1
-POLICY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
+# img-src data: is the QR scene's plate, one image inlined as a data URI; no image loads from any origin.
+POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                  ("Content-Security-Policy", POLICY), ("X-Content-Type-Options", "nosniff"))
@@ -36,7 +37,7 @@ WORDS = {
                  "con tu cuenta.",
         "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
-        "show_key": "Mostrar la clave",
+        "show_code": "Mostrar el código",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -87,7 +88,7 @@ WORDS = {
                  "account.",
         "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
-        "show_key": "Show the key",
+        "show_code": "Show the code",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -143,15 +144,18 @@ PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
 # action="/relink" or action="/quit" of a form it does not show.
-_STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
+# The theme's colours, light and dark, as the system chooses them.
+_LIGHT = ("--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
           "--line:#D8D0EA;--hair:#ECE6F7;--brand:#6D28D9;--on-brand:#FFFFFF;--tonal:#E9DEFB;--on-tonal:#4C1D95;"
           "--danger:#C21F45;--danger-bg:#F6DDE3;--on-danger-bg:#671025;--ring:rgba(109,40,217,.24);--hover:rgba(30,21,"
-          "51,.06);--px-line:#1E1533;--shadow:0 1px 2px rgba(30,21,51,.05),0 12px 32px rgba(30,21,51,.07);}\n"
-          "@media (prefers-color-scheme:dark){:root{--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
-          "--ink2:#A79FC2;--line:#3A3452;--hair:#2B2740;--brand:#C3B1F7;--on-brand:#24124F;--tonal:#40277C;"
-          "--on-tonal:#E9DEFB;--danger:#FB7196;--danger-bg:#853C50;--on-danger-bg:#FEEAEF;--ring:rgba(195,177,247,.30);"
-          "--hover:rgba(255,255,255,.08);--px-line:#0D0A18;--shadow:0 1px 2px rgba(0,0,0,.30),0 16px 40px rgba(0,0,0,"
-          ".32);}}\n"
+          "51,.06);--px-line:#1E1533;--shadow:0 1px 2px rgba(30,21,51,.05),0 12px 32px rgba(30,21,51,.07);")
+_DARK = ("--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
+         "--ink2:#A79FC2;--line:#3A3452;--hair:#2B2740;--brand:#C3B1F7;--on-brand:#24124F;--tonal:#40277C;"
+         "--on-tonal:#E9DEFB;--danger:#FB7196;--danger-bg:#853C50;--on-danger-bg:#FEEAEF;--ring:rgba(195,177,247,.30);"
+         "--hover:rgba(255,255,255,.08);--px-line:#0D0A18;--shadow:0 1px 2px rgba(0,0,0,.30),0 16px 40px rgba(0,0,0,"
+         ".32);")
+_STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
+          "@media (prefers-color-scheme:dark){:root{" + _DARK + "}}\n"
           "*{box-sizing:border-box}\n"
           "body{margin:0;padding:32px 16px 40px;background:var(--bg);color:var(--ink);font:400 16px/24px system-ui,"
           "sans-serif;-webkit-font-smoothing:antialiased}\n"
@@ -177,12 +181,13 @@ _STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFE
           "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
           ".qr{display:block;width:100%;max-width:288px;height:auto;border-radius:12px;"
           "box-shadow:0 0 0 1px var(--hair)}\n"
-          ".key-card figcaption{display:grid;gap:2px;text-align:center}\n"
+          ".key-card details{justify-self:stretch;text-align:center}\n"
+          ".shown{display:grid;justify-items:center;gap:16px}\n"
+          ".key{display:grid;gap:2px;margin:0}\n"
           ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
           ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
-          ".key-card details[open] summary{margin-bottom:12px}\n"
-          ".key-card details>span{display:block}\n"
+          ".key-card details[open] summary{margin-bottom:16px}\n"
           '.code{font:600 22px/28px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.12em;'
           "font-variant-numeric:tabular-nums}\n"
           ".party{display:flex;justify-content:center;align-items:flex-end;gap:18px;width:100%;padding-top:4px;"
@@ -233,7 +238,12 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown)location.reload();})"
-           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);")
+           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
+           # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
+           # toggle, so a close by hand leaves none running.
+           "const d=document.querySelector('.key-card details');let hide;"
+           "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
+           "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});")
 
 # Four original 16 by 16 pixel figures under the key (an archer, a knight, a mage and a small winged creature), in
 # the app's colours; 'o' is the outline, drawn in the theme's outline colour, and '.' is empty.
@@ -384,13 +394,17 @@ class PairingPage:
         if watch is not None:
             link.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
         if secret is not None:
-            drawn = qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules, labelledby="scan")
+            modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
+            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
+            if drawn is None:  # the scene is drawn for version 3 only
+                drawn = qr.svg(modules, labelledby="scan")
             link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
-                     # The key is hidden until its person asks (a page shown on a stream prints none): a native
-                     # details, closed, its summary the one control; no script.
-                     f'<figure class="key-card">{drawn}<figcaption><details><summary>{words["show_key"]}</summary>'
-                     f'<span class="key-label">{words["code_label"]}</span> <span class="code">'
-                     f'{codes.display(secret)}</span></details></figcaption>{_PARTY}</figure>',
+                     # The QR and the key are hidden until their person asks (a page shown on a stream prints
+                     # neither): a native details, closed, its summary the one control; _SCRIPT closes it again
+                     # 60 s after it opens.
+                     f'<figure class="key-card"><details><summary>{words["show_code"]}</summary><div class="shown">'
+                     f'{drawn}<p class="key"><span class="key-label">{words["code_label"]}</span> <span class="code">'
+                     f'{codes.display(secret)}</span></p>{_PARTY}</div></details></figure>',
                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]
             if snapshot["buttonRefused"]:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
