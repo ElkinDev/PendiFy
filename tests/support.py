@@ -101,7 +101,8 @@ class FakeWorker:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        # A short poll interval, so close() does not wait half a second per fake.
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
 
     def bodies(self):
         return [json.loads(r["body"]) for r in self.requests if r["method"] == "POST"]

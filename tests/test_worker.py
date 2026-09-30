@@ -111,7 +111,8 @@ class LinkWorkerClientTest(unittest.TestCase):
             port = probe.getsockname()[1]
         result = worker.check(SECRET, base=f"http://127.0.0.1:{port}", timeout=0.5)
         self.assertIsInstance(result, worker.Failed)
-        self.assertEqual(result.reason, "ConnectionRefusedError")
+        # Windows retries a refused loopback connect for about two seconds, so the bound may fire first.
+        self.assertIn(result.reason, ("ConnectionRefusedError", "TimeoutError"))
 
     def test_nothing_printed_logged_raised_or_shown_carries_the_secret_or_the_link_id(self):
         # Mutation: the exception text carries the body. Red: the secret is in the ValueError text.
