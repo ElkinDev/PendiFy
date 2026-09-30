@@ -71,6 +71,17 @@ class CodesTest(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(codes.normalize(raw), expected)
 
+    def test_the_raw_bound_counts_utf_16_units_as_the_workers_raw_length_does(self):
+        # Mutation: len() restored in normalize. Red: 17 astral characters and twelve symbols normalize here.
+        astral = "\U0001F600"  # outside the Basic Multilingual Plane: two UTF-16 units, one code point
+        self.assertIsNone(codes.normalize(astral * 17 + "ABCD2345EFGH"))  # 46 units, null at W src/link-registry.ts:98
+        self.assertIsNone(codes.normalize(astral * 10 + "ABCD2345EFGH "))  # 33 units
+        self.assertEqual(codes.normalize(astral * 10 + "ABCD2345EFGH"), "ABCD2345EFGH")  # 32 units pass
+        self.assertEqual(codes.normalize("--ABCD-2345-EFGH" + "-" * 16), "ABCD2345EFGH")  # 32 plain characters
+        # A lone surrogate is one unit in a JavaScript string, and never an encoding error here.
+        self.assertEqual(codes.normalize("\ud800" * 20 + "ABCD2345EFGH"), "ABCD2345EFGH")
+        self.assertIsNone(codes.normalize("\ud800" * 21 + "ABCD2345EFGH"))
+
     def test_display_is_four_four_four(self):
         # Mutation: display groups by three. Red: ABC-D23-45E-FGH.
         self.assertEqual(codes.display("ABCD2345EFGH"), "ABCD-2345-EFGH")

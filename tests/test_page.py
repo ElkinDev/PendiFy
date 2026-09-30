@@ -22,6 +22,8 @@ GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
 FENCE = {"cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY"}
 ROUTES = [("GET", "/"), ("GET", "/state"), ("POST", "/check"), ("POST", "/typed"), ("POST", "/forget"),
           ("POST", "/relink")]
+# A refused POST's body is read up to 64 KiB before the answer (brief lnk5a-fix1, change 1).
+DRAIN_BOUND = 64 * 1024
 
 
 class PairingPageTest(unittest.TestCase):
@@ -206,6 +208,76 @@ class PairingPageTest(unittest.TestCase):
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
                                              else None)[2])
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
+
+    def post_in_two_sends(self, path, body, host=None, declared=None):
+        """A POST whose body follows its headers in a second send, as a browser may send a form: the status
+        and the Connection header, or the name of the socket error met in their place."""
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.putrequest("POST", path, skip_host=True, skip_accept_encoding=True)
+            connection.putheader("Host", self.host if host is None else host)
+            connection.putheader("Content-Type", "application/x-www-form-urlencoded")
+            connection.putheader("Content-Length", str(len(body) if declared is None else declared))
+            connection.endheaders()
+            connection.send(body)
+            response = connection.getresponse()
+            response.read()
+            return response.status, response.getheader("Connection")
+        except OSError as failure:
+            return type(failure).__name__, None
+        finally:
+            connection.close()
+
+    def test_a_refused_post_is_answered_after_its_body_is_read_and_never_reset(self):
+        # Mutation: the drain removed from do_POST. Red: Windows resets some of the 150 connections.
+        secret = self.secret()
+        cases = [("foreign host", "/typed", b"x" * 3000, "evil.example", 403),
+                 ("no such route", "/nothing", b"x" * 3000, None, 404),
+                 ("too large", "/typed", b"x" * (3 * page.MAX_FORM_BYTES), None, 413)]
+        for name, path, body, host, status in cases:
+            with self.subTest(name=name):
+                answers = [self.post_in_two_sends(path, body, host) for _ in range(50)]
+                self.assertEqual([answer for answer in answers if answer != (status, "close")], [])
+        self.assertEqual(self.store.read(), config.Pairing(secret, None))
+        self.assertEqual(self.checks, [])
+
+    def test_a_declared_body_past_the_bound_is_read_up_to_it_and_answered(self):
+        # Mutation: the drain reads the whole declaration. Red: the handler waits for a megabyte never sent.
+        self.assertEqual(self.post_in_two_sends("/typed", b"x" * DRAIN_BOUND, declared=1024 * 1024),
+                         (413, "close"))
+
+    def test_every_answer_says_it_closes_its_connection(self):
+        # Mutation: the Connection header dropped from _send. Red: the page's 200 carries none.
+        answers = [self.call("GET", "/"), self.call("GET", "/state"), self.call("GET", "/nothing"),
+                   self.call("GET", "/", host="evil.example"), self.call("POST", "/check", token=False),
+                   self.call("POST", "/check"), self.call("POST", "/nothing"), self.call("PUT", "/"),
+                   self.call("HEAD", "/")]
+        self.assertEqual([(status, headers.get("connection")) for status, headers, _ in answers],
+                         [(200, "close"), (200, "close"), (404, "close"), (403, "close"), (403, "close"),
+                          (303, "close"), (404, "close"), (501, "close"), (200, "close")])
+
+    def test_head_runs_the_fences_and_answers_the_headers_of_get_with_no_body(self):
+        # Mutation: do_HEAD removed. Red: a foreign-Host HEAD answers 501 from the base class.
+        for path in ("/", "/state", "/nothing"):
+            with self.subTest(path=path):
+                status, _, body = self.call("HEAD", path, host="evil.example")
+                self.assertEqual((status, body), (403, ""))
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as raw:
+            raw.sendall(f"HEAD / HTTP/1.1\r\nHost: {self.host}\r\n\r\n".encode("ascii"))
+            received = b""
+            while chunk := raw.recv(65536):
+                received += chunk
+        head, _, rest = received.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        headers = {name.lower(): value for name, value in (line.split(": ", 1) for line in lines[1:])}
+        self.assertEqual((lines[0].split(" ")[1], rest), ("200", b""))
+        for name, value in FENCE.items():
+            self.assertEqual(headers.get(name), value)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+        # A HEAD is not a person looking at the page: no automatic check falls due.
+        self.assertIsNone(self.state.tick())
+        self.assertEqual(self.checks, [])
+        self.assertEqual(int(headers["content-length"]), len(self.html().encode("utf-8")))
 
 
 if __name__ == "__main__":

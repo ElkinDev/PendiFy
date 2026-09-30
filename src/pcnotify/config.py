@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,13 @@ from . import codes
 # The folder under the base is named after the package, the one constant that names it.
 FOLDER_NAME = __name__.split(".")[0]
 FILE_NAME = "config.json"
+# The one sentence for a config file that is there but cannot be read or replaced, most often because
+# another program holds it open. It names the path, never anything the file holds.
+UNAVAILABLE = "the config file {path} cannot be used now: close any program that holds it open and start again"
+
+
+class ConfigError(OSError):
+    """The config file is there but cannot be read or written; the message is UNAVAILABLE."""
 
 
 @dataclass(frozen=True)
@@ -37,9 +45,10 @@ def default_base_dir(environ=None):
 
 
 class ConfigStore:
-    def __init__(self, base_dir):
+    def __init__(self, base_dir, *, pause=time.sleep):
         self.path = Path(base_dir) / FOLDER_NAME / FILE_NAME
         self._lock = threading.Lock()
+        self._pause = pause
 
     def read(self):
         """The stored pair, or None when the file is missing, empty, corrupt or its secret does not
