@@ -106,7 +106,8 @@ class ClientCredentialsTest(unittest.TestCase):
         args, kwargs = run.calls[0]
         self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
         self.assertEqual(len(args), 4)
-        for word in ("Get-CimInstance", "Win32_Process", "LeagueClient", "CommandLine"):
+        # [Console]::Out: the host's own output wraps at the console width and would cut the token in two.
+        for word in ("Get-CimInstance", "Win32_Process", "LeagueClient", "[Console]::Out.WriteLine($_.CommandLine)"):
             self.assertIn(word, args[3])
         self.assertEqual((kwargs.get("timeout"), kwargs.get("capture_output"), kwargs.get("text")), (5, True, True))
         self.assertIsNone(client.ClientCredentials((str(self.first),), run=None, clock=self.clock).read())
