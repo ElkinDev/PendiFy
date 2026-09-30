@@ -65,6 +65,8 @@ class ConfigStoreTest(unittest.TestCase):
                 self.assertEqual(codes.normalize(loaded.secret), loaded.secret)
                 self.assertIsNone(loaded.link_id)
                 self.assertEqual(self.on_disk(), {"secret": loaded.secret, "linkId": None})
+        self.store.path.write_bytes(b"\xff\xfe{")
+        self.assertIsNone(self.store.load().link_id)
         self.store.path.unlink()
         self.assertEqual(self.store.read(), None)
         self.assertEqual(self.on_disk() if self.store.path.exists() else "absent", "absent")
