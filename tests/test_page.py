@@ -379,6 +379,35 @@ class PairingPageTest(unittest.TestCase):
                       "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});", page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("setTimeout("), 1)
 
+    def test_the_theme_button_of_the_site_is_served_with_its_words_its_head_read_and_its_rules(self):
+        # Mutation: the head read left out. Red: the head holds no pendi-theme read. Mutation: the dark variables
+        # left out of the data-theme="dark" block. Red: the block is not the dark list.
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown = self.html(accept)
+                self.assertEqual(shown.count('<button id="theme-toggle"'), 1)
+                self.assertIn(f'<main class="page"><header class="bar"><button id="theme-toggle" class="icon-btn" '
+                              f'type="button" aria-pressed="false" aria-label="'
+                              f'{html.escape(page.WORDS[lang]["theme_toggle"])}"><svg class="moon"', shown)
+                self.assertIn('<svg class="sun"', shown)
+                head = shown.split("</head>")[0]
+                self.assertIn("<script>(function(){try{var t=localStorage.getItem('pendi-theme');"
+                              "if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);"
+                              "}catch(e){}})();</script>", head)
+        self.assertEqual((page.WORDS["es"]["theme_toggle"], page.WORDS["en"]["theme_toggle"]),
+                         ("Cambiar entre tema claro y oscuro", "Switch between light and dark theme"))
+        for handler in ("btn.addEventListener('click',function(){var next=current()==='dark'?'light':'dark';",
+                        "document.documentElement.setAttribute('data-theme',next);",
+                        "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();",
+                        "btn.setAttribute('aria-pressed',String(current()==='dark'));"):
+            self.assertIn(handler, page._SCRIPT)
+        self.assertIn(':root[data-theme="light"]{color-scheme:light;' + page._LIGHT + "}", page._STYLE)
+        self.assertIn(':root[data-theme="dark"]{color-scheme:dark;' + page._DARK + "}", page._STYLE)
+        self.assertIn("@media (prefers-color-scheme:dark){:root{" + page._DARK + "}}", page._STYLE)
+        self.assertIn("--bg:#131022;", page._DARK)
+        self.assertIn("--bg:#FAF8FE;", page._LIGHT)
+        # The stopped page keeps a stored choice too.
+        self.assertIn("localStorage.getItem('pendi-theme')", self.page.render_stopped("es").split("</head>")[0])
 
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.

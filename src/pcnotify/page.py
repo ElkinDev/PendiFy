@@ -38,6 +38,7 @@ WORDS = {
         "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
         "show_code": "Mostrar el código",
+        "theme_toggle": "Cambiar entre tema claro y oscuro",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -89,6 +90,7 @@ WORDS = {
         "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
         "show_code": "Show the code",
+        "theme_toggle": "Switch between light and dark theme",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -144,7 +146,9 @@ PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
 # action="/relink" or action="/quit" of a form it does not show.
-# The theme's colours, light and dark, as the system chooses them.
+# The theme's colours, light and dark. The system's choice sets them; the theme button's choice, kept in data-theme
+# on the html element, overrides it in either direction; with no choice stored the system's governs (pendiapp.com's
+# rule, assets/tokens.css).
 _LIGHT = ("--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
           "--line:#D8D0EA;--hair:#ECE6F7;--brand:#6D28D9;--on-brand:#FFFFFF;--tonal:#E9DEFB;--on-tonal:#4C1D95;"
           "--danger:#C21F45;--danger-bg:#F6DDE3;--on-danger-bg:#671025;--ring:rgba(109,40,217,.24);--hover:rgba(30,21,"
@@ -156,6 +160,8 @@ _DARK = ("--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
          ".32);")
 _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "@media (prefers-color-scheme:dark){:root{" + _DARK + "}}\n"
+          ':root[data-theme="light"]{color-scheme:light;' + _LIGHT + "}\n"
+          ':root[data-theme="dark"]{color-scheme:dark;' + _DARK + "}\n"
           "*{box-sizing:border-box}\n"
           "body{margin:0;padding:32px 16px 40px;background:var(--bg);color:var(--ink);font:400 16px/24px system-ui,"
           "sans-serif;-webkit-font-smoothing:antialiased}\n"
@@ -188,6 +194,20 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
           ".key-card details[open] summary{margin-bottom:16px}\n"
+          ".bar{display:flex;justify-content:flex-end;margin:0 0 8px}\n"
+          ".icon-btn{display:inline-grid;place-items:center;width:38px;height:38px;min-height:0;padding:0;"
+          "border-radius:999px;border:1px solid var(--hair);background:transparent;color:var(--ink);cursor:pointer;"
+          "transition:background .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1)}\n"
+          ".icon-btn:hover{background:var(--tint);box-shadow:none}\n"
+          ".icon-btn:active{transform:scale(.94)}\n"
+          ".icon-btn .sun{display:none}\n"
+          ".icon-btn .moon{display:block}\n"
+          '@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .icon-btn .sun{display:block}'
+          ':root:not([data-theme="light"]) .icon-btn .moon{display:none}}\n'
+          ':root[data-theme="dark"] .icon-btn .sun{display:block}\n'
+          ':root[data-theme="dark"] .icon-btn .moon{display:none}\n'
+          ':root[data-theme="light"] .icon-btn .sun{display:none}\n'
+          ':root[data-theme="light"] .icon-btn .moon{display:block}\n'
           '.code{font:600 22px/28px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.12em;'
           "font-variant-numeric:tabular-nums}\n"
           ".party{display:flex;justify-content:center;align-items:flex-end;gap:18px;width:100%;padding-top:4px;"
@@ -243,7 +263,27 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            # toggle, so a close by hand leaves none running.
            "const d=document.querySelector('.key-card details');let hide;"
            "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
-           "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});")
+           "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});"
+           # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage.
+           "(function(){var btn=document.getElementById('theme-toggle');if(!btn)return;"
+           "function current(){var t=document.documentElement.getAttribute('data-theme');"
+           "if(t==='light'||t==='dark')return t;return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}"
+           "function reflect(){btn.setAttribute('aria-pressed',String(current()==='dark'));}reflect();"
+           "btn.addEventListener('click',function(){var next=current()==='dark'?'light':'dark';"
+           "document.documentElement.setAttribute('data-theme',next);"
+           "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();});})();")
+# Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
+# index.html head script).
+_THEME_READ = ("(function(){try{var t=localStorage.getItem('pendi-theme');"
+               "if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();")
+# The theme button's two icons, copied from pendiapp.com's header; the style shows the one of the other theme.
+_THEME_ICONS = ('<svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>'
+                '<svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 '
+                '12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>')
 
 # Four original 16 by 16 pixel figures under the key (an archer, a knight, a mage and a small winged creature), in
 # the app's colours; 'o' is the outline, drawn in the theme's outline colour, and '.' is empty.
@@ -421,19 +461,21 @@ class PairingPage:
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
-        body = (f'<main class="page"><section class="link">{"".join(link)}</section><section class="more">'
+        bar = (f'<header class="bar"><button id="theme-toggle" class="icon-btn" type="button" aria-pressed="false" '
+               f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
+        body = (f'<main class="page">{bar}<section class="link">{"".join(link)}</section><section class="more">'
                 f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
                 f"{foot}</main>")
         return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
-                f"</style></head><body>{body}<script>{_SCRIPT}</script></body></html>")
+                f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def render_stopped(self, lang):
         """The one small page /quit answers: the program stopped, and how to start it again."""
         words = {key: html.escape(value) for key, value in WORDS[lang].items()}
         return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
-                f'</style></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
+                f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
 
     def act(self, path, form):
