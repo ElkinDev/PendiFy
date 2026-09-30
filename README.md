@@ -1,20 +1,80 @@
-# PC notifications, pairing core
+# pcnotify
 
-A pure-Python program, standard library only, that pairs this PC with a person's Pendi account.
-It keeps one secret of its own in a config file under the user's profile.
-While it is not paired it shows that secret as a QR on a page served only on 127.0.0.1.
-It asks the pairing service which link the phone made for that secret, then stores it.
-With the pair stored it sends one of two alert kinds to that account.
+## Español
 
-## Commands
+Un programa pequeño para Windows que avisa en tu teléfono cuando se encuentra tu partida y cuando empieza.
+Se enlaza una sola vez con tu cuenta de Pendi leyendo un código QR, sin crear ninguna cuenta nueva.
+Es gratis, no pide permisos de administrador y solo usa Python.
+
+### Instalar
+
+Abre PowerShell (menú Inicio, escribe PowerShell) y pega esta línea:
+
+    irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex
+
+El instalador busca Python 3.10 o más nuevo; si no lo hay lo instala con winget solo para tu usuario, o te indica https://www.python.org/downloads/ cuando winget no existe. Después instala pcnotify con pip, deja un acceso directo `pcnotify` en el Escritorio y en el menú Inicio, y lo inicia.
+
+Para ver qué haría sin cambiar nada: `$env:PCNOTIFY_DRYRUN = "1"` antes de pegar la línea. Para no iniciarlo al final: `$env:PCNOTIFY_NOSTART = "1"`.
+
+### Enlazar
+
+Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
+
+### Iniciar, detener, desinstalar
+
+- Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`.
+- Detener: cierra el proceso `pythonw.exe` en el Administrador de tareas.
+- Desinstalar: descarga `uninstall.ps1` de este repositorio y ejecútalo con `powershell -ExecutionPolicy Bypass -File uninstall.ps1`. Quita el paquete y los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
+
+### Qué envía y a quién
+
+Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pcnotify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego.
+
+### `--dry`
+
+Con `--dry` el programa solo avisa y no acepta la partida por ti.
+
+## English
+
+A small Windows program that alerts your phone when your match is found and when it starts.
+It links once to your Pendi account by scanning a QR code, with no new account of any kind.
+It is free, needs no administrator rights and only uses Python.
+
+### Install
+
+Open PowerShell (Start menu, type PowerShell) and paste this line:
+
+    irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex
+
+The installer looks for Python 3.10 or newer; when there is none it installs it with winget for your user only, or points you to https://www.python.org/downloads/ when winget is missing. Then it installs pcnotify with pip, leaves a `pcnotify` shortcut on the Desktop and in the Start menu, and starts it.
+
+To see what it would do without changing anything, set `$env:PCNOTIFY_DRYRUN = "1"` before pasting the line. To leave it stopped at the end, set `$env:PCNOTIFY_NOSTART = "1"`.
+
+### Link
+
+When it starts, the browser opens a local page with a QR code. Scan it with the phone's camera: the Pendi app opens and asks you to confirm the link. The page shows when the link is done.
+
+### Start, stop, uninstall
+
+- Start: the `pcnotify` shortcut, or `pythonw -m pcnotify`.
+- Stop: end the `pythonw.exe` process in Task Manager.
+- Uninstall: download `uninstall.ps1` from this repository and run `powershell -ExecutionPolicy Bypass -File uninstall.ps1`. It removes the package and both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
+
+### What it sends and to whom
+
+It only sends, to Pendi's link service, the alert kind (match found or match started) together with the link id and this PC's secret, which live in `%APPDATA%\pcnotify\config.json`. The service delivers it to the account you linked. It sends no name, no match history and nothing else from the game.
+
+### `--dry`
+
+With `--dry` the program only alerts and never accepts the match for you.
+
+## Developer commands
 
     python -m pcnotify
     python -m pcnotify ping <kind>
 
 The first loads the config, starts the page and opens it in the default browser while the PC is not paired.
 The second sends one alert with the stored pair and prints one line with the answer.
-
-## Test runs
 
 Both commands take `--data-dir <dir>`, used instead of `%APPDATA%` (the config file lives in a folder under it), and `--worker <address>`, used instead of the pairing service's address and accepted only as `http://127.0.0.1:<port>` or `http://localhost:<port>`, so a test run never reaches the real service.
 
