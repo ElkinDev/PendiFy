@@ -17,6 +17,7 @@ JAR = Path("C:/Users/nikle/.gradle/caches/modules-2/files-2.1/com.google.zxing/c
            "955fcd6bcd0723ddfb8ee6ed502d5fdf0e9676a9/core-3.5.4.jar")
 JAVA = Path("C:/Program Files/Android/Android Studio/jbr/bin/java.exe")
 SOURCE = Path(__file__).resolve().parent / "QrMatrixDecode.java"
+MULTI_BLOCK = [("v4 " * 21)[:62], ("v5 " * 28)[:84], ("v6 " * 36)[:106]]
 
 
 def matrix_text(modules):
@@ -45,10 +46,32 @@ class QrDecodeTest(unittest.TestCase):
 
     def test_zxing_decodes_the_multi_block_versions(self):
         # Mutation: the blocks concatenated instead of interleaved. Red: versions 4 to 6 fail to decode.
-        texts = [("v4 " * 21)[:62], ("v5 " * 28)[:84], ("v6 " * 36)[:106]]
+        texts = MULTI_BLOCK
         codes = [qr.encode(text.encode("ascii")) for text in texts]
         self.assertEqual([code.version for code in codes], [4, 5, 6])
         status, decoded, errors = zxing_decode([code.modules for code in codes])
+        self.assertEqual(status, 0, errors[-1500:])
+        self.assertEqual(decoded, texts)
+
+    def test_the_drawn_symbol_keeps_every_module_centre_and_zxing_reads_the_drawing(self):
+        # Mutation: the finder rings drawn with rx 2.2, as design r1 drew them. Red: the 12 finder corner centres of
+        # every symbol read light, (0, 0) (0, 6) (0, 22) and on, 12 of the 1369 of a version 3 symbol.
+        texts = ([qr.pairing_address(secret) for secret in (SECRET, LINK_ID, "HJKM2345NPQR")]
+                 + [("v1 " * 5)[:14], ("v2 " * 9)[:26]] + MULTI_BLOCK)
+        codes = [qr.encode(text.encode("ascii")) for text in texts]
+        self.assertEqual([code.version for code in codes], [3, 3, 3, 1, 2, 4, 5, 6])
+        drawings = [qr.svg(code.modules) for code in codes]
+        differ = {}
+        for text, code, drawing in zip(texts, codes, drawings):
+            centres = support.svg_samples(drawing, 1)  # one point a module, at its centre, quiet zone included
+            wanted = support.quiet_padded(code.modules, qr.QUIET_ZONE)
+            differ[text] = [(r - qr.QUIET_ZONE, c - qr.QUIET_ZONE) for r, row in enumerate(wanted)
+                            for c, dark in enumerate(row) if centres[r][c] != dark]
+        self.assertEqual(differ, {text: [] for text in texts})
+        # The drawing itself, four points a module with the page dark where no shape covers it: ZXing's detector
+        # has to find the rounded finders before it decodes.
+        status, decoded, errors = zxing_decode([[[sample is not False for sample in row]
+                                                 for row in support.svg_samples(drawing, 4)] for drawing in drawings])
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 

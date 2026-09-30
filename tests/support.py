@@ -6,6 +6,8 @@ fake Worker listens on 127.0.0.1 only.
 """
 import importlib
 import json
+import math
+import re
 import sys
 import tempfile
 import threading
@@ -214,3 +216,62 @@ class FakeClock:
 
     def advance(self, seconds):
         self.now += seconds
+
+
+_SVG_TAG = re.compile(r"<(/?)([a-zA-Z]+)([^>]*?)(/?)>")
+_SVG_ATTRIBUTE = re.compile(r'([a-zA-Z-]+)="([^"]*)"')
+
+
+def quiet_padded(modules, quiet):
+    """The symbol inside its light quiet zone of `quiet` modules each side, rows of booleans, True dark."""
+    side = len(modules) + 2 * quiet
+    return [[quiet <= r < side - quiet and quiet <= c < side - quiet and bool(modules[r - quiet][c - quiet])
+             for c in range(side)] for r in range(side)]
+
+
+def svg_samples(svg, per_module):
+    """A drawn QR read at `per_module` by `per_module` points a module, each at its sample's centre: True dark,
+    False light, None where no shape covers the point and the page shows through. Every <rect> is painted in
+    document order with its rounded corners (rx, clamped to half a side), its fill its own or its <g>'s, dark
+    when the luma 0.299 R + 0.587 G + 0.114 B is under 128. Any element but svg, g and rect, and any fill but
+    #rrggbb, is refused, so a shape this reader cannot paint never passes unseen."""
+    grid, fills = None, []
+    for closing, name, attributes, empty in _SVG_TAG.findall(svg):
+        values = dict(_SVG_ATTRIBUTE.findall(attributes))
+        if name == "svg" and not closing:
+            origin_x, origin_y, width, height = (float(v) for v in values["viewBox"].split())
+            if (origin_x, origin_y) != (0, 0) or width != height or width != int(width):
+                raise ValueError(f"not a square viewBox from the origin: {values['viewBox']}")
+            grid = [[None] * (int(width) * per_module) for _ in range(int(width) * per_module)]
+        elif name == "g":
+            if closing:
+                fills.pop()
+            elif not empty:
+                fills.append(values.get("fill", fills[-1] if fills else None))
+        elif name == "rect" and grid is not None:
+            _paint(grid, per_module, values, values.get("fill", fills[-1] if fills else None))
+        elif name != "svg":
+            raise ValueError(f"an element this reader cannot paint: <{closing}{name}{attributes[:60]}")
+    if grid is None:
+        raise ValueError("no <svg> with a viewBox")
+    return grid
+
+
+def _paint(grid, per_module, values, fill):
+    if fill is None or not re.fullmatch(r"#[0-9a-fA-F]{6}", fill) or "ry" in values:
+        raise ValueError(f"a rect this reader cannot paint: fill {fill!r}, attributes {values}")
+    x, y = float(values.get("x", 0)), float(values.get("y", 0))
+    width, height = float(values["width"]), float(values["height"])
+    radius = min(float(values.get("rx", 0)), width / 2, height / 2)
+    red, green, blue = (int(fill[i:i + 2], 16) for i in (1, 3, 5))
+    dark = 0.299 * red + 0.587 * green + 0.114 * blue < 128
+    size = len(grid)
+    for row in range(max(0, math.ceil(y * per_module - .5)), min(size, math.floor((y + height) * per_module - .5) + 1)):
+        point_y = (row + .5) / per_module
+        for column in range(max(0, math.ceil(x * per_module - .5)),
+                            min(size, math.floor((x + width) * per_module - .5) + 1)):
+            point_x = (column + .5) / per_module
+            near_x = min(max(point_x, x + radius), x + width - radius)
+            near_y = min(max(point_y, y + radius), y + height - radius)
+            if (point_x - near_x) ** 2 + (point_y - near_y) ** 2 <= radius * radius:
+                grid[row][column] = dark

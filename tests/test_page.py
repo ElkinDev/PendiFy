@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
 
 import support
@@ -24,6 +25,7 @@ codes = support.module("codes")
 config = support.module("config")
 page = support.module("page")
 pairing = support.module("pairing")
+qr = support.module("qr")
 worker = support.module("worker")
 
 GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
@@ -38,6 +40,31 @@ BODY_DELAY = 0.01
 CONFIG_WORDS = {"es": "No se pudo leer ni guardar la configuración de este PC.",
                 "en": "This PC's settings could not be read or saved."}
 WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
+# The words of a waiting page with a watcher and a quit button, in the order the page before the design showed
+# them (page.py at 8f6b90661); None is the key as codes.display prints it.
+PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "scan", "code_label", None, "check",
+              "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence", "forget", "quit")
+
+
+class PageText(HTMLParser):
+    """The text a person reads on a page, in document order: every text node outside style and script, stripped,
+    the blank ones left out."""
+
+    def __init__(self, document):
+        super().__init__()
+        self.texts, self.hidden = [], 0
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        self.hidden += tag in ("style", "script")
+
+    def handle_endtag(self, tag):
+        self.hidden -= tag in ("style", "script")
+
+    def handle_data(self, data):
+        if not self.hidden and data.strip():
+            self.texts.append(data.strip())
 
 
 @contextlib.contextmanager
@@ -235,6 +262,33 @@ class PairingPageTest(unittest.TestCase):
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
                                              else None)[2])
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
+
+    def test_the_page_loads_nothing_from_outside_and_every_word_keeps_its_one_place(self):
+        # Mutation: the scan sentence left out of the QR's column. Red: the words miss WORDS["es"]["scan"].
+        # Mutation: a web font imported by the style. Red: "@import" and an http address on the page.
+        secret = self.secret()
+        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None)
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+        symbol = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown, words = self.html(accept), page.WORDS[lang]
+                self.assertEqual(PageText(shown).texts,
+                                 [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER])
+                self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
+                for outside in ("<link", "src=", "@import", "@font-face", "url(", "http"):
+                    self.assertNotIn(outside, shown)
+                # The pairing address is only in the QR's own modules: each drawn centre is the encoder's.
+                drawn = re.findall(r'<svg class="qr".*?</svg>', shown, re.S)
+                self.assertEqual(len(drawn), 1)
+                self.assertEqual(support.svg_samples(drawn[0], 1), support.quiet_padded(symbol, qr.QUIET_ZONE))
+        self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
+        refused = list(PAGE_ORDER)
+        refused.insert(refused.index("save") + 1, "typed_refused")
+        self.assertEqual(PageText(self.html()).texts,
+                         [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused])
 
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.
