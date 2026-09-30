@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
 
 import support
@@ -24,6 +25,7 @@ codes = support.module("codes")
 config = support.module("config")
 page = support.module("page")
 pairing = support.module("pairing")
+qr = support.module("qr")
 worker = support.module("worker")
 
 GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
@@ -37,7 +39,72 @@ BODY_DELAY = 0.01
 # The page word for a config file that cannot be read or replaced (brief lnk5a-notes, change 3).
 CONFIG_WORDS = {"es": "No se pudo leer ni guardar la configuración de este PC.",
                 "en": "This PC's settings could not be read or saved."}
+# The watcher line's words (brief pcpg-live, change 3): connected, the phase frame, the ping frame; each phase the
+# client names, in Spanish and in English, with one name the map does not hold; each ping result by its name.
+WATCH_FRAMES = {"es": ("Conectado al cliente del juego.", "Ahora: {}.", "Aviso al teléfono: {}, a las {}."),
+                "en": ("Connected to the game client.", "Now: {}.", "Alert to the phone: {}, at {}.")}
+PHASE_TEXTS = {"None": ("Sin partida", "No game"), "Lobby": ("En la sala", "In the lobby"),
+               "Matchmaking": ("Buscando partida", "Looking for a match"),
+               "ReadyCheck": ("Partida encontrada", "Match found"), "ChampSelect": ("Eligiendo", "Choosing"),
+               "InProgress": ("En partida", "In a game"), "EndOfGame": ("Fin de la partida", "Game over"),
+               "PreEndOfGame": ("Fin de la partida", "Game over"),
+               "WaitingForStats": ("Fin de la partida", "Game over"),
+               "Reconnect": ("Otro estado", "Other state")}
+PING_TEXTS = {"sent": ("enviado", "sent"),
+              "refused": ("rechazado por tu cuenta", "refused by your account"),
+              "not_delivered": ("no entregado", "not delivered"), "failed": ("falló el envío", "sending failed")}
 WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
+# The words of a waiting page with a watcher and a quit button, in the order the page before the design showed
+# them (page.py at 8f6b90661), with the key's summary before its label (brief pcpg-hide, change 1); None is the key
+# as codes.display prints it.
+PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "scan", "show_key", "code_label", None,
+              "check", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence", "forget",
+              "quit")
+
+
+class PageText(HTMLParser):
+    """The text a person reads on a page, in document order: every text node outside style and script, stripped,
+    the blank ones left out."""
+
+    def __init__(self, document):
+        super().__init__()
+        self.texts, self.hidden = [], 0
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        self.hidden += tag in ("style", "script")
+
+    def handle_endtag(self, tag):
+        self.hidden -= tag in ("style", "script")
+
+    def handle_data(self, data):
+        if not self.hidden and data.strip():
+            self.texts.append(data.strip())
+
+
+class KeyPlace(HTMLParser):
+    """Where a page prints `key`: for each text node that holds it, the attributes of every <details> around it
+    (an empty list when none is), and each <details> start tag's attributes in document order."""
+
+    def __init__(self, document, key):
+        super().__init__()
+        self.key, self.open_details, self.details, self.places = key, [], [], []
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "details":
+            self.open_details.append(dict(attrs))
+            self.details.append(dict(attrs))
+
+    def handle_endtag(self, tag):
+        if tag == "details":
+            self.open_details.pop()
+
+    def handle_data(self, data):
+        if self.key in data:
+            self.places.append(list(self.open_details))
 
 
 @contextlib.contextmanager
@@ -236,6 +303,50 @@ class PairingPageTest(unittest.TestCase):
                                              else None)[2])
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
 
+    def test_the_page_loads_nothing_from_outside_and_every_word_keeps_its_one_place(self):
+        # Mutation: the scan sentence left out of the QR's column. Red: the words miss WORDS["es"]["scan"].
+        # Mutation: a web font imported by the style. Red: "@import" and an http address on the page.
+        secret = self.secret()
+        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None)
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+        symbol = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown, words = self.html(accept), page.WORDS[lang]
+                self.assertEqual(PageText(shown).texts,
+                                 [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER])
+                self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
+                for outside in ("<link", "src=", "@import", "@font-face", "url(", "http"):
+                    self.assertNotIn(outside, shown)
+                # The pairing address is only in the QR's own modules: each drawn centre is the encoder's.
+                drawn = re.findall(r'<svg class="qr".*?</svg>', shown, re.S)
+                self.assertEqual(len(drawn), 1)
+                self.assertEqual(support.svg_samples(drawn[0], 1), support.quiet_padded(symbol, qr.QUIET_ZONE))
+        self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
+        refused = list(PAGE_ORDER)
+        refused.insert(refused.index("save") + 1, "typed_refused")
+        self.assertEqual(PageText(self.html()).texts,
+                         [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused])
+
+    def test_the_key_is_printed_only_inside_a_closed_details_whose_summary_asks_to_show_it(self):
+        # Mutation: the key back beside its label in the figcaption, outside the details. Red: a place with no
+        # details around it. Mutation: the details rendered open. Red: its attributes hold "open".
+        secret = self.secret()
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown = self.html(accept)
+                self.assertEqual(shown.count(codes.display(secret)), 1)
+                self.assertNotIn(secret, shown)
+                place = KeyPlace(shown, codes.display(secret))
+                self.assertEqual(place.places, [[{}]])
+                self.assertEqual(place.details, [{}])
+                self.assertIn(f"<details><summary>{html.escape(page.WORDS[lang]['show_key'])}</summary>", shown)
+                self.assertIn(".key-card summary::-webkit-details-marker{display:none}", shown)
+        self.assertEqual((page.WORDS["es"]["show_key"], page.WORDS["en"]["show_key"]),
+                         ("Mostrar la clave", "Show the key"))
+
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.
         snapshot = {"client": "waiting", "alert": None, "at": None}
@@ -255,15 +366,65 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(json.loads(get("/state", "es")).get("watchText"), page.WORDS["es"]["watch_waiting"])
         at = 1_790_000_000.0
         for alert, language in (("loading", "es"), ("queue", "en"), ("started", "es")):
-            snapshot.update(client="connected", alert=alert, at=at)
+            snapshot.update(client="connected", phase="Lobby", alert=alert, at=at)
             words = page.WORDS[language]
-            expected = words["watch_connected"] + " " + words["watch_last"].format(
-                what=words["alert_" + alert], time=time.strftime("%H:%M", time.localtime(at)))
+            expected = " ".join((words["watch_connected"], words["watch_phase"].format(phase=words["phase_lobby"]),
+                                 words["watch_last"].format(what=words["alert_" + alert],
+                                                            time=time.strftime("%H:%M", time.localtime(at)))))
             self.assertEqual(json.loads(get("/state", language)).get("watchText"), expected)
             self.assertIn(html.escape(expected), get("/", language))
             self.assertIsNone(GAME_WORDS.search(expected), expected)
         self.assertNotIn('id="watch"', self.html())
         self.assertNotIn("watchText", json.loads(self.call("GET", "/state")[2]))
+
+    def test_the_watcher_line_says_the_phase_while_connected_and_the_last_ping_in_both_languages(self):
+        # Mutation: the ping line left out of watch_text. Red: /state ends at the phase, with no ping line.
+        # Mutation: PreEndOfGame left out of the phase map. Red: it reads «Otro estado».
+        at, ping_at = 1_790_000_000.0, 1_790_000_600.0
+        snapshot = {"client": "connected", "phase": None, "alert": None, "at": None, "pingResult": None, "pingAt": None}
+        self.page = page.PairingPage(self.state, watch=lambda: dict(snapshot))
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+
+        def served(accept):
+            headers = {"Accept-Language": accept}
+            return json.loads(self.call("GET", "/state", headers=headers)[2]).get("watchText"), self.html(accept)
+
+        for index, (lang, accept) in enumerate((("es", "es-CO,es;q=0.9"), ("en", "en-US,en;q=0.9"))):
+            connected, now, ping = WATCH_FRAMES[lang]
+            words = page.WORDS[lang]
+            # Connected with nothing read yet: no phase clause (pcpg-live Open item 5); the client's "None" is a read.
+            snapshot.update(client="connected", phase=None, alert=None, at=None, pingResult=None, pingAt=None)
+            state, shown = served(accept)
+            self.assertEqual(state, connected)
+            self.assertIn(f'<p id="watch" role="status">{html.escape(connected)}</p>', shown)
+            for phase, names in PHASE_TEXTS.items():
+                with self.subTest(lang=lang, phase=phase):
+                    snapshot.update(client="connected", phase=phase, pingResult=None, pingAt=None)
+                    expected = f"{connected} {now.format(names[index])}"
+                    state, shown = served(accept)
+                    self.assertEqual(state, expected)
+                    self.assertIn(f'<p id="watch" role="status">{html.escape(expected)}</p>', shown)
+            last = words["watch_last"].format(what=words["alert_started"],
+                                              time=time.strftime("%H:%M", time.localtime(at)))
+            for result, names in PING_TEXTS.items():
+                with self.subTest(lang=lang, result=result):
+                    snapshot.update(client="connected", phase="InProgress", alert="started", at=at, pingResult=result,
+                                    pingAt=ping_at)
+                    line = ping.format(names[index], time.strftime("%H:%M", time.localtime(ping_at)))
+                    expected = f"{connected} {now.format(PHASE_TEXTS['InProgress'][index])} {last} {line}"
+                    state, shown = served(accept)
+                    self.assertEqual(state, expected)
+                    self.assertIn(html.escape(expected), shown)
+                    self.assertIsNone(GAME_WORDS.search(state), state)
+            # Waiting: no phase, whatever the last one read was; the ping line still shows.
+            snapshot.update(client="waiting", phase="Lobby", alert=None, at=None, pingResult="sent", pingAt=ping_at)
+            line = ping.format(PING_TEXTS["sent"][index], time.strftime("%H:%M", time.localtime(ping_at)))
+            self.assertEqual(served(accept)[0], f"{words['watch_waiting']} {line}")
+        # The note under a panel's form keeps its own margin (pcpg-apply Open item 6).
+        self.assertIn(".panel p{margin:0 0 16px;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+                      ".panel .note{margin:12px 0 0}\n", self.html())
 
     def post_in_two_sends(self, path, body, host=None, declared=None, length_headers=None):
         """A POST whose body follows its headers in a second send, as a browser may send a form: the status

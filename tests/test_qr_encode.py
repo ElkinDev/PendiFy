@@ -119,12 +119,18 @@ class QrEncodeTest(unittest.TestCase):
         svg = qr.svg(self.m)
         self.assertTrue(svg.startswith("<svg "))
         self.assertIn('viewBox="0 0 37 37"', svg)
-        self.assertIn('<rect width="37" height="37" fill="#ffffff"/>', svg)
-        cells = {(int(x), int(y)) for x, y in re.findall(r"M(\d+) (\d+)h1v1h-1z", svg)}
-        expected = {(c + 4, r + 4) for r in range(29) for c in range(29) if self.m[r][c]}
-        self.assertEqual(cells, expected)
-        self.assertEqual(min(x for x, _ in cells), 4)
-        self.assertEqual(max(y for _, y in cells), 32)
+        self.assertIn('<rect width="37" height="37" rx="1.5" fill="#FFFFFF"/>', svg)
+        # Every module centre keeps its module's colour, and the four modules around the symbol are light.
+        self.assertEqual(support.svg_samples(svg, 1), support.quiet_padded(self.m, 4))
+        # Each dark module but the finders' and the alignment pattern's is one 0.88 dot, corner 0.3, on its cell.
+        dots = {(int(x), int(y)) for x, y in
+                re.findall(r'<rect x="(\d+)\.06" y="(\d+)\.06" width="\.88" height="\.88" rx="\.3"/>', svg)}
+        drawn_apart = ({(r, c) for top, left in ((0, 0), (0, 22), (22, 0)) for r in range(top, top + 7)
+                        for c in range(left, left + 7)} | {(r, c) for r in range(20, 25) for c in range(20, 25)})
+        expected = {(c + 4, r + 4) for r in range(29) for c in range(29) if self.m[r][c] and (r, c) not in drawn_apart}
+        self.assertEqual(dots, expected)
+        self.assertEqual(min(x for x, _ in dots), 4)
+        self.assertEqual(max(y for _, y in dots), 32)
 
 
 if __name__ == "__main__":

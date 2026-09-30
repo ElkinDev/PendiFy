@@ -25,6 +25,7 @@ Al iniciarse, el navegador abre una página local con un código QR. Escanéalo 
 - Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`, que es lo que ejecuta el acceso directo; sin consola, si ya está abierto o no puede iniciarse te lo dice en una ventana. Para verlo en una consola: `python -m pcnotify`.
 - Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
 - Desinstalar: pega en PowerShell `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex`. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está y quita los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
+- Actualizar: pulsa «Salir» en la página y vuelve a pegar la línea de instalación; instala la última versión y conserva la configuración y el enlace.
 
 ### Qué envía y a quién
 
@@ -61,6 +62,7 @@ When it starts, the browser opens a local page with a QR code. Scan it with the 
 - Start: the `pcnotify` shortcut, or `pythonw -m pcnotify`, which is what the shortcut runs; with no console, it tells you in a window when it is already running or cannot start. To see it in a console: `python -m pcnotify`.
 - Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
 - Uninstall: paste `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex` into PowerShell. It removes the package from the same Python that installed it, checks that it is gone and removes both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
+- Update: press "Quit" on the page and paste the install line again; it installs the latest version and keeps the configuration and the link.
 
 ### What it sends and to whom
 
@@ -78,7 +80,7 @@ License: MIT
     python -m pcnotify ping <kind>
 
 The first loads the config, starts the page and opens it in the default browser while the PC is not paired.
-It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the match really starts it beeps and sends the started alert.
+It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps and sends the started alert.
 Add `--dry` to watch and alert without accepting. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
 The second sends one alert with the stored pair and prints one line with the answer.
 

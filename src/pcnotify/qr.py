@@ -10,6 +10,8 @@ from . import codes
 
 PAIRING_ADDRESS = "https://pendiapp.com/link/pc#"
 QUIET_ZONE = 4
+# The drawn symbol's colours: ink on a white tile in both page themes, the finder rings in the app's violet.
+_QR_INK, _QR_RING, _QR_TILE = "#1E1533", "#6D28D9", "#FFFFFF"
 
 # Level M: version -> (EC codewords per block, blocks, data codewords per block). No short blocks up to 6.
 _LEVEL_M = {1: (10, 1, 16), 2: (16, 1, 28), 3: (26, 1, 44), 4: (18, 2, 32), 5: (24, 2, 43), 6: (16, 4, 27)}
@@ -221,11 +223,44 @@ def penalty(modules):
             + 10 * (abs(dark * 2 - total) * 10 // total))
 
 
-def svg(modules):
-    """An inline SVG of the symbol inside a four-module light quiet zone, one unit per module."""
-    side = len(modules) + 2 * QUIET_ZONE
-    cells = "".join(f"M{c + QUIET_ZONE} {r + QUIET_ZONE}h1v1h-1z"
-                    for r, row in enumerate(modules) for c, module in enumerate(row) if module)
-    return (f'<svg viewBox="0 0 {side} {side}" width="{side * 8}" height="{side * 8}" shape-rendering="crispEdges"'
-            f' role="img"><rect width="{side}" height="{side}" fill="#ffffff"/>'
-            f'<path d="{cells}" fill="#000000"/></svg>')
+def svg(modules, labelledby=None):
+    """An inline SVG of the symbol on a white tile that keeps a four-module quiet zone, one unit per module.
+
+    The grid is the encoder's; only how a module is painted changes. A dark data module is a 0.88 dot with
+    0.3 corners centred on its cell; each finder is a violet 7 by 7 ring, a white 5 by 5 separator and a 3 by 3
+    eye; each alignment pattern a 5 by 5 ring, its 3 by 3 gap and its centre. Every rounded corner is small
+    enough that each module's centre, where a reader samples, keeps the module's colour: a 7 by 7 ring keeps its
+    corner centre inside the arc only while its radius is under 0.5*sqrt(2)/(sqrt(2)-1), about 1.707.
+    """
+    n, q = len(modules), QUIET_ZONE
+    side = n + 2 * q
+    finders = ((0, 0), (0, n - 7), (n - 7, 0))
+
+    def in_finder(r, c):
+        return any(top <= r < top + 7 and left <= c < left + 7 for top, left in finders)
+
+    centres = _ALIGNMENT[(n - 17) // 4]
+    alignments = [(r, c) for r in centres for c in centres if not in_finder(r, c)]
+
+    def drawn_apart(r, c):
+        return in_finder(r, c) or any(abs(r - a) <= 2 and abs(c - b) <= 2 for a, b in alignments)
+
+    dots = "".join(f'<rect x="{c + q}.06" y="{r + q}.06" width=".88" height=".88" rx=".3"/>'
+                   for r, row in enumerate(modules) for c, module in enumerate(row)
+                   if module and not drawn_apart(r, c))
+    label = f' aria-labelledby="{labelledby}"' if labelledby else ""
+    out = [f'<svg class="qr" viewBox="0 0 {side} {side}" role="img"{label}>',
+           f'<rect width="{side}" height="{side}" rx="1.5" fill="{_QR_TILE}"/>',
+           f'<g fill="{_QR_INK}">{dots}</g>']
+    for top, left in finders:
+        x, y = left + q, top + q
+        out.append(f'<rect x="{x}" y="{y}" width="7" height="7" rx="1.5" fill="{_QR_RING}"/>'
+                   f'<rect x="{x + 1}" y="{y + 1}" width="5" height="5" rx="1.4" fill="{_QR_TILE}"/>'
+                   f'<rect x="{x + 2}" y="{y + 2}" width="3" height="3" rx="1" fill="{_QR_INK}"/>')
+    for a, b in alignments:
+        x, y = b - 2 + q, a - 2 + q
+        out.append(f'<rect x="{x}" y="{y}" width="5" height="5" rx="1.5" fill="{_QR_INK}"/>'
+                   f'<rect x="{x + 1}" y="{y + 1}" width="3" height="3" rx=".9" fill="{_QR_TILE}"/>'
+                   f'<rect x="{x + 2}" y="{y + 2}" width="1" height="1" rx=".3" fill="{_QR_INK}"/>')
+    out.append("</svg>")
+    return "".join(out)

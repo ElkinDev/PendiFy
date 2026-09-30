@@ -3,11 +3,11 @@
 The client writes its port and token to a lockfile while it runs. When no lockfile answers, one read of
 the client process's command line through PowerShell takes the place of the script's psutil fallback, at
 most once every 10 s. Every failure is no client, never an exception. Nothing here prints, logs or raises
-the client's token, and Credentials hides it from repr.
+the client's token, and Credentials hides it from repr. Only the client's own port is called: its phase alone
+says a game started, and no live game data port is read.
 """
 import base64
 import http.client
-import json
 import re
 import ssl
 import subprocess
@@ -109,10 +109,6 @@ CLIENT_HOST = "127.0.0.1"
 PHASE_PATH = "/lol-gameflow/v1/gameflow-phase"  # S:745
 ACCEPT_PATH = "/lol-matchmaking/v1/ready-check/accept"  # S:784
 CLIENT_TIMEOUT = 2.0  # S:746, S:785
-LIVE_CLOCK_PATH = "/liveclientdata/gamestats"
-LIVE_CLOCK_URL = f"https://{CLIENT_HOST}:2999{LIVE_CLOCK_PATH}"  # S:112
-CLOCK_TIMEOUT = 1.5  # S:721
-GAME_TIME_THRESHOLD = 2.0  # S:113
 _MAX_ANSWER_BYTES = 64 * 1024
 
 
@@ -121,13 +117,13 @@ class ClientUnreachable(Exception):
 
 
 def real_addresses(port):
-    """The client's base address and the live clock's address in a real run (S:743, S:112)."""
-    return f"https://{CLIENT_HOST}:{port}", LIVE_CLOCK_URL
+    """The client's base address in a real run (S:743)."""
+    return f"https://{CLIENT_HOST}:{port}"
 
 
 def loopback_addresses(port):
-    """The test override's addresses: one fake on 127.0.0.1 answers both, over plain http."""
-    return f"http://{CLIENT_HOST}:{port}", f"http://{CLIENT_HOST}:{port}{LIVE_CLOCK_PATH}"
+    """The test override's base address: a fake on 127.0.0.1, over plain http."""
+    return f"http://{CLIENT_HOST}:{port}"
 
 
 def loopback_tls_context(host):
@@ -189,13 +185,3 @@ def get(url, token, timeout):
 def post(url, token, timeout):
     """POST of an empty JSON object on the client, as S:784-786: the status, or ClientUnreachable."""
     return _call(url, token, timeout, data=b"{}")[0]
-
-
-def game_really_started(get_call, url):
-    """True once the game clock runs past the threshold (S:718-726). The clock only answers while a game
-    runs, so no answer, or an answer that is not a clock, is False and never an error."""
-    try:
-        _, raw = get_call(url, None, CLOCK_TIMEOUT)
-        return float(json.loads(raw.decode("utf-8")).get("gameTime", 0)) > GAME_TIME_THRESHOLD
-    except (ClientUnreachable, ValueError, TypeError, AttributeError):
-        return False

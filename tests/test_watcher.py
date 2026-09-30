@@ -1,9 +1,9 @@
 """WatcherTest: the loop of S:728-800 as a class, driven step by step with no sleep.
 
-The fake client and the fake clock address answer on 127.0.0.1 over plain http, reached through the
-injected address builder. The four fire sites of the script: S:759 (a change into a phase of
-ALERT_PHASES), S:769 (the game clock past its threshold), S:776 (ReadyCheck with the accept off) and
-S:790 (ReadyCheck, the accept taken).
+The fake client answers on 127.0.0.1 over plain http, reached through the injected address builder. The
+three fire sites: the arrival of InProgress after a read of another phase (the loading screen, match_started
+with a beep and a ping, once per game), S:776 (ReadyCheck with the accept off) and S:790 (ReadyCheck, the
+accept taken).
 """
 import ast
 import base64
@@ -26,9 +26,10 @@ watcher = support.module("watcher")
 worker = support.module("worker")
 
 TOKEN = "fake-Token_0123"  # a test vector, never a client's
-PHASE, ACCEPT, CLOCK = support.CLIENT_PHASE_PATH, support.CLIENT_ACCEPT_PATH, support.CLIENT_CLOCK_PATH
+PHASE, ACCEPT = support.CLIENT_PHASE_PATH, support.CLIENT_ACCEPT_PATH
 QUEUE_FOUND, MATCH_STARTED = "lol_queue_found", "lol_match_started"
 WALL = 1_790_000_000.0
+PING_WALL = 1_790_000_030.0  # the alerter's wall clock, apart from the watcher's so the snapshot shows whose
 GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
 UNVERIFIED = re.compile(r"CERT_NONE|_create_unverified_context|check_hostname|verify_mode|_create_default_https")
 
@@ -70,13 +71,13 @@ class WatcherTest(unittest.TestCase):
 
     def alerter(self, ping=None, **kwargs):
         kwargs.setdefault("start", lambda target: target())
-        return alert.Alerter(self.store, self.state, ping or self.ping, beep=lambda: self.beeps.append(self.clock()),
-                             log=self.lines.append, **kwargs)
+        kwargs.setdefault("beep", lambda: self.beeps.append(self.clock()))
+        kwargs.setdefault("wall", lambda: PING_WALL)
+        return alert.Alerter(self.store, self.state, ping or self.ping, log=self.lines.append, **kwargs)
 
-    def watcher(self, credentials=None, accept=True, alerter=None, clock_fake=None, delay=1.7, **kwargs):
-        clock_url = (clock_fake or self.fake).base + CLOCK
+    def watcher(self, credentials=None, accept=True, alerter=None, delay=1.7, **kwargs):
         return watcher.Watcher(credentials or Credentials(self.fake.port), alerter or self.alerter(), accept=accept,
-                               addresses=lambda port: (f"http://127.0.0.1:{port}", clock_url), clock=self.clock,
+                               addresses=lambda port: f"http://127.0.0.1:{port}", clock=self.clock,
                                wall=lambda: WALL, sleep=kwargs.pop("sleep", self.sleep), delay=lambda: delay,
                                log=self.lines.append, **kwargs)
 
@@ -85,27 +86,61 @@ class WatcherTest(unittest.TestCase):
             self.clock.advance(every)
             subject.step()
 
-    def test_the_first_read_of_an_alert_phase_alerts_nothing_and_a_later_change_into_it_only_beeps(self):
-        # Mutation: the first-read guard removed (S:757). Red: the first read of InProgress beeps.
-        self.assertEqual(watcher.ALERT_PHASES, ("InProgress",))
-        self.fake.phase = "InProgress"
-        subject = self.watcher()
-        subject.step()
-        self.assertEqual(self.fake.count("GET", PHASE), 1)
-        self.assertEqual((self.beeps, self.pings), ([], []))
-        for phase in ("InProgress", "EndOfGame", "Lobby", "Lobby"):
+    def read(self, subject, *phases):
+        """One step per phase, 0.3 s apart, the fake client answering each phase in turn."""
+        for phase in phases:
             self.fake.phase = phase
             self.clock.advance(0.3)
             subject.step()
-        self.assertEqual(self.beeps, [])
+
+    @staticmethod
+    def shown(phase, alert=None, ping=None, client_state="connected"):
+        """The snapshot a watcher answers: the phase as the client names it, the last alert at the watcher's
+        wall clock and the last ping's result at the alerter's."""
+        return {"client": client_state, "phase": phase, "alert": alert, "at": None if alert is None else WALL,
+                "pingResult": ping, "pingAt": None if ping is None else PING_WALL}
+
+    def test_the_arrival_of_in_progress_pings_the_match_start_once_and_beeps_once(self):
+        # Mutation: the arrival alerting with no kind, as before. Red: a beep and no ping.
+        # Mutation: the latch set after the alert. Red: an alert that broke is made again at the next read.
+        for name in ("ALERT_PHASES", "CLOCK_READ_INTERVAL"):
+            self.assertFalse(hasattr(watcher, name), name)
+        for name in ("game_really_started", "LIVE_CLOCK_URL", "LIVE_CLOCK_PATH"):
+            self.assertFalse(hasattr(client, name), name)
+        subject = self.watcher()
+        self.read(subject, "Lobby", "ChampSelect")
+        self.assertEqual((self.beeps, self.pings), ([], []))
+        self.assertEqual(subject.snapshot(), self.shown("ChampSelect"))
+        self.read(subject, "InProgress")
+        self.assertEqual((len(self.beeps), self.pings), (1, [(LINK_ID, SECRET, MATCH_STARTED)]))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+        self.read(subject, *["InProgress"] * 5)
+        self.assertEqual((len(self.beeps), len(self.pings)), (1, 1))
+        # The phase is the one call: no other address and no other route is read.
+        self.assertEqual({(call["method"], call["path"]) for call in self.fake.requests}, {("GET", PHASE)})
+        failures = [RuntimeError("the beep could not start")]
+
+        def beep():
+            if failures:
+                raise failures.pop()
+            self.beeps.append(self.clock())
+
+        self.beeps.clear()
+        self.pings.clear()
+        breaking = self.watcher(alerter=self.alerter(beep=beep))
+        self.read(breaking, "Lobby")
         self.fake.phase = "InProgress"
-        self.clock.advance(0.3)
-        subject.step()
-        self.assertEqual((len(self.beeps), self.pings), (1, []))
-        self.assertEqual(subject.snapshot(), {"client": "connected", "alert": "loading", "at": WALL})
-        self.clock.advance(0.3)
-        subject.step()
-        self.assertEqual(len(self.beeps), 1)
+        with self.assertRaises(RuntimeError):
+            breaking.step()
+        self.read(breaking, "InProgress", "InProgress")
+        self.assertEqual((self.beeps, self.pings, failures), ([], [], []))
+
+    def test_a_client_already_in_progress_at_the_first_read_alerts_nothing(self):
+        # Mutation: the first-read guard removed (S:755-757). Red: the first read of InProgress beeps and pings.
+        subject = self.watcher()
+        self.read(subject, "InProgress", "InProgress", "InProgress")
+        self.assertEqual((self.beeps, self.pings), ([], []))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress"))
 
     def test_ready_check_with_the_accept_on_posts_once_after_the_delay_then_alerts_and_holds_15_s(self):
         # Mutation: the alert made before the accept's answer is read. Red: the refused accept beeps and pings.
@@ -144,7 +179,7 @@ class WatcherTest(unittest.TestCase):
         subject.step()
         self.assertEqual(self.fake.count("POST", ACCEPT), 0)
         self.assertEqual((len(self.beeps), self.pings, self.sleeps), (1, [(LINK_ID, SECRET, QUEUE_FOUND)], []))
-        self.assertEqual(subject.snapshot(), {"client": "connected", "alert": "queue", "at": WALL})
+        self.assertEqual(subject.snapshot(), self.shown("ReadyCheck", "queue", "sent"))
         held_from, reads = self.clock(), self.fake.count("GET", PHASE)
         self.steps_until(subject, held_from + 15.0)
         self.assertEqual((len(self.beeps), len(self.pings), self.fake.count("GET", PHASE)), (1, 1, reads))
@@ -152,50 +187,28 @@ class WatcherTest(unittest.TestCase):
         subject.step()
         self.assertEqual((len(self.pings), self.fake.count("POST", ACCEPT)), (2, 0))
 
-    def test_in_progress_alerts_the_match_start_once_per_game_reading_the_clock_at_most_once_a_second(self):
-        # Mutation: the once-per-game latch removed. Red: a second lol_match_started a second later.
-        self.assertEqual(client.GAME_TIME_THRESHOLD, 2.0)
-        clock_fake = self.client_fake(game_time=0.0)
-        self.fake.phase = "InProgress"
-        subject = self.watcher(clock_fake=clock_fake)
-        subject.step()
-        self.assertEqual(clock_fake.count("GET", CLOCK), 1)
-        self.assertNotIn("authorization", clock_fake.calls("GET", CLOCK)[0]["headers"])  # no token to the clock
-        self.clock.advance(0.5)
-        subject.step()
-        self.assertEqual(clock_fake.count("GET", CLOCK), 1)
-        self.clock.advance(0.6)
-        subject.step()
-        self.assertEqual((clock_fake.count("GET", CLOCK), self.pings), (2, []))
-        clock_fake.game_time = 2.0  # the threshold itself is not past it
-        self.clock.advance(1.1)
-        subject.step()
-        self.assertEqual((clock_fake.count("GET", CLOCK), self.pings), (3, []))
-        clock_fake.game_time = 2.5
-        self.clock.advance(1.1)
-        subject.step()
-        self.assertEqual(self.pings, [(LINK_ID, SECRET, MATCH_STARTED)])
-        self.assertEqual(subject.snapshot(), {"client": "connected", "alert": "started", "at": WALL})
-        for _ in range(3):
-            self.clock.advance(1.1)
-            subject.step()
-        self.assertEqual((clock_fake.count("GET", CLOCK), len(self.pings)), (4, 1))
-        self.fake.phase = "EndOfGame"
-        self.clock.advance(0.3)
-        subject.step()
-        self.fake.phase = "InProgress"
-        self.clock.advance(1.1)
-        subject.step()
+    def test_lobby_then_in_progress_again_pings_the_match_start_again(self):
+        # Mutation: the latch never reset when the phase leaves InProgress. Red: the second game sends no ping.
+        subject = self.watcher()
+        self.read(subject, "InProgress", "PreEndOfGame", "WaitingForStats", "EndOfGame", "Lobby", "Matchmaking",
+                  "InProgress", "InProgress", "EndOfGame", "Lobby", "InProgress", "InProgress")
         self.assertEqual([kind for *_, kind in self.pings], [MATCH_STARTED, MATCH_STARTED])
-        self.assertEqual(len(self.beeps), 3)  # the start, the change into InProgress, the start again
-        clock_fake.dropping = True
-        for phase in ("Lobby", "InProgress", "InProgress"):
-            self.fake.phase = phase
-            self.clock.advance(1.1)
-            subject.step()
-        self.assertEqual(len(self.pings), 2)
-        self.assertNotIn(watcher.LOST_LINE, self.lines)
-        self.assertEqual(subject.snapshot()["client"], "connected")
+        self.assertEqual(len(self.beeps), 2)
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+
+    def test_a_reconnect_mid_game_keeps_the_latch_and_the_next_game_pings_again(self):
+        # Mutation: the latch reset on every phase that is not InProgress. Red: the InProgress after Reconnect pings.
+        self.assertEqual(watcher.GAME_BOUNDARY_PHASES,
+                         {"None", "Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "EndOfGame", "PreEndOfGame",
+                          "WaitingForStats"})
+        subject = self.watcher(accept=False)
+        self.read(subject, "ChampSelect", "InProgress")
+        self.assertEqual([kind for *_, kind in self.pings], [MATCH_STARTED])
+        self.read(subject, "Reconnect", "Reconnect", "InProgress", "InProgress")
+        self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (1, [MATCH_STARTED]))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+        self.read(subject, "EndOfGame", "Lobby", "InProgress")
+        self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (2, [MATCH_STARTED, MATCH_STARTED]))
 
     def test_a_client_that_stops_answering_is_looked_for_again_and_a_fresh_one_is_followed(self):
         # Mutation: the credentials kept after a lost connection. Red: the fresh client on another port is never read.
@@ -223,6 +236,26 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(subject.snapshot()["client"], "connected")
         self.assertEqual(self.lines.count(watcher.CONNECTED_LINE), 2)
 
+    def test_a_fresh_client_already_in_progress_after_a_lost_one_alerts_nothing_until_lobby_then_in_progress(self):
+        # Mutation: _forget keeps the last phase read. Red: the fresh client's first InProgress beeps and pings.
+        credentials = Credentials(self.fake.port)
+        subject = self.watcher(credentials=credentials)
+        self.read(subject, "Lobby")
+        self.fake.dropping = True
+        self.clock.advance(0.3)
+        subject.step()
+        self.assertEqual(subject.snapshot(), self.shown(None, client_state="waiting"))
+        self.fake = self.client_fake(phase="InProgress")
+        credentials.port = self.fake.port
+        self.read(subject, "InProgress", "InProgress")
+        self.assertEqual((credentials.reads, self.lines.count(watcher.CONNECTED_LINE)), (2, 2))
+        self.assertEqual((self.beeps, self.pings), ([], []))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress"))
+        self.read(subject, "Lobby", "InProgress", "InProgress")
+        self.assertEqual([kind for *_, kind in self.pings], [MATCH_STARTED])
+        self.assertEqual(len(self.beeps), 1)
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+
     def test_run_pauses_3_s_while_there_is_no_client_and_0_3_s_between_reads(self):
         # Mutation: the no-client pause made 0.3 s (S:739). Red: the pauses read 0.3 where 3 is due.
         self.assertEqual((watcher.NO_CLIENT_PAUSE, watcher.STEP_PAUSE), (3.0, 0.3))
@@ -246,8 +279,10 @@ class WatcherTest(unittest.TestCase):
         # Mutation: the ping made on the watcher's thread. Red: the step returns only after the held ping.
         self.store.forget()  # a new secret and no link id
         started = []
-        self.alerter(start=started.append)(QUEUE_FOUND)
+        unlinked = self.alerter(start=started.append)
+        unlinked(QUEUE_FOUND)
         self.assertEqual((len(self.beeps), self.pings, started), (1, [], []))
+        self.assertEqual(self.watcher(alerter=unlinked).snapshot(), self.shown(None, client_state="waiting"))
         self.store.set_typed(LINK_ID, SECRET)
         release, finished = threading.Event(), threading.Event()
         self.addCleanup(release.set)
@@ -279,6 +314,15 @@ class WatcherTest(unittest.TestCase):
             self.assertEqual(self.state.snapshot()["relinkOffered"], count == 3)
         self.assertEqual(self.state.snapshot()["state"], "refused")
         self.assertEqual(fake_worker.bodies(), [{"linkId": LINK_ID, "secret": SECRET, "kind": QUEUE_FOUND}] * 3)
+        # The last ping's result reaches the watcher's snapshot by its name, at the alerter's wall clock.
+        self.assertEqual(self.watcher(alerter=refusing).snapshot(),
+                         self.shown(None, ping="refused", client_state="waiting"))
+        answers = {"not_delivered": lambda *_: worker.NotDelivered(500), "failed": lambda *_: 1 / 0,
+                   "sent": lambda *_: worker.Sent()}
+        for name, answer in answers.items():
+            answering = self.alerter(answer)
+            answering(MATCH_STARTED)
+            self.assertEqual(self.watcher(alerter=answering).snapshot()["pingResult"], name)
 
     def test_the_beep_plays_the_script_s_six_notes_on_its_own_thread_and_is_silent_without_the_sound_module(self):
         # Mutation: the notes played on the caller's thread. Red: a note played on the test's thread.
@@ -314,12 +358,11 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(outside, [])
         self.assertEqual({name for name, _ in inside}, {"client.py"})
         self.assertGreaterEqual(len(inside), 2)
-        self.assertEqual(client.real_addresses(51234),
-                         ("https://127.0.0.1:51234", "https://127.0.0.1:2999/liveclientdata/gamestats"))
+        self.assertEqual(client.real_addresses(51234), "https://127.0.0.1:51234")
         with self.assertRaises(ValueError):
             client.get(f"https://localhost:{self.fake.port}{PHASE}", TOKEN, 1.0)
         with self.assertRaises(client.ClientUnreachable):  # the https road, against a fake that speaks http
-            client.get(client.real_addresses(self.fake.port)[0] + PHASE, TOKEN, 0.3)
+            client.get(client.real_addresses(self.fake.port) + PHASE, TOKEN, 0.3)
         self.assertEqual(self.fake.count("GET", PHASE), 0)
 
     def test_nothing_printed_logged_or_raised_holds_the_token_the_secret_or_the_link_id(self):

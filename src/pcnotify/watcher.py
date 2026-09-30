@@ -2,9 +2,11 @@
 
 Everything that touches the world is injected: the credentials reader, the address builder, the HTTP
 getter and poster, the clock, the wall clock, the sleep, the random delay, the alert and the console.
-One step() is one turn of the script's loop and answers the pause before the next; run() is the loop
-around it. The script's 15 s sleep after a ready check (S:778, S:793) is a hold on the injected clock, so
-a stop never waits for it. The console gets fixed lines only: no phase, no port, no token.
+Its `alert` is an Alerter: snapshot() reads its last_ping(). One step() is one turn of the script's loop
+and answers the pause before the next; run() is the loop around it. The script's 15 s sleep after a ready
+check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
+InProgress after a read of another phase is the loading screen: it beeps and pings match_started at once,
+once per game; a reconnect is the same game. The console gets fixed lines only: no phase, no port, no token.
 """
 import json
 import random
@@ -13,15 +15,14 @@ import time
 
 from . import client, worker
 
-# S:103-105: the phases whose arrival alerts, with no kind, so a beep and no ping. The script's two
-# sentences are not carried: no channel here shows them.
-ALERT_PHASES = ("InProgress",)
 IN_PROGRESS, READY_CHECK = "InProgress", "ReadyCheck"
+# The phases that end or precede a game: only a read of one of them resets the start latch.
+GAME_BOUNDARY_PHASES = frozenset({"None", "Lobby", "Matchmaking", READY_CHECK, "ChampSelect", "EndOfGame",
+                                  "PreEndOfGame", "WaitingForStats"})
 ACCEPT_DELAY = (1.0, 2.5)  # S:136
 HOLD_SECONDS = 15.0  # S:778, S:793
 STEP_PAUSE = 0.3  # S:799
 NO_CLIENT_PAUSE = 3.0  # S:739
-CLOCK_READ_INTERVAL = 1.0  # S:764
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 
 CONNECTED_LINE = "connected to the game client"
@@ -32,7 +33,7 @@ DRY_LINE = "match found: not accepting (--dry)"
 STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client again"
 
 WAITING, CONNECTED = "waiting", "connected"
-_ALERT_NAMES = {None: "loading", QUEUE_FOUND: "queue", MATCH_STARTED: "started"}
+_ALERT_NAMES = {QUEUE_FOUND: "queue", MATCH_STARTED: "started"}
 
 
 def accept_delay():
@@ -67,7 +68,6 @@ class Watcher:
         self._found = None
         self._last_phase = None
         self._start_alerted = False
-        self._last_clock_read = None
         self._hold_until = None
         self._client_state = WAITING
         self._last_alert = None
@@ -102,7 +102,7 @@ class Watcher:
             self._found = found
             self._set_client(CONNECTED)
             self._log(CONNECTED_LINE)
-        base, clock_url = self._addresses(self._found.port)
+        base = self._addresses(self._found.port)
         token = self._found.token
         try:
             status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
@@ -110,34 +110,31 @@ class Watcher:
                 phase = _phase(raw)
                 if phase is None:  # requests raises a RequestException on a body that is not JSON (S:750)
                     raise client.ClientUnreachable("ValueError")
-                self._on_phase(phase, base, token, clock_url)
+                self._on_phase(phase, base, token)
         except client.ClientUnreachable:  # S:796-798
             self._log(LOST_LINE)
             self._forget()
         return STEP_PAUSE
 
     def snapshot(self):
-        """The watcher's state in plain values: the client waiting or connected, the last alert and when."""
+        """The watcher's state in plain values: the client waiting or connected, the last phase read as the
+        client names it (None before any), the last alert and when, and the last ping's result and when."""
+        ping, ping_at = self._alert.last_ping()
         with self._lock:
             name, at = self._last_alert or (None, None)
-            return {"client": self._client_state, "alert": name, "at": at}
+            return {"client": self._client_state, "phase": self._last_phase, "alert": name, "at": at,
+                    "pingResult": ping, "pingAt": ping_at}
 
-    def _on_phase(self, phase, base, token, clock_url):
-        if phase != self._last_phase:
-            # The first read is not a change: an alert for something already under way says nothing (S:755-757).
-            if self._last_phase is not None and phase in ALERT_PHASES:
-                self._fire(None)  # S:759
-            self._last_phase = phase
-        if phase == IN_PROGRESS:
-            now = self._clock()
-            due = self._last_clock_read is None or now - self._last_clock_read > CLOCK_READ_INTERVAL
-            if not self._start_alerted and due:
-                self._last_clock_read = now
-                if client.game_really_started(self._get, clock_url):
-                    self._start_alerted = True
-                    self._fire(MATCH_STARTED)  # S:769
-        else:
+    def _on_phase(self, phase, base, token):
+        # An arrival is InProgress after a read of another phase. The first read is not one: an alert for a game
+        # already under way says nothing (S:755-757). Reconnect, InProgress or an unknown phase keeps the latch.
+        if phase in GAME_BOUNDARY_PHASES:
             self._start_alerted = False
+        elif self._last_phase not in (None, IN_PROGRESS) and not self._start_alerted:
+            self._start_alerted = True  # before the alert: an alert that breaks is not made again for this game
+            self._fire(MATCH_STARTED)
+        with self._lock:
+            self._last_phase = phase
         if phase == READY_CHECK:
             self._ready_check(base, token)
 
@@ -168,7 +165,10 @@ class Watcher:
         self._alert(kind)
 
     def _forget(self):
+        # S:755-757 is per connection: a fresh client already InProgress at its first read alerts nothing.
         self._found = None
+        with self._lock:
+            self._last_phase = None
         self._set_client(WAITING)
 
     def _set_client(self, value):

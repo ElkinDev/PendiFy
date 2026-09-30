@@ -1,8 +1,9 @@
-"""An alert: the beep of S:161-169 and, with a kind and a stored link id, the ping off the watcher's thread.
+"""An alert: the beep of S:161-169 and, with a stored link id, the ping of its kind off the watcher's thread.
 
-Every alert beeps; a ping goes only with a kind (S:336-355). The ping's result goes to the pairing state
-through record_ping, as lane lnk5a's ping command answers it, so three refusals in a row offer the relink.
-With no link id nothing is sent and nothing is queued. The console gets fixed lines only.
+Every alert beeps and names a kind (S:336-355). The ping's result goes to the pairing state through record_ping,
+as lane lnk5a's ping command answers it, so three refusals in a row offer the relink, and its name and time stay
+for the page as the last ping. With no link id nothing is sent and nothing is queued. The console gets fixed
+lines only.
 """
 import threading
 import time
@@ -60,18 +61,18 @@ def _result_name(result):
 
 
 class Alerter:
-    def __init__(self, store, state, ping, *, beep=beep, start=None, log=None):
+    def __init__(self, store, state, ping, *, beep=beep, start=None, log=None, wall=time.time):
         self._store, self._state, self._ping, self._beep = store, state, ping, beep
         self._start = start or _start_daemon
         self._log = log or _print
+        self._wall = wall
         self._lock = threading.Lock()
         self._pending = []
+        self._last_ping = (None, None)
 
-    def __call__(self, kind=None):
-        """Beeps; with a kind and a stored link id, sends the ping on a thread of its own."""
+    def __call__(self, kind):
+        """Beeps; with a stored link id, sends the ping of `kind` on a thread of its own."""
         self._beep()
-        if kind is None:
-            return
         try:
             pair = self._store.read()  # read at each alert: a link made on the page counts at once
         except OSError:
@@ -91,9 +92,18 @@ class Alerter:
             except Exception as failure:  # a refused input raises a fixed sentence; it still ends as failed
                 result = worker.Failed(type(failure).__name__)
             self._state.record_ping(result)
-            self._log(PING_LINES[_result_name(result)])
+            name = _result_name(result)
+            with self._lock:
+                self._last_ping = (name, self._wall())
+            self._log(PING_LINES[name])
         finally:
             done.set()
+
+    def last_ping(self):
+        """The last ping's result name (sent, refused, not_delivered or failed) and its wall time; (None, None)
+        before any ping was made."""
+        with self._lock:
+            return self._last_ping
 
     def flush(self, timeout):
         """Waits up to `timeout` seconds for the pings in flight; True when none is left."""
