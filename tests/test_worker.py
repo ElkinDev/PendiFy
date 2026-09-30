@@ -60,6 +60,19 @@ class LinkWorkerClientTest(unittest.TestCase):
         self.assertEqual(request["path"], "/v1/link-ping")
         self.assertEqual(json.loads(request["body"]), {"linkId": LINK_ID, "secret": SECRET, "kind": "lol_queue_found"})
 
+    def test_check_and_ping_name_the_program_in_the_user_agent(self):
+        # Mutation: the User-Agent header removed. Red: urllib's default Python-urllib/<version> is sent,
+        # the signature the edge refuses with error 1010 before the Worker reads the request.
+        fake = self.fake(lambda path, body: (200, {"linkId": LINK_ID}) if path == "/v1/link-check" else SENT)
+        worker.check(SECRET, base=fake.base)
+        worker.ping(LINK_ID, SECRET, "lol_match_started", base=fake.base)
+        self.assertEqual([request["path"] for request in fake.requests], ["/v1/link-check", "/v1/link-ping"])
+        for request in fake.requests:
+            with self.subTest(path=request["path"]):
+                agent = request["headers"].get("user-agent", "")
+                self.assertTrue(agent.startswith("pcnotify/"), agent)
+                self.assertFalse(agent.startswith("Python-urllib"), agent)
+
     def test_each_ping_answer_maps_to_its_result_as_s_reads_it(self):
         # Mutation: a 200 with sent 0 read as Sent. Red: Sent where NotDelivered(200) is expected (S:303).
         answers = [
