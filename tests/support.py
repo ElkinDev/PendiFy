@@ -129,22 +129,21 @@ class FakeWorker:
         self.server.server_close()
 
 
-# The game client's routes (S:745, S:784) and the live game clock's (S:112).
+# The game client's routes (S:745, S:784).
 CLIENT_PHASE_PATH = "/lol-gameflow/v1/gameflow-phase"
 CLIENT_ACCEPT_PATH = "/lol-matchmaking/v1/ready-check/accept"
-CLIENT_CLOCK_PATH = "/liveclientdata/gamestats"
 
 
 class FakeClient:
-    """The game client's routes on 127.0.0.1 over plain http: the phase, the accept and the live clock.
+    """The game client's routes on 127.0.0.1 over plain http: the phase and the accept.
 
     `phase` is the value the phase route answers as JSON; `accept_status` the accept's status (204 carries
-    no body); `game_time` the clock's value, or None for a 404; `dropping` closes every connection without
-    an answer, as a client that stopped answering. Every request is recorded with its headers and body.
+    no body); `dropping` closes every connection without an answer, as a client that stopped answering.
+    Every request is recorded with its headers and body.
     """
 
-    def __init__(self, phase="None", accept_status=204, game_time=0.0):
-        self.phase, self.accept_status, self.game_time, self.dropping = phase, accept_status, game_time, False
+    def __init__(self, phase="None", accept_status=204):
+        self.phase, self.accept_status, self.dropping = phase, accept_status, False
         self.requests = []
         fake = self
 
@@ -168,8 +167,6 @@ class FakeClient:
                     return
                 if self.command == "GET" and self.path == CLIENT_PHASE_PATH:
                     return self._reply(200, json.dumps(fake.phase).encode())
-                if self.command == "GET" and self.path == CLIENT_CLOCK_PATH and fake.game_time is not None:
-                    return self._reply(200, json.dumps({"gameTime": fake.game_time}).encode())
                 if self.command == "POST" and self.path == CLIENT_ACCEPT_PATH:
                     return self._reply(fake.accept_status, b"" if fake.accept_status == 204 else b"{}")
                 self._reply(404, b'{"errorCode":"RPC_ERROR"}')
