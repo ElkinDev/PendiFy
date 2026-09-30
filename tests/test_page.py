@@ -225,14 +225,14 @@ class PairingPageTest(unittest.TestCase):
         shown = get("/", "es")
         self.assertIn('id="watch"', shown)
         self.assertIn(page.WORDS["es"]["watch_waiting"], shown)
-        self.assertEqual(json.loads(get("/state", "es"))["watchText"], page.WORDS["es"]["watch_waiting"])
+        self.assertEqual(json.loads(get("/state", "es")).get("watchText"), page.WORDS["es"]["watch_waiting"])
         at = 1_790_000_000.0
         for alert, language in (("loading", "es"), ("queue", "en"), ("started", "es")):
             snapshot.update(client="connected", alert=alert, at=at)
             words = page.WORDS[language]
             expected = words["watch_connected"] + " " + words["watch_last"].format(
                 what=words["alert_" + alert], time=time.strftime("%H:%M", time.localtime(at)))
-            self.assertEqual(json.loads(get("/state", language))["watchText"], expected)
+            self.assertEqual(json.loads(get("/state", language)).get("watchText"), expected)
             self.assertIn(html.escape(expected), get("/", language))
             self.assertIsNone(GAME_WORDS.search(expected), expected)
         self.assertNotIn('id="watch"', self.html())
