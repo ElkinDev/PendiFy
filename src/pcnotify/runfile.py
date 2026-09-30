@@ -4,6 +4,7 @@ A start creates the file exclusively. When the file is already there and names a
 this one, the start stops; a file whose pid is gone, or that names no pid, is taken over. A live pid is
 asked of the system through ctypes on Windows (os.kill there would end the process) and os.kill elsewhere.
 """
+import errno
 import json
 import os
 import tempfile
@@ -60,7 +61,9 @@ class RunFile:
 
     def claim(self):
         """None when this process now holds the file; the live holder's record, {pid, port}, when another
-        does. OSError when the file can neither be created nor taken over."""
+        does. A start that loses the race for the file to another start (PermissionError on Windows: the
+        file held open, or pending its removal, by the other start) reads the winner as that live holder.
+        OSError when the file can neither be created nor taken over."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         for _ in range(3):
             try:
@@ -73,12 +76,23 @@ class RunFile:
                     os.remove(self.path)  # a holder that is gone, or a file that names none: taken over
                 except FileNotFoundError:
                     pass
+                except PermissionError:  # another start holds the file open: it won the race
+                    return self._race_lost()
                 continue
+            except PermissionError:  # the file is pending its removal under another start's handle
+                return self._race_lost()
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 json.dump({"pid": self._pid, "port": None}, out)
             self._held = True
             return None
         raise FileExistsError("the run file came back after every take-over")
+
+    def _race_lost(self):
+        """The start that won the race, read as a live holder whose port is not known yet. A folder in the
+        file's place is no race: this start cannot go on."""
+        if self.path.is_dir():
+            raise IsADirectoryError(errno.EISDIR, "the run file is a folder", str(self.path))
+        return {"pid": None, "port": None}
 
     def publish(self, port):
         """This process's pid and its page's port, written over the claim in one move."""

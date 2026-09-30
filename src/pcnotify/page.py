@@ -217,9 +217,19 @@ class PairingPage:
             parts.append(f"<p>{words['typed_refused']}</p>")
         parts += [f"<h2>{words['forget']}</h2>", f"<p>{words['forget_sentence']}</p>",
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
+        if self.on_quit is not None:
+            parts.append(_form("quit", token, f'<button type="submit">{words["quit"]}</button>'))
         return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
                 f"</style></head><body>{''.join(parts)}<script>{_SCRIPT}</script></body></html>")
+
+    def render_stopped(self, lang):
+        """The one small page /quit answers: the program stopped, and how to start it again."""
+        words = {key: html.escape(value) for key, value in WORDS[lang].items()}
+        return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
+                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
+                f'</style></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
+                f'<p>{words["start_again"]}</p></body></html>')
 
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
@@ -318,7 +328,8 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            if path not in ("/check", "/typed", "/forget", "/relink"):
+            routes = ("/check", "/typed", "/forget", "/relink") + (("/quit",) if page.on_quit is not None else ())
+            if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
                 return self._refuse(411 if encoded or declared is None else 400)
@@ -332,6 +343,11 @@ def _handler(page):
             form = {key: values[0] for key, values in fields.items()}
             if not hmac.compare_digest(form.get("token", "").encode(), page.token.encode()):
                 return self._refuse(403)
+            if path == "/quit":
+                # Answered before the stop, so the exit that follows never cuts the answer short.
+                self._send(200, "text/html; charset=utf-8",
+                           page.render_stopped(language(self.headers.get("Accept-Language"))))
+                return page.on_quit()
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
 

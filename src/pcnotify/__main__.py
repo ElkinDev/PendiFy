@@ -4,8 +4,9 @@
     python -m <package> --dry        the same, but the watcher never accepts: it alerts at the queue pop
     python -m <package> ping <kind>  one alert with the stored pair, one fixed line per answer
 
-The page and the watcher stop together on Ctrl+C, and on Ctrl+Break. One instance per config folder: a
-second start opens the running page and exits 0. `--data-dir`, `--worker` and `--client-lockfile` are the
+The page and the watcher stop together on Ctrl+C, on Ctrl+Break and on the page's quit button, which
+removes the run file and exits 0. One instance per config folder: a second start opens the running page
+and exits 0. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
 """
 import argparse
@@ -84,7 +85,7 @@ def _ping(store, base, kind, timeout):
     return 0 if isinstance(result, worker.Sent) else 1
 
 
-def _watcher(args, store, state, base, timeout, stop, delay):
+def _watcher(args, store, state, base, timeout, stop, delay, beep):
     """The watcher and its alert. The test override reads its one lockfile, with no process read, and
     reaches its client over plain http on 127.0.0.1."""
     lockfile = getattr(args, "client_lockfile", None)
@@ -93,12 +94,12 @@ def _watcher(args, store, state, base, timeout, stop, delay):
     else:
         credentials, addresses = client.ClientCredentials((str(lockfile),), run=None), client.loopback_addresses
     alerter = alert.Alerter(store, state, lambda link_id, secret, kind: worker.ping(
-        link_id, secret, kind, base=base, timeout=timeout))
+        link_id, secret, kind, base=base, timeout=timeout), beep=beep)
     return watcher.Watcher(credentials, alerter, accept=not args.dry, addresses=addresses, delay=delay,
                            stop=stop), alerter
 
 
-def _serve(args, store, base, timeout, opener, stop, delay):
+def _serve(args, store, base, timeout, opener, stop, delay, beep):
     run = runfile.RunFile(store.path.parent)
     try:
         holder = run.claim()
@@ -112,8 +113,9 @@ def _serve(args, store, base, timeout, opener, stop, delay):
         return 0
     try:
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
-        watch, alerter = _watcher(args, store, state, base, timeout, stop, delay)
-        pairing_page = page.PairingPage(state, watch=watch.snapshot)
+        watch, alerter = _watcher(args, store, state, base, timeout, stop, delay, beep)
+        # The page's quit sets the same stop event as Ctrl+C: the watcher, the page and the run file end below.
+        pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=stop.set)
         url = pairing_page.start()
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
@@ -146,7 +148,9 @@ def _break_as_interrupt():
     return signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
 
-def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None, beep=None):
+def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
+         beep=alert.beep):
+    """`beep` is the one seam of the sound: a test run passes a silent one."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -155,7 +159,8 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
             return _ping(store, base, args.kind, timeout)
         previous = _break_as_interrupt()
         try:
-            return _serve(args, store, base, timeout, opener, stop or threading.Event(), delay or watcher.accept_delay)
+            return _serve(args, store, base, timeout, opener, stop or threading.Event(),
+                          delay or watcher.accept_delay, beep)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)

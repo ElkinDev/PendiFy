@@ -23,7 +23,7 @@ Al iniciarse, el navegador abre una página local con un código QR. Escanéalo 
 ### Iniciar, detener, desinstalar
 
 - Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`.
-- Detener: cierra el proceso `pythonw.exe` en el Administrador de tareas.
+- Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
 - Desinstalar: pega en PowerShell `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex`. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está y quita los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
 
 ### Qué envía y a quién
@@ -57,7 +57,7 @@ When it starts, the browser opens a local page with a QR code. Scan it with the 
 ### Start, stop, uninstall
 
 - Start: the `pcnotify` shortcut, or `pythonw -m pcnotify`.
-- Stop: end the `pythonw.exe` process in Task Manager.
+- Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
 - Uninstall: paste `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex` into PowerShell. It removes the package from the same Python that installed it, checks that it is gone and removes both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
 
 ### What it sends and to whom
