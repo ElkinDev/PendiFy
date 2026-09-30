@@ -1,14 +1,27 @@
 """ConfigStoreTest: the one JSON file holding exactly secret and linkId (design P1, P6, residual e)."""
+import contextlib
+import io
 import json
 import os
+import threading
 import unittest
+import urllib.request
 from pathlib import Path
 
 import support
 from support import LINK_ID, SECRET
 
+try:
+    import msvcrt
+except ImportError:  # not Windows
+    msvcrt = None
+
 codes = support.module("codes")
 config = support.module("config")
+entry = support.module("__main__")
+
+WINDOWS_ONLY = ("another handle that holds config.json against a read (msvcrt.locking) or a replace (an open "
+                "handle without delete sharing) is a Windows behavior")
 
 
 class ConfigStoreTest(unittest.TestCase):
@@ -17,6 +30,8 @@ class ConfigStoreTest(unittest.TestCase):
         self.base = Path(self._tmp.name)
         self.store = config.ConfigStore(self.base)
         self.folder = self.base / config.FOLDER_NAME
+        # A lockfile never written: a run of the entry point watches no client, never the real one.
+        self.no_client = str(self.base / "no client" / "lockfile")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -150,6 +165,121 @@ class ConfigStoreTest(unittest.TestCase):
         secret = store.load().secret
         self.assertEqual(json.loads((self.base / "a folder with spaces" / config.FOLDER_NAME / "config.json")
                                     .read_text(encoding="utf-8"))["secret"], secret)
+
+    @contextlib.contextmanager
+    def held(self, lock):
+        """config.json open in another handle, as another program holds it; with lock, its bytes locked."""
+        handle = open(self.store.path, "rb")
+        size = self.store.path.stat().st_size
+        try:
+            if lock:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, size)
+            try:
+                yield handle
+            finally:
+                if lock:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, size)
+        finally:
+            handle.close()
+
+    def unavailable(self):
+        return config.UNAVAILABLE.format(path=self.store.path)
+
+    @unittest.skipIf(msvcrt is None, WINDOWS_ONLY)
+    def test_a_file_another_handle_locks_raises_the_one_sentence_and_keeps_the_pair(self):
+        # Mutation: read catches only FileNotFoundError. Red: a raw PermissionError out of load.
+        self.store.set_typed(LINK_ID, SECRET)
+        with self.held(lock=True):
+            with self.assertRaises(OSError) as caught:
+                self.store.load()
+        self.assertIs(type(caught.exception), config.ConfigError)
+        self.assertEqual(str(caught.exception), self.unavailable())
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertTrue(caught.exception.__suppress_context__)
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+
+    @unittest.skipIf(msvcrt is None, WINDOWS_ONLY)
+    def test_the_page_driver_and_the_ping_command_print_the_one_sentence_and_exit_1(self):
+        # Mutation: main lets ConfigError out. Red: an exception in place of exit 1 and the sentence.
+        self.store.set_typed(LINK_ID, SECRET)
+        stop, opened = threading.Event(), []
+        stop.set()
+        for argv, kwargs in ((["ping", "lol_queue_found"], {}), ([], {"opener": opened.append, "stop": stop})):
+            with self.subTest(argv=argv):
+                out, err = io.StringIO(), io.StringIO()
+                with self.held(lock=True), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    try:
+                        code = entry.main(["--data-dir", str(self.base), "--worker", "http://127.0.0.1:9",
+                                           "--client-lockfile", self.no_client, *argv],
+                                          **kwargs)
+                    except Exception as failure:  # the red: what leaves main in place of the exit code
+                        code = type(failure).__name__
+                self.assertEqual((code, out.getvalue(), err.getvalue()), (1, self.unavailable() + "\n", ""))
+        self.assertEqual(opened, [])
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+
+    @unittest.skipIf(msvcrt is None, WINDOWS_ONLY)
+    def test_a_replace_refused_twice_is_retried_and_one_never_allowed_ends_in_the_sentence(self):
+        # Mutation: the retry removed from the replace. Red: the first PermissionError ends the write.
+        self.store.load()
+        pauses, outcome = [], None
+        with self.held(lock=False) as handle:
+            def pause(seconds):
+                pauses.append(seconds)
+                if len(pauses) == 2:
+                    handle.close()  # the other program lets go after the second refusal
+            try:
+                config.ConfigStore(self.base, pause=pause).set_typed(LINK_ID, SECRET)
+            except OSError as failure:
+                outcome = type(failure).__name__
+        self.assertEqual((outcome, pauses), (None, [0.2, 0.2]))
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+        self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+        pauses.clear()
+        with self.held(lock=False):
+            with self.assertRaises(OSError) as caught:
+                config.ConfigStore(self.base, pause=pauses.append).forget()
+        self.assertIs(type(caught.exception), config.ConfigError)
+        self.assertEqual(str(caught.exception), self.unavailable())
+        self.assertEqual(pauses, [0.2] * 5)  # five retries over one second
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+        self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+
+    def test_a_config_file_deleted_mid_run_raises_the_one_sentence_and_the_page_driver_exits_1(self):
+        # Mutation: _current raises RuntimeError again. Red: RuntimeError in place of ConfigError and of exit 1.
+        self.store.load()
+        self.store.path.unlink()
+        outcomes = []
+        for store_it in (lambda: self.store.set_link_id(LINK_ID), self.store.clear_link_id):
+            try:
+                outcomes.append(store_it() and None)
+            except Exception as failure:  # the red: whatever leaves the store in place of ConfigError
+                outcomes.append((type(failure).__name__, str(failure)))
+        self.assertEqual(outcomes, [("ConfigError", self.unavailable())] * 2)
+        fake = support.FakeWorker(lambda path, body: (200, {"linkId": LINK_ID}))
+        self.addCleanup(fake.close)
+        stop, opened = threading.Event(), []
+
+        def opener(url):  # the browser's first fetch opens the check window, then the file goes
+            opened.append(url)
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url + "state", timeout=5):
+                pass
+            self.store.path.unlink()
+            stop.set()  # one tick at most: a driver that swallows the failure ends, never hangs
+            return True
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = entry.main(["--data-dir", str(self.base), "--worker", fake.base, "--client-lockfile",
+                                   self.no_client], opener=opener, stop=stop)
+            except Exception as failure:  # the red: what leaves main in place of the exit code
+                code = type(failure).__name__
+        self.assertEqual((code, out.getvalue(), err.getvalue()),
+                         (1, f"page: {opened[0]}\n{self.unavailable()}\n", ""))
+        self.assertEqual(len(fake.bodies()), 1)
+        self.assertFalse(self.store.path.exists())
 
 
 if __name__ == "__main__":

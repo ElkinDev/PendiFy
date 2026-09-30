@@ -6,6 +6,7 @@ import io
 import json
 import re
 import socket
+import threading
 import time
 import unittest
 import urllib.parse
@@ -13,6 +14,11 @@ from pathlib import Path
 
 import support
 from support import LINK_ID, SECRET, FakeClock
+
+try:
+    import msvcrt
+except ImportError:  # not Windows
+    msvcrt = None
 
 codes = support.module("codes")
 config = support.module("config")
@@ -24,6 +30,27 @@ GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
 FENCE = {"cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY"}
 ROUTES = [("GET", "/"), ("GET", "/state"), ("POST", "/check"), ("POST", "/typed"), ("POST", "/forget"),
           ("POST", "/relink")]
+# A refused POST's body is read up to 64 KiB before the answer (brief lnk5a-fix1, change 1).
+DRAIN_BOUND = 64 * 1024
+# Sent in one burst, headers and body share the handler's first read and a missing drain never shows.
+BODY_DELAY = 0.01
+# The page word for a config file that cannot be read or replaced (brief lnk5a-notes, change 3).
+CONFIG_WORDS = {"es": "No se pudo leer ni guardar la configuración de este PC.",
+                "en": "This PC's settings could not be read or saved."}
+WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
+
+
+@contextlib.contextmanager
+def held(path):
+    """path open in another handle with its bytes locked, as another program holds config.json."""
+    size = path.stat().st_size
+    with open(path, "rb") as handle:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, size)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, size)
 
 
 class PairingPageTest(unittest.TestCase):
@@ -237,6 +264,154 @@ class PairingPageTest(unittest.TestCase):
             self.assertIsNone(GAME_WORDS.search(expected), expected)
         self.assertNotIn('id="watch"', self.html())
         self.assertNotIn("watchText", json.loads(self.call("GET", "/state")[2]))
+
+    def post_in_two_sends(self, path, body, host=None, declared=None, length_headers=None):
+        """A POST whose body follows its headers in a second send, as a browser may send a form: the status
+        and the Connection header, or the name of the socket error met in their place."""
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.putrequest("POST", path, skip_host=True, skip_accept_encoding=True)
+            connection.putheader("Host", self.host if host is None else host)
+            connection.putheader("Content-Type", "application/x-www-form-urlencoded")
+            if length_headers is None:
+                length_headers = [("Content-Length", str(len(body) if declared is None else declared))]
+            for name, value in length_headers:
+                connection.putheader(name, value)
+            connection.endheaders()
+            # The body a moment after the headers, as over a real network: a handler that answers without
+            # reading it has closed by then, and Windows resets the socket (150 of 150 without the drain).
+            time.sleep(BODY_DELAY)
+            connection.send(body)
+            response = connection.getresponse()
+            response.read()
+            return response.status, response.getheader("Connection")
+        except OSError as failure:
+            return type(failure).__name__, None
+        finally:
+            connection.close()
+
+    def test_a_refused_post_is_answered_after_its_body_is_read_and_never_reset(self):
+        # Mutation: the drain removed from do_POST. Red: Windows resets some of the 150 connections.
+        secret = self.secret()
+        cases = [("foreign host", "/typed", b"x" * 3000, "evil.example", 403),
+                 ("no such route", "/nothing", b"x" * 3000, None, 404),
+                 ("too large", "/typed", b"x" * (3 * page.MAX_FORM_BYTES), None, 413)]
+        for name, path, body, host, status in cases:
+            with self.subTest(name=name):
+                answers = [self.post_in_two_sends(path, body, host) for _ in range(50)]
+                self.assertEqual([answer for answer in answers if answer != (status, "close")], [])
+        self.assertEqual(self.store.read(), config.Pairing(secret, None))
+        self.assertEqual(self.checks, [])
+
+    def test_a_declared_body_past_the_bound_is_read_up_to_it_and_answered(self):
+        # Mutation: the drain reads the whole declaration. Red: the handler waits for a megabyte never sent.
+        self.assertEqual(self.post_in_two_sends("/typed", b"x" * DRAIN_BOUND, declared=1024 * 1024),
+                         (413, "close"))
+
+    def test_every_answer_says_it_closes_its_connection(self):
+        # Mutation: the Connection header dropped from _send. Red: the page's 200 carries none.
+        answers = [self.call("GET", "/"), self.call("GET", "/state"), self.call("GET", "/nothing"),
+                   self.call("GET", "/", host="evil.example"), self.call("POST", "/check", token=False),
+                   self.call("POST", "/check"), self.call("POST", "/nothing"), self.call("PUT", "/"),
+                   self.call("HEAD", "/")]
+        self.assertEqual([(status, headers.get("connection")) for status, headers, _ in answers],
+                         [(200, "close"), (200, "close"), (404, "close"), (403, "close"), (403, "close"),
+                          (303, "close"), (404, "close"), (501, "close"), (200, "close")])
+
+    def test_head_runs_the_fences_and_answers_the_headers_of_get_with_no_body(self):
+        # Mutation: do_HEAD removed. Red: a foreign-Host HEAD answers 501 from the base class.
+        for path in ("/", "/state", "/nothing"):
+            with self.subTest(path=path):
+                status, _, body = self.call("HEAD", path, host="evil.example")
+                self.assertEqual((status, body), (403, ""))
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as raw:
+            raw.sendall(f"HEAD / HTTP/1.1\r\nHost: {self.host}\r\n\r\n".encode("ascii"))
+            received = b""
+            while chunk := raw.recv(65536):
+                received += chunk
+        head, _, rest = received.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        headers = {name.lower(): value for name, value in (line.split(": ", 1) for line in lines[1:])}
+        self.assertEqual((lines[0].split(" ")[1], rest), ("200", b""))
+        for name, value in FENCE.items():
+            self.assertEqual(headers.get(name), value)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+        # A HEAD is not a person looking at the page: no automatic check falls due.
+        self.assertIsNone(self.state.tick())
+        self.assertEqual(self.checks, [])
+        self.assertEqual(int(headers["content-length"]), len(self.html().encode("utf-8")))
+
+    def serve(self, answer):
+        """A new state and page over the same store, whose check answers answer()."""
+        self.state = pairing.PairingState(self.store, lambda secret: self.checks.append(secret) or answer(),
+                                          clock=FakeClock())
+        self.page = page.PairingPage(self.state)
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port = self.page.port
+        self.host = f"127.0.0.1:{self.port}"
+
+    def status_of(self, method, path, form=None):
+        """The status of the answer, or the name of the socket error met in its place."""
+        try:
+            return self.call(method, path, form=form)[0]
+        except OSError as failure:
+            return type(failure).__name__
+
+    def test_a_post_with_no_usable_length_is_drained_then_answered_411_or_400_and_never_reset(self):
+        # Mutation: the length refusal answered before the drain. Red: Windows resets the connections.
+        secret = self.secret()
+        body = b"x" * 3000
+        chunked = b"%x\r\n" % len(body) + body + b"\r\n0\r\n\r\n"
+        cases = [("Content-Length abc", [("Content-Length", "abc")], body, 400),
+                 ("chunked, no length", [("Transfer-Encoding", "chunked")], chunked, 411),
+                 ("Content-Length -5", [("Content-Length", "-5")], body, 400),
+                 ("no length", [], body, 411)]
+        for name, length_headers, sent, status in cases:
+            with self.subTest(name=name):
+                answers = [self.post_in_two_sends("/typed", sent, length_headers=length_headers) for _ in range(20)]
+                self.assertEqual([answer for answer in answers if answer != (status, "close")], [])
+        self.assertEqual(self.store.read(), config.Pairing(secret, None))
+        self.assertEqual(self.checks, [])
+
+    def test_a_declared_body_never_sent_is_dropped_at_the_timeout_and_its_thread_ends(self):
+        # Mutation: the timeout removed from the Handler. Red: the socket is still open and unanswered at 12 s.
+        baseline = threading.active_count()
+        with socket.create_connection(("127.0.0.1", self.port), timeout=12) as raw:
+            raw.sendall(f"POST /typed HTTP/1.1\r\nHost: {self.host}\r\nContent-Length: 65536\r\n\r\n".encode("ascii"))
+            started = time.monotonic()
+            try:
+                received = raw.recv(4096)
+            except OSError as failure:  # TimeoutError when the page never lets go, or a reset
+                received = type(failure).__name__
+            waited = time.monotonic() - started
+            deadline = time.monotonic() + 2
+            while threading.active_count() > baseline and time.monotonic() < deadline:
+                time.sleep(0.01)
+            threads = threading.active_count()
+        self.assertEqual((received, 9 <= waited < 12, threads <= baseline), (b"", True, True))
+
+    @unittest.skipIf(msvcrt is None, WINDOWS_ONLY)
+    def test_a_post_that_meets_a_held_config_file_answers_303_and_the_page_says_so_in_both_languages(self):
+        # Mutation: the ConfigError catch removed from the page's act. Red: RemoteDisconnected in place of 303.
+        roads = [("/check", self.store.forget, lambda: worker.Linked(LINK_ID)),
+                 ("/typed", self.store.forget, worker.Refused),
+                 ("/forget", self.store.forget, worker.Refused),
+                 ("/relink", lambda: self.store.set_typed(LINK_ID, SECRET), worker.Refused)]
+        answers = []
+        for path, arrange, answer in roads:
+            arrange()
+            self.serve(answer)
+            for _ in range(3 if path == "/relink" else 0):
+                self.state.record_ping(worker.Refused())
+            before, shown_before = self.store.read(), CONFIG_WORDS["es"] in self.html()
+            err = io.StringIO()
+            with held(self.store.path), contextlib.redirect_stderr(err):
+                status = self.status_of("POST", path, form={"linkId": LINK_ID, "secret": SECRET})
+                shown = (CONFIG_WORDS["es"] in self.html(), html.escape(CONFIG_WORDS["en"]) in self.html("en"))
+            answers.append((path, shown_before, status, *shown, err.getvalue(), self.store.read() == before))
+        self.assertEqual(answers, [(path, False, 303, True, True, " [page] a request failed: ConfigError\n", True)
+                                   for path, _, _ in roads])
 
 
 if __name__ == "__main__":

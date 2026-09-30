@@ -67,21 +67,8 @@ class PackageShapeTest(unittest.TestCase):
         for table in ("optional-dependencies", "scripts", "gui-scripts", "entry-points"):
             self.assertNotIn(table, project)
 
-    def test_the_working_name_is_written_only_where_the_brief_allows(self):
-        # Mutation: a test imports the package by its literal name. Red: the name in a test file.
-        found = []
-        for folder, subfolders, files in os.walk(support.ROOT):
-            subfolders[:] = [name for name in subfolders if name not in (".git", "build", "__pycache__")
-                             and not name.endswith(".egg-info")]
-            for name in files:
-                path = os.path.join(folder, name)
-                with open(path, encoding="utf-8") as handle:
-                    for number, line in enumerate(handle, 1):
-                        if support.PACKAGE in line:
-                            found.append((os.path.relpath(path, support.ROOT).replace(os.sep, "/"), line.strip()))
-        allowed = {("pyproject.toml", f'name = "{support.PACKAGE}"'), ("README.md", f"python -m {support.PACKAGE}"),
-                   ("README.md", f"python -m {support.PACKAGE} ping <kind>")}
-        self.assertEqual(set(found) - allowed, set())
+    # The working-name pin was retired on 2026-09-30: pcnotify is the public name now, spelled by the
+    # installer, the uninstaller and the README (the repository slug stays one constant in install.ps1).
 
     def test_the_built_wheel_holds_no_binary_and_no_launcher(self):
         # Mutation: a [project.scripts] entry. Red: the wheel carries an entry_points.txt.

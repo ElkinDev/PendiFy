@@ -15,10 +15,15 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, qr
+from . import codes, config, qr
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
+# A POST's body is read up to this bound before any answer, refusals included: a socket closed with
+# unread bytes in it is reset on Windows, and the client meets the reset in place of the answer.
+DRAIN_BYTES = 64 * 1024
+# With no usable length the socket is read up to DRAIN_BYTES while bytes keep coming, each read waiting this long.
+DRAIN_WAIT = 0.1
 POLICY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
@@ -45,6 +50,7 @@ WORDS = {
         "secret_label": "Clave",
         "save": "Guardar",
         "typed_refused": "Esos valores no son válidos: cada uno tiene doce caracteres.",
+        "config_failed": "No se pudo leer ni guardar la configuración de este PC.",
         "relink": "Volver a enlazar",
         "forget": "Olvidar este PC",
         "forget_sentence": "Olvidar este PC crea una clave nueva y quita el enlace de este PC. El enlace anterior "
@@ -76,6 +82,7 @@ WORDS = {
         "secret_label": "Key",
         "save": "Save",
         "typed_refused": "Those values are not valid: each has twelve characters.",
+        "config_failed": "This PC's settings could not be read or saved.",
         "relink": "Link again",
         "forget": "Forget this PC",
         "forget_sentence": "Forgetting this PC makes a new key and removes this PC's link. The old link stays "
@@ -112,7 +119,12 @@ def _report_failure(request, client_address):
     a browser that dropped its connection is not a failure of the page."""
     failure = sys.exc_info()[1]
     if not isinstance(failure, ConnectionError):
-        print(f" [page] a request failed: {type(failure).__name__}", file=sys.stderr)
+        _say_failure(failure)
+
+
+def _say_failure(failure):
+    """The one fixed stderr line of a failed request: its type, never its data."""
+    print(f" [page] a request failed: {type(failure).__name__}", file=sys.stderr)
 
 
 def _form(action, token, inner):
@@ -175,6 +187,8 @@ class PairingPage:
                  f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
                  f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
                  f'{words["state_" + snapshot["state"]]}</p>']
+        if snapshot["configFailed"]:
+            parts.append(f"<p>{words['config_failed']}</p>")
         watch = self.watch_text(lang)
         if watch is not None:
             parts.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
@@ -200,20 +214,28 @@ class PairingPage:
                 f"</style></head><body>{''.join(parts)}<script>{_SCRIPT}</script></body></html>")
 
     def act(self, path, form):
-        if path == "/check":
-            self.state.ask()
-        elif path == "/typed":
-            self.state.typed(form.get("linkId", ""), form.get("secret", ""))
-        elif path == "/forget":
-            self.state.forget()
-        elif path == "/relink":
-            self.state.accept_relink()
+        """The route's action; a config file that cannot be read or replaced is said on the page and on
+        stderr, and the request is still answered."""
+        try:
+            if path == "/check":
+                self.state.ask()
+            elif path == "/typed":
+                self.state.typed(form.get("linkId", ""), form.get("secret", ""))
+            elif path == "/forget":
+                self.state.forget()
+            elif path == "/relink":
+                self.state.accept_relink()
+        except config.ConfigError as failure:
+            _say_failure(failure)
+            self.state.config_failed()
 
 
 def _handler(page):
     class Handler(BaseHTTPRequestHandler):
         server_version = "local"
         sys_version = ""
+        # A socket that declares a body and sends none is dropped after it, with no answer, and its thread ends.
+        timeout = 10
 
         def log_message(self, format, *args):  # no request line, no body, ever
             pass
@@ -228,6 +250,7 @@ def _handler(page):
             self.send_response(status)
             for name, value in extra:
                 self.send_header(name, value)
+            self.send_header("Connection", "close")  # no client reuses a socket the handler is done with
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -235,35 +258,65 @@ def _handler(page):
                 self.wfile.write(data)
 
         def _refuse(self, status):
-            self._send(status, "text/plain; charset=utf-8", {403: "forbidden", 404: "not found",
-                                                             400: "bad request", 413: "too large"}[status])
+            self._send(status, "text/plain; charset=utf-8", {403: "forbidden", 404: "not found", 400: "bad request",
+                                                             411: "length required", 413: "too large"}[status])
 
         def do_GET(self):
+            self._get(seen=True)
+
+        def do_HEAD(self):
+            # The fences and the headers of GET, no body; a HEAD is not a person looking at the page.
+            self._get(seen=False)
+
+        def _get(self, seen):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
             lang = language(self.headers.get("Accept-Language"))
-            if path == "/":
+            if seen and path in ("/", "/state"):
                 page.state.page_seen()
+            if path == "/":
                 return self._send(200, "text/html; charset=utf-8", page.render(lang))
             if path == "/state":
-                page.state.page_seen()
                 return self._send(200, "application/json", json.dumps(page.state_json(lang)))
             return self._refuse(404)
 
+        def _drain(self):
+            """What the socket holds, up to DRAIN_BYTES, for a body with no usable length: read while bytes
+            come within DRAIN_WAIT, so no answer leaves bytes unread."""
+            self.connection.settimeout(DRAIN_WAIT)
+            try:
+                drained = 0
+                while drained < DRAIN_BYTES:
+                    chunk = self.rfile.read1(DRAIN_BYTES - drained)
+                    if not chunk:
+                        return
+                    drained += len(chunk)
+            except TimeoutError:  # nothing more came within DRAIN_WAIT: the drain ends, it did not fail
+                return
+            finally:
+                self.connection.settimeout(self.timeout)
+
         def do_POST(self):
+            declared = self.headers.get("Content-Length")
+            encoded = self.headers.get("Transfer-Encoding") is not None
+            plain = declared is not None and declared.strip().isascii() and declared.strip().isdigit()
+            length = int(declared) if plain and not encoded else None
+            # Read before any answer, up to DRAIN_BYTES: the declared body, or what the socket holds when there is
+            # no usable length; a longer declaration leaves the rest unread.
+            if length is None:
+                self._drain()
+            body = self.rfile.read(min(length, DRAIN_BYTES)) if length else b""
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
             if path not in ("/check", "/typed", "/forget", "/relink"):
                 return self._refuse(404)
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                return self._refuse(400)
-            if length < 0 or length > MAX_FORM_BYTES:
+            if length is None:  # chunked or absent is 411, anything but plain digits 400
+                return self._refuse(411 if encoded or declared is None else 400)
+            if length > MAX_FORM_BYTES:
                 return self._refuse(413)
-            raw = self.rfile.read(length).decode("utf-8", "replace")
+            raw = body.decode("utf-8", "replace")
             try:
                 fields = urllib.parse.parse_qs(raw, keep_blank_values=True, max_num_fields=8) if raw else {}
             except ValueError:  # more fields than any form of the page has

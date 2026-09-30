@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,15 @@ from . import codes
 # The folder under the base is named after the package, the one constant that names it.
 FOLDER_NAME = __name__.split(".")[0]
 FILE_NAME = "config.json"
+# The one sentence for a config file that is there but cannot be read or replaced, most often because
+# another program holds it open. It names the path, never anything the file holds.
+UNAVAILABLE = "the config file {path} cannot be used now: close any program that holds it open and start again"
+# A refused os.replace is tried again after each pause: five retries over one second.
+REPLACE_PAUSES = (0.2,) * 5
+
+
+class ConfigError(OSError):
+    """The config file is there but cannot be read or written; the message is UNAVAILABLE."""
 
 
 @dataclass(frozen=True)
@@ -37,17 +47,21 @@ def default_base_dir(environ=None):
 
 
 class ConfigStore:
-    def __init__(self, base_dir):
+    def __init__(self, base_dir, *, pause=time.sleep):
         self.path = Path(base_dir) / FOLDER_NAME / FILE_NAME
         self._lock = threading.Lock()
+        self._pause = pause
 
     def read(self):
         """The stored pair, or None when the file is missing, empty, corrupt or its secret does not
-        normalize. A malformed link id beside a good secret reads as no link id. Never writes."""
+        normalize. A malformed link id beside a good secret reads as no link id. Never writes. A file
+        that is there and cannot be read raises ConfigError, never a first load over the stored pair."""
         try:
             raw = self.path.read_bytes()
         except FileNotFoundError:
             return None
+        except OSError:
+            raise self._unavailable() from None
         try:
             data = json.loads(raw.decode("utf-8"))
         except ValueError:  # JSONDecodeError and UnicodeDecodeError alike
@@ -98,24 +112,42 @@ class ConfigStore:
             return self._write(Pairing(self._current().secret))
 
     def _current(self):
+        """The stored pair whose secret a write keeps; a file gone mid-run is the one sentence, as a held one is."""
         current = self.read()
         if current is None:
-            raise RuntimeError("the config file is missing or unreadable")
+            raise self._unavailable()
         return current
+
+    def _unavailable(self):
+        return ConfigError(UNAVAILABLE.format(path=self.path))
 
     def _write(self, pairing):
         folder = self.path.parent
-        folder.mkdir(parents=True, exist_ok=True)
         data = json.dumps({"secret": pairing.secret, "linkId": pairing.link_id}).encode("utf-8")
-        handle, temp = tempfile.mkstemp(dir=folder, prefix=".config-", suffix=".tmp")
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            handle, temp = tempfile.mkstemp(dir=folder, prefix=".config-", suffix=".tmp")
+        except OSError:
+            raise self._unavailable() from None
         try:
             with os.fdopen(handle, "wb") as out:
                 out.write(data)
                 out.flush()
                 os.fsync(out.fileno())
-            os.replace(temp, self.path)
-        except BaseException:
+            self._replace(temp)
+        except BaseException as failure:
             if os.path.exists(temp):
                 os.remove(temp)
+            if isinstance(failure, OSError):
+                raise self._unavailable() from None
             raise
         return pairing
+
+    def _replace(self, temp):
+        """os.replace, retried while Windows refuses it because another program holds the file open."""
+        for pause in REPLACE_PAUSES:
+            try:
+                return os.replace(temp, self.path)
+            except PermissionError:
+                self._pause(pause)
+        return os.replace(temp, self.path)
