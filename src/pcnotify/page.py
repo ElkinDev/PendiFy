@@ -61,6 +61,20 @@ WORDS = {
         "alert_loading": "empezó la pantalla de carga",
         "alert_queue": "partida encontrada",
         "alert_started": "la partida empezó",
+        "phase_none": "Sin partida",
+        "phase_lobby": "En la sala",
+        "phase_matchmaking": "Buscando partida",
+        "phase_readycheck": "Partida encontrada",
+        "phase_champselect": "Eligiendo",
+        "phase_inprogress": "En partida",
+        "phase_endofgame": "Fin de la partida",
+        "phase_other": "Otro estado",
+        "ping_sent": "enviado al teléfono",
+        "ping_refused": "rechazado por tu cuenta",
+        "ping_not_delivered": "no entregado",
+        "ping_failed": "falló el envío",
+        "watch_phase": "Ahora: {phase}.",
+        "watch_ping": "Aviso al teléfono: {result}, a las {time}.",
         "quit": "Salir",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
@@ -97,12 +111,32 @@ WORDS = {
         "alert_loading": "the loading screen started",
         "alert_queue": "match found",
         "alert_started": "the match started",
+        "phase_none": "No game",
+        "phase_lobby": "In the lobby",
+        "phase_matchmaking": "Looking for a match",
+        "phase_readycheck": "Match found",
+        "phase_champselect": "Choosing",
+        "phase_inprogress": "In a game",
+        "phase_endofgame": "Game over",
+        "phase_other": "Other state",
+        "ping_sent": "sent to the phone",
+        "ping_refused": "refused by your account",
+        "ping_not_delivered": "not delivered",
+        "ping_failed": "sending failed",
+        "watch_phase": "Now: {phase}.",
+        "watch_ping": "Alert to the phone: {result}, at {time}.",
         "quit": "Quit",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pcnotify "
                        "(or python -m pcnotify to see it in a console).",
     },
 }
+
+# The phase as the client names it, to its word; any other name reads phase_other.
+PHASE_WORDS = {"None": "phase_none", "Lobby": "phase_lobby", "Matchmaking": "phase_matchmaking",
+               "ReadyCheck": "phase_readycheck", "ChampSelect": "phase_champselect", "InProgress": "phase_inprogress",
+               "EndOfGame": "phase_endofgame", "PreEndOfGame": "phase_endofgame", "WaitingForStats": "phase_endofgame"}
+PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
 
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
@@ -164,6 +198,7 @@ _STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFE
           ".panel{padding:20px;border-radius:16px;background:var(--card);border:1px solid var(--hair)}\n"
           ".panel h2{margin:0 0 16px;font-size:16px;line-height:24px;font-weight:600}\n"
           ".panel p{margin:0 0 16px;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+          ".panel .note{margin:12px 0 0}\n"
           "form[action='/typed']{display:grid;gap:12px}\n"
           "label{display:grid;gap:6px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink2)}\n"
           "input{width:100%;height:44px;padding:0 14px;border:1px solid var(--line);border-radius:12px;"
@@ -259,6 +294,11 @@ def _say_failure(failure):
     print(f" [page] a request failed: {type(failure).__name__}", file=sys.stderr)
 
 
+def _clock_time(at):
+    """A wall time as the page says it, hours and minutes in this PC's zone."""
+    return time.strftime("%H:%M", time.localtime(at))
+
+
 def _form(action, token, inner):
     return (f'<form method="post" action="/{action}"><input type="hidden" name="token" value="{token}">'
             f"{inner}</form>")
@@ -293,16 +333,24 @@ class PairingPage:
         return (host or "").strip().lower() in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
 
     def watch_text(self, lang):
-        """The watcher's line in `lang`: waiting or connected, then the last alert and its time; None
-        when no watcher runs beside the page. It names no game, no maker and no product."""
+        """The watcher's line in `lang`: waiting or connected, then the phase while connected, then the last
+        alert and its time, then the last ping's result and its time when a ping was made; None when no watcher
+        runs beside the page. It names no game, no maker and no product."""
         if self.watch is None:
             return None
         snapshot, words = self.watch(), WORDS[lang]
-        text = words["watch_connected" if snapshot.get("client") == "connected" else "watch_waiting"]
+        connected = snapshot.get("client") == "connected"
+        parts = [words["watch_connected" if connected else "watch_waiting"]]
+        if connected:
+            phase = PHASE_WORDS.get(snapshot.get("phase"), "phase_other")
+            parts.append(words["watch_phase"].format(phase=words[phase]))
         if snapshot.get("alert") in ("loading", "queue", "started") and snapshot.get("at") is not None:
-            text += " " + words["watch_last"].format(what=words["alert_" + snapshot["alert"]],
-                                                     time=time.strftime("%H:%M", time.localtime(snapshot["at"])))
-        return text
+            parts.append(words["watch_last"].format(what=words["alert_" + snapshot["alert"]],
+                                                    time=_clock_time(snapshot["at"])))
+        if snapshot.get("pingResult") in PING_RESULTS and snapshot.get("pingAt") is not None:
+            parts.append(words["watch_ping"].format(result=words["ping_" + snapshot["pingResult"]],
+                                                    time=_clock_time(snapshot["pingAt"])))
+        return " ".join(parts)
 
     def state_json(self, lang):
         snapshot = self.state.snapshot()
