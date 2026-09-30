@@ -153,6 +153,17 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (1, [MATCH_STARTED]))
         self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
 
+    def test_a_game_met_at_a_reconnect_at_the_first_read_is_never_announced(self):
+        # Mutation: the first-read branch latching on InProgress only. Red: the InProgress after the first read's
+        # Reconnect pings a game that was under way before the watcher saw the client.
+        subject = self.watcher(accept=False)
+        self.read(subject, "Reconnect", "InProgress")
+        self.assertEqual((self.beeps, self.pings), ([], []))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress"))
+        self.read(subject, "EndOfGame", "Lobby", "InProgress")
+        self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (1, [MATCH_STARTED]))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+
     def test_ready_check_with_the_accept_on_posts_once_after_the_delay_then_alerts_and_holds_15_s(self):
         # Mutation: the alert made before the accept's answer is read. Red: the refused accept beeps and pings.
         self.assertEqual(watcher.ACCEPT_DELAY, (1.0, 2.5))
