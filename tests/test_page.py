@@ -5,6 +5,7 @@ import io
 import json
 import re
 import socket
+import time
 import unittest
 import urllib.parse
 from pathlib import Path
@@ -24,6 +25,8 @@ ROUTES = [("GET", "/"), ("GET", "/state"), ("POST", "/check"), ("POST", "/typed"
           ("POST", "/relink")]
 # A refused POST's body is read up to 64 KiB before the answer (brief lnk5a-fix1, change 1).
 DRAIN_BOUND = 64 * 1024
+# Sent in one burst, headers and body share the handler's first read and a missing drain never shows.
+BODY_DELAY = 0.01
 
 
 class PairingPageTest(unittest.TestCase):
@@ -219,6 +222,9 @@ class PairingPageTest(unittest.TestCase):
             connection.putheader("Content-Type", "application/x-www-form-urlencoded")
             connection.putheader("Content-Length", str(len(body) if declared is None else declared))
             connection.endheaders()
+            # The body a moment after the headers, as over a real network: a handler that answers without
+            # reading it has closed by then, and Windows resets the socket (150 of 150 without the drain).
+            time.sleep(BODY_DELAY)
             connection.send(body)
             response = connection.getresponse()
             response.read()
