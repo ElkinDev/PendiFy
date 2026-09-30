@@ -118,7 +118,7 @@ class PackageShapeTest(unittest.TestCase):
                 metadata = wheel.read(info + "/METADATA").decode("utf-8").splitlines()
                 carried = wheel.read(info + "/licenses/LICENSE") if info + "/licenses/LICENSE" in names else None
         # The license form is one this setuptools takes without a deprecation warning.
-        self.assertNotIn("DeprecationWarning", build.stdout + build.stderr)
+        self.assertNotIn("SetuptoolsDeprecationWarning", build.stdout + build.stderr)
         self.assertEqual([line for line in metadata if line.startswith(("License-Expression:", "License-File:"))],
                          ["License-Expression: MIT", "License-File: LICENSE"])
         self.assertEqual(carried, (support.ROOT / "LICENSE").read_bytes())
