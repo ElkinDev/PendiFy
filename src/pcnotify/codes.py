@@ -9,6 +9,7 @@ import secrets
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 LENGTH = 12
 # A pasted value may carry the display dashes; anything longer cannot be one (link-registry.ts:45).
+# Counted in UTF-16 units, as the Worker's raw.length counts it (link-registry.ts:98).
 MAX_RAW_CHARS = 32
 
 
@@ -18,8 +19,12 @@ def mint():
 
 
 def normalize(value):
-    """Upper-cased, every character outside the alphabet dropped; None unless exactly twelve remain."""
-    if not isinstance(value, str) or len(value) > MAX_RAW_CHARS:
+    """Upper-cased, every character outside the alphabet dropped; None unless exactly twelve remain.
+
+    The raw bound is in UTF-16 units, as the Worker's raw.length is: a character outside the Basic
+    Multilingual Plane counts two, so a value the Worker refuses is never stored here. A lone surrogate
+    counts one unit, as in JavaScript, and is no encoding error."""
+    if not isinstance(value, str) or len(value.encode("utf-16-le", "surrogatepass")) // 2 > MAX_RAW_CHARS:
         return None
     code = "".join(char for char in value.upper() if char in ALPHABET)
     return code if len(code) == LENGTH else None
