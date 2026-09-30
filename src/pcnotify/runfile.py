@@ -3,17 +3,30 @@
 A start creates the file exclusively. When the file is already there and names a live process other than
 this one, the start stops; a file whose pid is gone, or that names no pid, is taken over. A live pid is
 asked of the system through ctypes on Windows (os.kill there would end the process) and os.kill elsewhere.
+A refused remove or create is told apart before it is read as another start that won the race: a config
+folder that takes no new file, or a run file still there with no live holder when the re-read window ends,
+stops this start; only a live holder's record read within the window is that other start.
 """
 import errno
 import json
 import os
+import secrets
 import tempfile
+import time
 from pathlib import Path
 
 FILE_NAME = "run.json"
+# How long a start re-reads the other start's record: the winner of a race writes its pid right after its
+# create and its port once its page listens.
+REREAD_SECONDS = 1.0
+REREAD_STEP = 0.05
 _STILL_ACTIVE = 259
 _ERROR_ACCESS_DENIED = 5
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+class FolderNotWritable(PermissionError):
+    """The config folder takes no new file, so no start can hold its run file there; `filename` names it."""
 
 
 def pid_alive(pid):
@@ -53,46 +66,92 @@ def _windows_alive(pid):
 
 
 class RunFile:
-    def __init__(self, folder, pid=None, alive=pid_alive):
+    def __init__(self, folder, pid=None, alive=pid_alive, clock=time.monotonic, sleep=time.sleep):
         self.path = Path(folder) / FILE_NAME
         self._pid = os.getpid() if pid is None else pid
         self._alive = alive
+        self._clock = clock
+        self._sleep = sleep
         self._held = False
 
     def claim(self):
         """None when this process now holds the file; the live holder's record, {pid, port}, when another
-        does. A start that loses the race for the file to another start (PermissionError on Windows: the
-        file held open, or pending its removal, by the other start) reads the winner as that live holder.
-        OSError when the file can neither be created nor taken over."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        does. A refused remove or create (PermissionError on Windows: the file held open, or pending its
+        removal, by another start) is that other start only when its live record shows within
+        REREAD_SECONDS. FolderNotWritable when the config folder takes no new file; OSError when the file
+        can neither be created nor taken over."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise FolderNotWritable(errno.EACCES, "the config folder cannot be made", str(self.path.parent)) from None
         for _ in range(3):
             try:
                 handle = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
-                holder = self._read()
-                if holder is not None and holder["pid"] != self._pid and self._alive(holder["pid"]):
+                holder = self._live_holder()
+                if holder is not None:
                     return holder
                 try:
                     os.remove(self.path)  # a holder that is gone, or a file that names none: taken over
                 except FileNotFoundError:
                     pass
-                except PermissionError:  # another start holds the file open: it won the race
-                    return self._race_lost()
+                except PermissionError:  # held open by another start, or a file this user cannot remove
+                    holder = self._refused()
+                    if holder is not None:
+                        return holder
                 continue
-            except PermissionError:  # the file is pending its removal under another start's handle
-                return self._race_lost()
+            except PermissionError:  # pending its removal under another handle, or a folder that takes no file
+                holder = self._refused()
+                if holder is not None:
+                    return holder
+                continue
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 json.dump({"pid": self._pid, "port": None}, out)
             self._held = True
             return None
         raise FileExistsError("the run file came back after every take-over")
 
-    def _race_lost(self):
-        """The start that won the race, read as a live holder whose port is not known yet. A folder in the
-        file's place is no race: this start cannot go on."""
+    def _refused(self):
+        """A refused remove or create, told apart: the live holder's record when it shows within the window;
+        None when the file is gone by then, so the claim tries again. A folder in the file's place, a config
+        folder that takes no new file, or a file still there naming no live holder: this start cannot go on."""
         if self.path.is_dir():
             raise IsADirectoryError(errno.EISDIR, "the run file is a folder", str(self.path))
-        return {"pid": None, "port": None}
+        self._probe_folder()
+        deadline = self._clock() + REREAD_SECONDS
+        while True:
+            holder = self._live_holder()
+            if holder is not None:
+                return holder
+            if not os.path.lexists(self.path):
+                return None
+            if self._clock() >= deadline:
+                raise PermissionError(errno.EACCES, "the run file names no live holder and cannot be replaced",
+                                      str(self.path))
+            self._sleep(REREAD_STEP)
+
+    def _probe_folder(self):
+        """FolderNotWritable when the config folder takes no new file: a probe name, made and removed at once."""
+        probe = self.path.parent / f".probe-{self._pid}-{secrets.token_hex(4)}.tmp"
+        try:
+            handle = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except PermissionError:
+            raise FolderNotWritable(errno.EACCES, "the config folder takes no new file",
+                                    str(self.path.parent)) from None
+        os.close(handle)
+        os.remove(probe)
+
+    def holder_port(self, holder):
+        """The port of `holder`, a live holder claim() returned, re-read from its record for up to
+        REREAD_SECONDS; None when it has published none by then."""
+        deadline = self._clock() + REREAD_SECONDS
+        while True:
+            record = self._read()
+            if record is not None and record["pid"] == holder["pid"] and record["port"] is not None:
+                return record["port"]
+            if self._clock() >= deadline:
+                return None
+            self._sleep(REREAD_STEP)
 
     def publish(self, port):
         """This process's pid and its page's port, written over the claim in one move."""
@@ -117,6 +176,13 @@ class RunFile:
                 os.remove(self.path)
             except FileNotFoundError:
                 pass
+
+    def _live_holder(self):
+        """The record of a live process other than this one, or None."""
+        holder = self._read()
+        if holder is not None and holder["pid"] != self._pid and self._alive(holder["pid"]):
+            return holder
+        return None
 
     def _read(self):
         try:

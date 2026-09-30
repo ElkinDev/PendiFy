@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,5 +7,7 @@ name = "pcnotify"
 version = "0.1.0"
 description = "Pairs this PC with a phone account by a QR on a loopback page and sends it two kinds of alerts."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = []

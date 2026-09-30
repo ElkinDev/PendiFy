@@ -6,13 +6,16 @@
 
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break and on the page's quit button, which
 removes the run file and exits 0. One instance per config folder: a second start opens the running page
-and exits 0. `--data-dir`, `--worker` and `--client-lockfile` are the
+and exits 0. Where no console is attached (a pythonw start), the line a start ends on is also shown in a
+message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
 """
 import argparse
+import os
 import signal
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -27,6 +30,8 @@ PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is no
                        "moment to open it")
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
 FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
+_MB_ICONINFORMATION = 0x40
+_MB_SETFOREGROUND = 0x10000
 
 
 def _data_dir(value):
@@ -102,17 +107,53 @@ def _watcher(args, store, state, base, timeout, stop, delay, beep):
                            stop=stop), alerter
 
 
-def _serve(args, store, base, timeout, opener, stop, delay, beep):
-    run = runfile.RunFile(store.path.parent)
+def _console_attached():
+    """False only on Windows with no terminal on stdout and no console window: a pythonw start, where a
+    printed line reaches nobody."""
+    if os.name != "nt":
+        return True
+    if sys.stdout is not None and sys.stdout.isatty():
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetConsoleWindow.restype = wintypes.HWND
+    return bool(kernel32.GetConsoleWindow())
+
+
+def _message_box(line):
+    """The line in a Windows message box, the one place a start with no console can show it."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32")
+    user32.MessageBoxW.argtypes = (wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.UINT)
+    user32.MessageBoxW(None, line, __package__, _MB_ICONINFORMATION | _MB_SETFOREGROUND)
+
+
+def _ends(line, code, show):
+    """The line a start ends on: printed as ever, and shown where no console is attached."""
+    print(line, flush=True)
+    show(line)
+    return code
+
+
+def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep):
+    run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
     try:
         holder = run.claim()
+    except runfile.FolderNotWritable as refused:
+        return _ends(FOLDER_FAILED_LINE.format(path=refused.filename), 1, show)
     except OSError:
-        print(CLAIM_FAILED_LINE, flush=True)
-        return 1
+        return _ends(CLAIM_FAILED_LINE.format(path=run.path), 1, show)
     if holder is not None:
+        port = holder["port"] if holder["port"] is not None else run.holder_port(holder)
+        if port is None:  # a winner with no page yet: nothing is opened, and the line says so
+            return _ends(PAGE_NOT_KNOWN_LINE, 0, show)
         print(ALREADY_RUNNING_LINE, flush=True)
-        if holder["port"] is not None:
-            opener(f"http://{page.ADDRESS}:{holder['port']}/")
+        opener(f"http://{page.ADDRESS}:{port}/")
+        show(ALREADY_RUNNING_LINE)
         return 0
     try:
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
@@ -152,23 +193,31 @@ def _break_as_interrupt():
 
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
-         beep=alert.beep, box=None, console=None, clock=None, sleep=None):
-    """`beep` is the one seam of the sound: a test run passes a silent one."""
+         beep=alert.beep, box=_message_box, console=_console_attached, clock=time.monotonic, sleep=time.sleep):
+    """`beep` and `box` are the seams of the sound and of the message box: a test run passes silent ones.
+    `console` says whether a printed line reaches anybody; `clock` and `sleep` time the run file's re-reads."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
+
+    def show(line):  # a start's last line, also in a message box where no console is attached
+        if not console():
+            box(line)
+
     try:
         if args.command == "ping":
             return _ping(store, base, args.kind, timeout)
         previous = _break_as_interrupt()
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
-                          delay or watcher.accept_delay, beep)
+                          delay or watcher.accept_delay, beep, show, clock, sleep)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)
     except config.ConfigError as failure:  # at start or mid-run: its one sentence, never a traceback
         print(failure)
+        if args.command != "ping":  # a start ends on it
+            show(str(failure))
         return 1
 
 

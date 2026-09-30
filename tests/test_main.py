@@ -262,8 +262,8 @@ class MainCommandTest(unittest.TestCase):
         lockfile.write_text(f"LeagueClient:4242:{client_fake.port}:{TOKEN}:https", encoding="utf-8")
         for argv, posts, line in ((["--dry"], 0, watcher.DRY_LINE), ([], 1, watcher.ACCEPTED_LINE)):
             with self.subTest(argv=argv):
-                stop, pings, accepts = threading.Event(), len(fake.requests), client_fake.count("POST",
-                                                                                                support.CLIENT_ACCEPT_PATH)
+                stop, pings = threading.Event(), len(fake.requests)
+                accepts = client_fake.count("POST", support.CLIENT_ACCEPT_PATH)
                 thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
                                                     "--client-lockfile", str(lockfile), *argv, opener=None,
                                                     stop=stop, delay=lambda: 0)
@@ -273,7 +273,8 @@ class MainCommandTest(unittest.TestCase):
                 code, out, err = result["run"]
                 self.assertEqual(code, 0)
                 self.assertEqual(client_fake.count("POST", support.CLIENT_ACCEPT_PATH) - accepts, posts)
-                self.assertEqual(fake.bodies()[pings:], [{"linkId": LINK_ID, "secret": SECRET, "kind": "lol_queue_found"}])
+                self.assertEqual(fake.bodies()[pings:],
+                                 [{"linkId": LINK_ID, "secret": SECRET, "kind": "lol_queue_found"}])
                 lines = out.splitlines()
                 self.assertRegex(lines[0], r"^page: http://127\.0\.0\.1:\d+/$")
                 self.assertIn(watcher.CONNECTED_LINE, lines)

@@ -63,7 +63,8 @@ WORDS = {
         "alert_started": "la partida empezó",
         "quit": "Salir",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
-        "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta python -m pcnotify.",
+        "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
+                       "pythonw -m pcnotify (o python -m pcnotify para verlo en una consola).",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -98,7 +99,8 @@ WORDS = {
         "alert_started": "the match started",
         "quit": "Quit",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
-        "start_again": "To start it again, open the shortcut on the Desktop or run python -m pcnotify.",
+        "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pcnotify "
+                       "(or python -m pcnotify to see it in a console).",
     },
 }
 
