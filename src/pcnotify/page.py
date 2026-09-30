@@ -18,6 +18,9 @@ from . import codes, qr
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
+# A POST's body is read up to this bound before any answer, refusals included: a socket closed with
+# unread bytes in it is reset on Windows, and the client meets the reset in place of the answer.
+DRAIN_BYTES = 64 * 1024
 POLICY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
@@ -192,6 +195,7 @@ def _handler(page):
             self.send_response(status)
             for name, value in extra:
                 self.send_header(name, value)
+            self.send_header("Connection", "close")  # no client reuses a socket the handler is done with
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -203,31 +207,42 @@ def _handler(page):
                                                              400: "bad request", 413: "too large"}[status])
 
         def do_GET(self):
+            self._get(seen=True)
+
+        def do_HEAD(self):
+            # The fences and the headers of GET, no body; a HEAD is not a person looking at the page.
+            self._get(seen=False)
+
+        def _get(self, seen):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
             lang = language(self.headers.get("Accept-Language"))
-            if path == "/":
+            if seen and path in ("/", "/state"):
                 page.state.page_seen()
+            if path == "/":
                 return self._send(200, "text/html; charset=utf-8", page.render(lang))
             if path == "/state":
-                page.state.page_seen()
                 return self._send(200, "application/json", json.dumps(page.state_json(lang)))
             return self._refuse(404)
 
         def do_POST(self):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = None
+            # Read before any answer, up to DRAIN_BYTES; a longer declaration leaves the rest unread.
+            body = self.rfile.read(min(length, DRAIN_BYTES)) if length is not None and length > 0 else b""
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
             if path not in ("/check", "/typed", "/forget", "/relink"):
                 return self._refuse(404)
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
+            if length is None:
                 return self._refuse(400)
             if length < 0 or length > MAX_FORM_BYTES:
                 return self._refuse(413)
-            raw = self.rfile.read(length).decode("utf-8", "replace")
+            raw = body.decode("utf-8", "replace")
             try:
                 fields = urllib.parse.parse_qs(raw, keep_blank_values=True, max_num_fields=8) if raw else {}
             except ValueError:  # more fields than any form of the page has
