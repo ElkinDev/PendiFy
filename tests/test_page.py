@@ -391,23 +391,56 @@ class PairingPageTest(unittest.TestCase):
                               f'{html.escape(page.WORDS[lang]["theme_toggle"])}"><svg class="moon"', shown)
                 self.assertIn('<svg class="sun"', shown)
                 head = shown.split("</head>")[0]
-                self.assertIn("<script>(function(){try{var t=localStorage.getItem('pendi-theme');"
-                              "if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);"
-                              "}catch(e){}})();</script>", head)
+                self.assertIn("<script>(function(){try{var e=document.documentElement;"
+                              "if(e.hasAttribute('data-theme'))return;var t=localStorage.getItem('pendi-theme');"
+                              "if(t==='light'||t==='dark')e.setAttribute('data-theme',t);}catch(x){}})();</script>",
+                              head)
         self.assertEqual((page.WORDS["es"]["theme_toggle"], page.WORDS["en"]["theme_toggle"]),
                          ("Cambiar entre tema claro y oscuro", "Switch between light and dark theme"))
         for handler in ("btn.addEventListener('click',function(){var next=current()==='dark'?'light':'dark';",
                         "document.documentElement.setAttribute('data-theme',next);",
                         "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();",
-                        "btn.setAttribute('aria-pressed',String(current()==='dark'));"):
+                        "btn.setAttribute('aria-pressed',String(current()==='dark'));",
+                        "var f=document.querySelector('input[name=token]');"
+                        "if(f)fetch('/theme',{method:'POST',body:new URLSearchParams({token:f.value,theme:next})})"):
             self.assertIn(handler, page._SCRIPT)
         self.assertIn(':root[data-theme="light"]{color-scheme:light;' + page._LIGHT + "}", page._STYLE)
         self.assertIn(':root[data-theme="dark"]{color-scheme:dark;' + page._DARK + "}", page._STYLE)
         self.assertIn("@media (prefers-color-scheme:dark){:root{" + page._DARK + "}}", page._STYLE)
         self.assertIn("--bg:#131022;", page._DARK)
         self.assertIn("--bg:#FAF8FE;", page._LIGHT)
+        # The button is the page's own touch minimum, 44 px square, never the site's 38 px.
+        self.assertIn(".icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;min-height:0;",
+                      page._STYLE)
         # The stopped page keeps a stored choice too.
         self.assertIn("localStorage.getItem('pendi-theme')", self.page.render_stopped("es").split("</head>")[0])
+
+    def test_the_theme_choice_is_kept_in_the_config_file_and_served_as_data_theme(self):
+        # Mutation: /theme answered without a write. Red: the GET after a POST of dark carries no data-theme.
+        # Mutation: the value written unchecked. Red: a POST of a fourth value is not 400 and changes config.json.
+        self.assertNotIn("data-theme=", self.html().split("<head>")[0])
+        self.assertEqual(self.call("POST", "/theme", {"theme": "dark"})[0], 204)
+        self.assertIn('<html lang="es" data-theme="dark"><head>', self.html("es"))
+        self.assertEqual(json.loads(self.store.path.read_text(encoding="utf-8"))["theme"], "dark")
+        self.assertEqual(self.store.read().secret, self.secret())
+        self.assertEqual(self.call("POST", "/theme", {"theme": "light"})[0], 204)
+        self.assertIn('<html lang="en" data-theme="light"><head>', self.html("en"))
+        # A new run reads the choice back from the file.
+        again = page.PairingPage(pairing.PairingState(self.store, lambda secret: worker.Refused(), clock=FakeClock()))
+        self.assertIn('data-theme="light"', again.render("en").split("<head>")[0])
+        self.assertEqual(self.call("POST", "/theme", {"theme": "system"})[0], 204)
+        self.assertNotIn("data-theme=", self.html().split("<head>")[0])
+        self.assertNotIn("theme", json.loads(self.store.path.read_text(encoding="utf-8")))
+        self.call("POST", "/theme", {"theme": "dark"})
+        before = self.store.path.read_bytes()
+        for value in ("", "blue", "Dark", "system "):
+            with self.subTest(value=value):
+                self.assertEqual(self.call("POST", "/theme", {"theme": value})[0], 400)
+                self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertEqual(self.call("POST", "/theme", {})[0], 400)
+        self.assertEqual(self.call("POST", "/theme", {"theme": "light"}, token="wrong")[0], 403)
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertIn(' data-theme="dark"><head>', self.html())
 
     def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
         # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.

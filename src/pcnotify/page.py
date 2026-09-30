@@ -195,7 +195,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
           ".key-card details[open] summary{margin-bottom:16px}\n"
           ".bar{display:flex;justify-content:flex-end;margin:0 0 8px}\n"
-          ".icon-btn{display:inline-grid;place-items:center;width:38px;height:38px;min-height:0;padding:0;"
+          ".icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;min-height:0;padding:0;"
           "border-radius:999px;border:1px solid var(--hair);background:transparent;color:var(--ink);cursor:pointer;"
           "transition:background .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1)}\n"
           ".icon-btn:hover{background:var(--tint);box-shadow:none}\n"
@@ -264,18 +264,25 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "const d=document.querySelector('.key-card details');let hide;"
            "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
            "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});"
-           # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage.
+           # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
+           # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
+           # its localStorage is a new origin each time. A post that fails leaves localStorage as the fallback.
            "(function(){var btn=document.getElementById('theme-toggle');if(!btn)return;"
            "function current(){var t=document.documentElement.getAttribute('data-theme');"
            "if(t==='light'||t==='dark')return t;return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}"
            "function reflect(){btn.setAttribute('aria-pressed',String(current()==='dark'));}reflect();"
            "btn.addEventListener('click',function(){var next=current()==='dark'?'light':'dark';"
            "document.documentElement.setAttribute('data-theme',next);"
-           "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();});})();")
+           "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();"
+           "var f=document.querySelector('input[name=token]');"
+           "if(f)fetch('/theme',{method:'POST',body:new URLSearchParams({token:f.value,theme:next})})"
+           ".catch(function(){});});})();")
 # Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
-# index.html head script).
-_THEME_READ = ("(function(){try{var t=localStorage.getItem('pendi-theme');"
-               "if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();")
+# index.html head script). The choice kept in config.json, served as data-theme on <html>, wins: localStorage is
+# read only when the page came with none.
+_THEME_READ = ("(function(){try{var e=document.documentElement;if(e.hasAttribute('data-theme'))return;"
+               "var t=localStorage.getItem('pendi-theme');"
+               "if(t==='light'||t==='dark')e.setAttribute('data-theme',t);}catch(x){}})();")
 # The theme button's two icons, copied from pendiapp.com's header; the style shows the one of the other theme.
 _THEME_ICONS = ('<svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
                 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -463,10 +470,12 @@ class PairingPage:
         foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
         bar = (f'<header class="bar"><button id="theme-toggle" class="icon-btn" type="button" aria-pressed="false" '
                f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
+        theme = self.state.theme()
+        kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
         body = (f'<main class="page">{bar}<section class="link">{"".join(link)}</section><section class="more">'
                 f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
                 f"{foot}</main>")
-        return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
+        return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
                 f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
 
@@ -477,6 +486,18 @@ class PairingPage:
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
                 f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
+
+    def set_theme(self, choice):
+        """/theme: the theme button's choice kept in the config file; False for a value that is not light, dark
+        or system, which changes nothing. A config file that cannot be replaced is said as act() says it."""
+        try:
+            self.state.set_theme(choice)
+        except ValueError:
+            return False
+        except config.ConfigError as failure:
+            _say_failure(failure)
+            self.state.config_failed()
+        return True
 
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
@@ -575,7 +596,8 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            routes = ("/check", "/typed", "/forget", "/relink") + (("/quit",) if page.on_quit is not None else ())
+            routes = ("/check", "/typed", "/forget", "/relink", "/theme")
+            routes += ("/quit",) if page.on_quit is not None else ()
             if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
@@ -599,6 +621,10 @@ def _handler(page):
                 finally:
                     page.on_quit()
                 return
+            if path == "/theme":  # the page's script posts it and reads no page back
+                if not page.set_theme(form.get("theme", "")):
+                    return self._refuse(400)
+                return self._send(204, "text/plain; charset=utf-8", "")
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
 

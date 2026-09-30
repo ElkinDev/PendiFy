@@ -110,6 +110,28 @@ class ConfigStoreTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
         self.assertTrue(self.store.path.is_dir())
 
+    def test_the_theme_choice_is_written_beside_the_pair_and_every_other_write_keeps_it(self):
+        # Mutation: _write drops the stored theme. Red: the choice is gone after a link id is stored.
+        self.store.set_typed(LINK_ID, SECRET)
+        self.assertIsNone(self.store.read_theme())
+        self.assertEqual(self.store.set_theme("dark"), "dark")
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID, "theme": "dark"})
+        self.store.set_link_id(LINK_ID)
+        self.store.clear_link_id()
+        forgotten = self.store.forget()
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None, "theme": "dark"})
+        self.assertEqual(self.store.read_theme(), "dark")
+        self.assertIsNone(self.store.set_theme("system"))
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None})
+        self.store.set_theme("light")
+        before = self.store.path.read_bytes()
+        for value in ("", "blue", "LIGHT", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store.set_theme(value)
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "theme": "sepia"}))
+        self.assertIsNone(self.store.read_theme())
+
     def test_forget_mints_a_new_secret_and_clears_the_link_id(self):
         # Mutation: forget keeps the secret and only clears the link id. Red: the secret is unchanged.
         self.store.set_typed(LINK_ID, SECRET)

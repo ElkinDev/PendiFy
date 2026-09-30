@@ -40,6 +40,7 @@ class PairingState:
         self._refused_pings = 0
         self._relink_offered = False
         self._config_failed = False
+        self._theme = store.read_theme()
 
     def page_seen(self):
         with self._lock:
@@ -108,6 +109,18 @@ class PairingState:
                 return False
             self._reset(pair)
             return True
+
+    def theme(self):
+        """The page's kept theme choice, light or dark, or None for the system's."""
+        with self._lock:
+            return self._theme
+
+    def set_theme(self, choice):
+        """The theme button's choice (light, dark or system) kept in the config file; anything else raises
+        ValueError and changes nothing."""
+        with self._lock:
+            self._theme = self._store.set_theme(choice)
+            self._config_failed = False
 
     def secret_for_display(self):
         """The secret while the QR is to be shown (no link id), else None."""
