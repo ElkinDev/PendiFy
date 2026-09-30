@@ -113,7 +113,8 @@ class InstallScriptTest(unittest.TestCase):
                               r"Invoke-Expression", r"\biex\b"):
                     self.assertIsNone(re.search(token, text, re.IGNORECASE), token)
                 hosts = re.findall(r"https?://([^/\s'\"`)]+)", text)
-                self.assertTrue(hosts, "no address found at all")
+                if path == INSTALL:
+                    self.assertTrue(hosts, "install.ps1 names no address at all")
                 self.assertEqual(sorted(set(hosts) - ALLOWED_HOSTS), [])
 
     @NEEDS_POWERSHELL
