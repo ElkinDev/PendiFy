@@ -6,7 +6,7 @@ Its `alert` is an Alerter: snapshot() reads its last_ping(). One step() is one t
 and answers the pause before the next; run() is the loop around it. The script's 15 s sleep after a ready
 check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
 InProgress after a read of another phase is the loading screen: it beeps and pings match_started at once,
-once per game. The console gets fixed lines only: no phase, no port, no token.
+once per game; a reconnect is the same game. The console gets fixed lines only: no phase, no port, no token.
 """
 import json
 import random
@@ -16,6 +16,9 @@ import time
 from . import client, worker
 
 IN_PROGRESS, READY_CHECK = "InProgress", "ReadyCheck"
+# The phases that end or precede a game: only a read of one of them resets the start latch.
+GAME_BOUNDARY_PHASES = frozenset({"None", "Lobby", "Matchmaking", READY_CHECK, "ChampSelect", "EndOfGame",
+                                  "PreEndOfGame", "WaitingForStats"})
 ACCEPT_DELAY = (1.0, 2.5)  # S:136
 HOLD_SECONDS = 15.0  # S:778, S:793
 STEP_PAUSE = 0.3  # S:799
@@ -124,8 +127,8 @@ class Watcher:
 
     def _on_phase(self, phase, base, token):
         # An arrival is InProgress after a read of another phase. The first read is not one: an alert for a game
-        # already under way says nothing (S:755-757).
-        if phase != IN_PROGRESS:
+        # already under way says nothing (S:755-757). Reconnect, InProgress or an unknown phase keeps the latch.
+        if phase in GAME_BOUNDARY_PHASES:
             self._start_alerted = False
         elif self._last_phase not in (None, IN_PROGRESS) and not self._start_alerted:
             self._start_alerted = True  # before the alert: an alert that breaks is not made again for this game

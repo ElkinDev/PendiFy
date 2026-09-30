@@ -196,6 +196,20 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(len(self.beeps), 2)
         self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
 
+    def test_a_reconnect_mid_game_keeps_the_latch_and_the_next_game_pings_again(self):
+        # Mutation: the latch reset on every phase that is not InProgress. Red: the InProgress after Reconnect pings.
+        self.assertEqual(watcher.GAME_BOUNDARY_PHASES,
+                         {"None", "Lobby", "Matchmaking", "ReadyCheck", "ChampSelect", "EndOfGame", "PreEndOfGame",
+                          "WaitingForStats"})
+        subject = self.watcher(accept=False)
+        self.read(subject, "ChampSelect", "InProgress")
+        self.assertEqual([kind for *_, kind in self.pings], [MATCH_STARTED])
+        self.read(subject, "Reconnect", "Reconnect", "InProgress", "InProgress")
+        self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (1, [MATCH_STARTED]))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+        self.read(subject, "EndOfGame", "Lobby", "InProgress")
+        self.assertEqual((len(self.beeps), [kind for *_, kind in self.pings]), (2, [MATCH_STARTED, MATCH_STARTED]))
+
     def test_a_client_that_stops_answering_is_looked_for_again_and_a_fresh_one_is_followed(self):
         # Mutation: the credentials kept after a lost connection. Red: the fresh client on another port is never read.
         self.fake.phase = "Lobby"

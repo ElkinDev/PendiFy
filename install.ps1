@@ -145,7 +145,8 @@
         $source = $env:PCNOTIFY_SOURCE
         if ($source) { $source = $source.Trim() }
         if (-not $source) { $source = $DefaultSource }
-        $pipArgs = @('-m', 'pip', 'install', '--user', '--upgrade', '--no-warn-script-location', $source)
+        # --force-reinstall: a paste replaces the code even when the package version is unchanged; --no-deps: none to fetch.
+        $pipArgs = @('-m', 'pip', 'install', '--user', '--upgrade', '--force-reinstall', '--no-deps', '--no-warn-script-location', $source)
         Say 'Instalando pcnotify con pip...'
         if ($DryRun) {
             Plan ((Format-Arg $python) + ' ' + (($pipArgs | ForEach-Object { Format-Arg $_ }) -join ' '))

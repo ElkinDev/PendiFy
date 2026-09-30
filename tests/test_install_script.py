@@ -183,7 +183,8 @@ class InstallScriptTest(unittest.TestCase):
         plan = _plan(lines)
         self.assertEqual(len(plan), 5, plan)
         self.assertTrue(plan[0].endswith(
-            " -m pip install --user --upgrade --no-warn-script-location " + DEFAULT_SOURCE), plan[0])
+            " -m pip install --user --upgrade --force-reinstall --no-deps --no-warn-script-location "
+            + DEFAULT_SOURCE), plan[0])
         self.assertEqual(plan[1], "anotar Python en " + str(self.record))
         self.assertEqual(plan[2], "acceso directo: " + str(desktop / "pcnotify.lnk"))
         self.assertEqual(plan[3], "acceso directo: " + str(programs / "pcnotify.lnk"))
