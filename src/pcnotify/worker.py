@@ -4,6 +4,7 @@ Nothing either function prints, logs or raises carries the secret or the link id
 an HTTP status or an exception type, results hide their values from repr, and a refused input is refused
 with a fixed sentence before any call.
 """
+import importlib.metadata
 import json
 import urllib.error
 import urllib.parse
@@ -21,6 +22,18 @@ TIMEOUT_SECONDS = 5
 KINDS = ("lol_queue_found", "lol_match_started")
 _MAX_ANSWER_BYTES = 64 * 1024
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+
+
+def _user_agent():
+    try:
+        return f"pcnotify/{importlib.metadata.version('pcnotify')}"
+    except importlib.metadata.PackageNotFoundError:  # a source-tree run: the tests, a checkout
+        return "pcnotify/source"
+
+
+# The program names itself in every request: the edge in front of the Worker refuses urllib's default
+# signature (Python-urllib/<version>) with error 1010 before the Worker reads the request.
+USER_AGENT = _user_agent()
 
 
 @dataclass(frozen=True)
@@ -78,7 +91,7 @@ def _post(base, path, payload, timeout):
     """(status, answer dict or None), or a Failed naming the exception type."""
     request = urllib.request.Request(
         base + path, data=json.dumps(payload, separators=(",", ":")).encode("utf-8"), method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"})
+        headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": USER_AGENT})
     handlers = [_NoRedirect()]
     if urllib.parse.urlsplit(base).hostname in _LOOPBACK_HOSTS:
         handlers.append(urllib.request.ProxyHandler({}))  # a loopback address never goes through a proxy
