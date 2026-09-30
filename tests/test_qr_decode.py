@@ -33,7 +33,9 @@ def zxing_decode(matrices):
 @unittest.skipUnless(JAVA.is_file(), f"no JDK at Android Studio's jbr: {JAVA}")
 class QrDecodeTest(unittest.TestCase):
     def test_zxing_decodes_the_pairing_address_for_three_secrets(self):
-        # Mutation: the format bits drawn without the 0x5412 mask. Red: ZXing finds no valid format and exits 1.
+        # Mutation: the zigzag of the data starts downward. Red: ZXing reads scrambled codewords and exits 1.
+        # (The format bits drawn without the 0x5412 mask are no mutation for ZXing, which also tries the
+        # unmasked word; QrEncodeTest's BCH read-back is the pin of that one.)
         addresses = [qr.pairing_address(secret) for secret in (SECRET, LINK_ID, "HJKM2345NPQR")]
         codes = [qr.encode(address.encode("ascii")) for address in addresses]
         self.assertEqual({code.version for code in codes}, {3})
