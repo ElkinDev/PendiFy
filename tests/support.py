@@ -119,6 +119,77 @@ class FakeWorker:
         self.server.server_close()
 
 
+# The game client's routes (S:745, S:784) and the live game clock's (S:112).
+CLIENT_PHASE_PATH = "/lol-gameflow/v1/gameflow-phase"
+CLIENT_ACCEPT_PATH = "/lol-matchmaking/v1/ready-check/accept"
+CLIENT_CLOCK_PATH = "/liveclientdata/gamestats"
+
+
+class FakeClient:
+    """The game client's routes on 127.0.0.1 over plain http: the phase, the accept and the live clock.
+
+    `phase` is the value the phase route answers as JSON; `accept_status` the accept's status (204 carries
+    no body); `game_time` the clock's value, or None for a 404; `dropping` closes every connection without
+    an answer, as a client that stopped answering. Every request is recorded with its headers and body.
+    """
+
+    def __init__(self, phase="None", accept_status=204, game_time=0.0):
+        self.phase, self.accept_status, self.game_time, self.dropping = phase, accept_status, game_time, False
+        self.requests = []
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self._answer(b"")
+
+            def do_POST(self):
+                self._answer(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+
+            def _answer(self, body):
+                fake.requests.append({"method": self.command, "path": self.path, "body": body,
+                                      "headers": {k.lower(): v for k, v in self.headers.items()}})
+                if fake.dropping:
+                    self.close_connection = True
+                    return
+                if self.command == "GET" and self.path == CLIENT_PHASE_PATH:
+                    return self._reply(200, json.dumps(fake.phase).encode())
+                if self.command == "GET" and self.path == CLIENT_CLOCK_PATH and fake.game_time is not None:
+                    return self._reply(200, json.dumps({"gameTime": fake.game_time}).encode())
+                if self.command == "POST" and self.path == CLIENT_ACCEPT_PATH:
+                    return self._reply(fake.accept_status, b"" if fake.accept_status == 204 else b"{}")
+                self._reply(404, b'{"errorCode":"RPC_ERROR"}')
+
+            def _reply(self, status, data):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                if status != 204:
+                    self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                if status != 204:
+                    self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.port = self.server.server_address[1]
+        self.base = f"http://127.0.0.1:{self.port}"
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+
+    def calls(self, method, path):
+        return [r for r in self.requests if r["method"] == method and r["path"] == path]
+
+    def count(self, method, path):
+        return len(self.calls(method, path))
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
 def error(code, status):
     """A Worker error body as errors.ts shapes it."""
     return (status, {"error": {"code": code, "message": code}})

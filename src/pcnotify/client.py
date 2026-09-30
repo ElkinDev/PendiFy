@@ -93,3 +93,28 @@ class ClientCredentials:
         self._last_query = now
         output = query_process(self._run)
         return None if output is None else parse_command_lines(output)
+
+
+# Inert seam: WatcherTest is committed before the calls.
+GAME_TIME_THRESHOLD = None
+
+
+class ClientUnreachable(Exception):
+    pass
+
+
+def real_addresses(port):
+    return ("", "")
+
+
+def loopback_tls_context(host):
+    import ssl
+    return ssl.create_default_context()
+
+
+def get(url, token, timeout):
+    raise ClientUnreachable()
+
+
+def post(url, token, timeout):
+    raise ClientUnreachable()
