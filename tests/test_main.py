@@ -8,6 +8,7 @@ import os
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -32,6 +33,10 @@ RUN_FILE = "run.json"
 RACE_WINDOWS_ONLY = ("a remove refused while another handle holds the file, a sharing violation, is a Windows "
                      "behavior; elsewhere the remove succeeds and this race does not arise")
 NO_SIGBREAK = "Ctrl+Break is a Windows console signal: this platform has no signal.SIGBREAK"
+READ_ONLY_WINDOWS_ONLY = ("the read-only attribute refuses a remove on Windows only; elsewhere the folder's "
+                          "mode decides and this file is removed")
+ROOT_WRITES = "root writes into a folder whatever its mode, so no folder can refuse it a new file"
+EVERYONE = "*S-1-1-0"  # the well-known SID of Everyone: a deny for it binds this user, no account name looked up
 QUIT_TOKEN = re.compile(r'<form method="post" action="/quit"><input type="hidden" name="token" value="([^"]+)">')
 
 
@@ -42,6 +47,39 @@ def answers(port):
             return True
     except OSError:
         return False
+
+
+class FakeClock:
+    """The re-read windows of a start on a clock that moves only when the start waits; each wait first plays
+    the next of `moves`, the other start's steps, in order."""
+
+    def __init__(self, *moves):
+        self.now, self.moves = 0.0, list(moves)
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        if self.moves:
+            self.moves.pop(0)()
+        self.now += seconds
+
+
+def deny_new_files(case, folder):
+    """The folder refuses a new file while the case runs: a deny entry on Windows, where a read-only attribute
+    does not stop a create, and a mode without write elsewhere."""
+    if os.name == "nt":
+        subprocess.run(["icacls", str(folder), "/deny", EVERYONE + ":(WD,AD)"], check=True, capture_output=True,
+                       timeout=30)
+        case.addCleanup(subprocess.run, ["icacls", str(folder), "/remove:d", EVERYONE], check=True,
+                        capture_output=True, timeout=30)
+    else:
+        if os.geteuid() == 0:
+            case.skipTest(ROOT_WRITES)
+        os.chmod(folder, 0o555)
+        case.addCleanup(os.chmod, folder, 0o755)
+    with case.assertRaises(PermissionError):  # the precondition: this user really cannot add a file there
+        open(folder / "a probe of the case", "x").close()
 
 
 class MainCommandTest(unittest.TestCase):
@@ -55,6 +93,7 @@ class MainCommandTest(unittest.TestCase):
         # never the real one, unless a case points it at a fake.
         self.no_client = Path(tmp.name) / "no client" / "lockfile"
         self.beeps = []  # what the entry point's beep seam heard: every run passes it, so no test run beeps
+        self.boxes = []  # what the message box seam showed: every run passes it, so no test run shows one
 
     def fake(self, answer):
         fake = support.FakeWorker(answer)
@@ -64,6 +103,8 @@ class MainCommandTest(unittest.TestCase):
     def run_main(self, *argv, **kwargs):
         out, err = io.StringIO(), io.StringIO()
         kwargs.setdefault("beep", lambda: self.beeps.append("beep"))
+        kwargs.setdefault("box", self.boxes.append)
+        kwargs.setdefault("console", lambda: True)  # a console is attached unless a case says there is none
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -262,22 +303,100 @@ class MainCommandTest(unittest.TestCase):
                          (0, [{"linkId": LINK_ID, "secret": SECRET, "kind": "lol_queue_found"}], ["beep"]))
 
     @unittest.skipIf(os.name != "nt", RACE_WINDOWS_ONLY)
-    def test_a_start_that_loses_the_race_for_the_run_file_says_already_running_and_exits_0(self):
-        # Mutation: claim lets the PermissionError of the remove out. Red: "cannot start" and exit 1.
+    def test_a_start_that_loses_the_race_reads_the_winners_record_and_opens_its_page(self):
+        # Mutation: the re-read removed, a refused remove read at once. Red: "cannot start" and exit 1 where the
+        # winner's record shows within the window, and no page where its port comes only after the claim.
         self.run_file.parent.mkdir(parents=True)
-        opened, stop = [], threading.Event()
+        winner, port = os.getppid(), 54321  # the process that started this test: alive, and not this start
+        url, stop = f"http://127.0.0.1:{port}/", threading.Event()
         stop.set()  # a start that wrongly goes on ends at its first tick
-        with open(self.run_file, "w", encoding="utf-8"):  # the winner's handle, its record not written yet
-            code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
-                                           opener=opened.append, stop=stop)
-            kept = self.run_file.exists()
-        self.assertEqual((code, out, err, opened, kept), (0, entry.ALREADY_RUNNING_LINE + "\n", "", [], True))
-        self.assertFalse(self.store.path.exists())  # no page, so no first load of the config
-        # A folder in the run file's place is no race: that start still cannot go on.
+        roads = (("its record shows with its port", [{"pid": winner, "port": port}], entry.ALREADY_RUNNING_LINE,
+                  [url]),
+                 ("its port comes after the claim", [{"pid": winner, "port": None}, {"pid": winner, "port": port}],
+                  entry.ALREADY_RUNNING_LINE, [url]),
+                 ("its port never comes", [{"pid": winner, "port": None}], entry.PAGE_NOT_KNOWN_LINE, []))
+        for road, records, line, pages in roads:
+            with self.subTest(road=road):
+                with open(self.run_file, "w", encoding="utf-8") as held:  # the winner's handle, no record yet
+
+                    def write(record, held=held):  # the winner's next step, played at a wait of this start
+                        held.seek(0)
+                        held.truncate()
+                        json.dump(record, held)
+                        held.flush()
+
+                    clock, opened = FakeClock(*[lambda record=record: write(record) for record in records]), []
+                    result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                           opener=opened.append, stop=stop, clock=clock.clock, sleep=clock.sleep)
+                    kept = self.run_file.exists()
+                self.assertEqual((result, opened, kept), ((0, line + "\n", ""), pages, True))
+                self.assertFalse(self.store.path.exists())  # no page, so no first load of the config
+        # A folder in the run file's place is no race: that start still cannot go on, and its line names the file.
         self.run_file.unlink()
         self.run_file.mkdir()
         self.assertEqual(self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
-                                       opener=opened.append, stop=stop), (1, entry.CLAIM_FAILED_LINE + "\n", ""))
+                                       opener=[].append, stop=stop),
+                         (1, entry.CLAIM_FAILED_LINE.format(path=self.run_file) + "\n", ""))
+
+    @unittest.skipIf(os.name != "nt", READ_ONLY_WINDOWS_ONLY)
+    def test_a_read_only_stale_run_file_naming_no_pid_cannot_start_and_its_line_names_the_file(self):
+        # Mutation: the probe removed, the refused remove read as a race at once. Red: "already running" and exit 0.
+        self.run_file.parent.mkdir(parents=True)
+        stale = {"pid": None, "port": None}
+        self.run_file.write_text(json.dumps(stale), encoding="utf-8")
+        os.chmod(self.run_file, stat.S_IREAD)  # the read-only attribute: the remove is refused
+        self.addCleanup(os.chmod, self.run_file, stat.S_IREAD | stat.S_IWRITE)
+        clock, opened, stop = FakeClock(), [], threading.Event()
+        stop.set()
+        for start in ("first", "next"):  # every start from then on says the same
+            with self.subTest(start=start):
+                result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                       opener=opened.append, stop=stop, clock=clock.clock, sleep=clock.sleep)
+                self.assertEqual(result, (1, entry.CLAIM_FAILED_LINE.format(path=self.run_file) + "\n", ""))
+        self.assertEqual((opened, json.loads(self.run_file.read_text(encoding="utf-8"))), ([], stale))
+        self.assertFalse(self.store.path.exists())  # no page, so no first load of the config
+
+    def test_a_config_folder_that_takes_no_new_file_cannot_start_and_its_line_names_the_folder(self):
+        # Mutation: the open's PermissionError read as a race. Red: "already running" and exit 0.
+        folder = self.run_file.parent
+        folder.mkdir(parents=True)
+        deny_new_files(self, folder)
+        clock, opened, stop = FakeClock(), [], threading.Event()
+        stop.set()
+        result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                               opener=opened.append, stop=stop, clock=clock.clock, sleep=clock.sleep)
+        self.assertEqual((result, opened, self.run_file.exists(), self.store.path.exists()),
+                         ((1, entry.FOLDER_FAILED_LINE.format(path=folder) + "\n", ""), [], False, False))
+
+    def test_with_no_console_each_start_diagnosis_also_reaches_the_message_box_with_its_line(self):
+        # Mutation: the box skipped. Red: the box shows nothing where no console is attached.
+        self.run_file.parent.mkdir(parents=True)
+        stop = threading.Event()
+        stop.set()
+
+        def already_running():
+            self.run_file.write_text(json.dumps({"pid": os.getppid(), "port": 54321}), encoding="utf-8")
+            return entry.ALREADY_RUNNING_LINE, 0
+
+        def cannot_start():
+            self.run_file.unlink()
+            self.run_file.mkdir()  # a folder in the run file's place
+            return entry.CLAIM_FAILED_LINE.format(path=self.run_file), 1
+
+        def config_sentence():
+            self.run_file.rmdir()
+            self.store.path.mkdir()  # a folder in the config file's place: it can be neither read nor written
+            return config.UNAVAILABLE.format(path=self.store.path), 1
+
+        for diagnosis in (already_running, cannot_start, config_sentence):
+            with self.subTest(diagnosis=diagnosis.__name__):
+                line, code = diagnosis()
+                for attached, shown in ((True, []), (False, [line])):
+                    del self.boxes[:]
+                    result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                           opener=lambda url: True, stop=stop,
+                                           console=lambda attached=attached: attached)
+                    self.assertEqual((result, self.boxes), ((code, line + "\n", ""), shown))
 
     @unittest.skipUnless(hasattr(signal, "SIGBREAK"), NO_SIGBREAK)
     def test_ctrl_break_stops_the_page_and_the_watcher_and_removes_the_run_file(self):

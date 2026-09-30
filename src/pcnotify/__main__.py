@@ -23,7 +23,10 @@ STOP_SECONDS = 5.0
 REFUSED_LINE = "refused: the pairing of this PC was not accepted; link it again from the page"
 NOT_LINKED_LINE = "not linked: start the program without arguments and link this PC first"
 ALREADY_RUNNING_LINE = "already running: opening the page of the program that runs"
-CLAIM_FAILED_LINE = "cannot start: the run file in the config folder cannot be replaced"
+PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is not known yet; start it again in a "
+                       "moment to open it")
+CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
+FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
 
 
 def _data_dir(value):
@@ -149,7 +152,7 @@ def _break_as_interrupt():
 
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
-         beep=alert.beep):
+         beep=alert.beep, box=None, console=None, clock=None, sleep=None):
     """`beep` is the one seam of the sound: a test run passes a silent one."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
