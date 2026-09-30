@@ -165,9 +165,9 @@ class SceneDecodeTest(unittest.TestCase):
         prefix = "data:image/webp;base64,"
         self.assertTrue(plate_almena.PLATE_DATA_URI.startswith(prefix))
         plate = base64.b64decode(plate_almena.PLATE_DATA_URI[len(prefix):], validate=True)
-        self.assertEqual((len(plate), plate[:4], plate[8:12]), (30938, b"RIFF", b"WEBP"))
+        self.assertEqual((len(plate), plate[:4], plate[8:12]), (28992, b"RIFF", b"WEBP"))
         self.assertEqual(hashlib.sha256(plate).hexdigest(),
-                         "4aa1cd5000a714e8d2acc54b84ae5ea4ec1e2a59226643c99cd48e73b8e0094b")
+                         "dd92c402e7e5364f12d02add757a19c401716f90a844dab498167d31105d52e4")
         texts = [("v1 " * 5)[:14], ("v2 " * 9)[:26]] + MULTI_BLOCK
         for text in texts:
             self.assertIsNone(qr.scene_svg(qr.encode(text.encode("ascii")).modules, plate_almena.PLATE_DATA_URI))

@@ -283,16 +283,16 @@ FIELD = 45          # render_diorama.py:554-555 field = span + 2 * RING, span = 
 RING = 4            # render_diorama.py:48 RING = APRON (3) + KERB (1), the tiles between the field edge and the code
 QUIET = 4           # the quiet zone, qr.QUIET_ZONE; the renderer's code["border"] (themes_halftone.json halftone.border)
 MODULES = 29        # the one symbol size the plate is drawn for: version 3, which every pairing address takes
-ELEVATION = 60      # the camera's pitch in degrees. render_diorama.py:609 RULED_CAMERA is 45, but at 45 zxing-cpp reads
-                    # this composition at no box from 288 to 720 px (pcpg-r3-probe.txt); 60 is the lowest rung of
-                    # pick_elevation's ladder (:68 ELEVATIONS, :613-628) that reads at 288 px on a 1x screen and at full
-                    # and half size on a 2x one. The 45 numbers, if the owner keeps the ruled camera: AY 4.1634,
-                    # AH 5.888, Y0 114.2463 (pcpg-r3-camera.json).
+ELEVATION = 75      # the camera's pitch in degrees, the "75" entry of pcpg-r3-camera.json (Pendi-evidence
+                    # mockups/pcpg, 1135 bytes) and its plate. render_diorama.py:609 RULED_CAMERA is 45, but at 45
+                    # zxing-cpp reads this composition at no box from 288 to 720 px (pcpg-r3-probe.txt), and at 60 the
+                    # phone's engine (ZXing core 3.5.4, QRCodeReader, HybridBinarizer) reads 34 of 48 crops
+                    # (SceneDecodeTest). 75 reads 48 of 48: 288 px on a 1x screen, and full and half size on a 2x one.
 AX = 5.888          # render_diorama.py:123 x = cx + (u - v) * INV_SQRT2 * S, S from :113 (3200 * 0.92 / (45 * sqrt 2))
-AY = 5.0992         # render_diorama.py:124 y term INV_SQRT2 * S * sin(ELEVATION), per unit of u + v
-AH = 4.1634         # render_diorama.py:125 and :127-128 rise per unit of height, S * cos(ELEVATION)
+AY = 5.6874         # render_diorama.py:124 y term INV_SQRT2 * S * sin(ELEVATION), per unit of u + v
+AH = 2.1552         # render_diorama.py:125 and :127-128 rise per unit of height, S * cos(ELEVATION)
 X0 = 288.0          # render_diorama.py:114 cx, the canvas centre
-Y0 = 68.1555        # render_diorama.py:115-118 cy after the centring pass, minus FIELD * AY (so y = Y0 + (u + v) * AY)
+Y0 = 37.0467        # render_diorama.py:115-118 cy after the centring pass, minus FIELD * AY (so y = Y0 + (u + v) * AY)
 RELIEF = 0.23       # render_diorama.py:50 RELIEF = PAVER_H (:52), the height of a light module; a dark one sits at
                     # SOIL_H 0 (:51)
 KERB_H = 0.62       # render_diorama.py:54, the kerb's top; its near inner edges hide the field's near rows
