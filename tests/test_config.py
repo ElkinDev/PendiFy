@@ -1,0 +1,154 @@
+"""ConfigStoreTest: the one JSON file holding exactly secret and linkId (design P1, P6, residual e)."""
+import json
+import os
+import unittest
+from pathlib import Path
+
+import support
+from support import LINK_ID, SECRET
+
+codes = support.module("codes")
+config = support.module("config")
+
+
+class ConfigStoreTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = support.temp_dir()
+        self.base = Path(self._tmp.name)
+        self.store = config.ConfigStore(self.base)
+        self.folder = self.base / config.FOLDER_NAME
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def on_disk(self):
+        return json.loads(self.store.path.read_text(encoding="utf-8"))
+
+    def write_raw(self, text):
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.store.path.write_text(text, encoding="utf-8")
+
+    def test_the_file_is_config_json_in_a_folder_named_after_the_package(self):
+        # Mutation: the file written straight under the base. Red: the path lacks the folder.
+        self.assertEqual(config.FOLDER_NAME, support.PACKAGE)
+        self.assertEqual(self.store.path, self.base / support.PACKAGE / "config.json")
+
+    def test_a_first_load_mints_and_writes_and_a_second_load_reads_the_same_pair(self):
+        # Mutation: load mints without writing. Red: the file is missing and the second load mints anew.
+        first = self.store.load()
+        self.assertEqual(codes.normalize(first.secret), first.secret)
+        self.assertIsNone(first.link_id)
+        self.assertEqual(self.on_disk(), {"secret": first.secret, "linkId": None})
+        second = config.ConfigStore(self.base).load()
+        self.assertEqual((second.secret, second.link_id), (first.secret, None))
+
+    def test_a_stored_pair_is_read_back_normalized(self):
+        # Mutation: read keeps the raw text. Red: the dashed lower-case secret comes back as written.
+        self.write_raw(json.dumps({"secret": "abcd-2345-efgh", "linkId": "wxyz-6789-abcd"}))
+        loaded = self.store.load()
+        self.assertEqual((loaded.secret, loaded.link_id), (SECRET, LINK_ID))
+
+    def test_missing_empty_corrupt_or_unnormalizable_files_are_a_first_load(self):
+        # Mutation: a corrupt file is kept and raises. Red: json.JSONDecodeError out of load.
+        cases = {
+            "empty": "",
+            "corrupt": "{not json",
+            "a list": "[]",
+            "no secret": json.dumps({"linkId": LINK_ID}),
+            "eleven symbols": json.dumps({"secret": "ABCD2345EFG", "linkId": LINK_ID}),
+            "a number": json.dumps({"secret": 12, "linkId": LINK_ID}),
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.write_raw(text)
+                loaded = self.store.load()
+                self.assertEqual(codes.normalize(loaded.secret), loaded.secret)
+                self.assertIsNone(loaded.link_id)
+                self.assertEqual(self.on_disk(), {"secret": loaded.secret, "linkId": None})
+        self.store.path.unlink()
+        self.assertEqual(self.store.read(), None)
+        self.assertEqual(self.on_disk() if self.store.path.exists() else "absent", "absent")
+
+    def test_a_malformed_link_id_beside_a_good_secret_reads_as_no_link_id(self):
+        # Mutation: the link id is returned raw. Red: WXYZ6789ABC comes back.
+        self.write_raw(json.dumps({"secret": SECRET, "linkId": "WXYZ6789ABC"}))
+        loaded = self.store.load()
+        self.assertEqual((loaded.secret, loaded.link_id), (SECRET, None))
+
+    def test_every_write_holds_two_keys_and_leaves_one_file(self):
+        # Mutation: the temp file is renamed with a copy instead of os.replace. Red: a .tmp remains beside it.
+        self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "extra": "kept?"}))
+        self.store.load()
+        self.store.set_typed(LINK_ID, SECRET)
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+        self.store.forget()
+        self.assertEqual(set(self.on_disk()), {"secret", "linkId"})
+        self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+
+    def test_a_failed_write_raises_and_leaves_no_temp_file(self):
+        # Mutation: the temp file is not removed when os.replace fails. Red: a second entry in the folder.
+        self.store.path.mkdir(parents=True)
+        with self.assertRaises(OSError):
+            self.store.set_typed(LINK_ID, SECRET)
+        self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+        self.assertTrue(self.store.path.is_dir())
+
+    def test_forget_mints_a_new_secret_and_clears_the_link_id(self):
+        # Mutation: forget keeps the secret and only clears the link id. Red: the secret is unchanged.
+        self.store.set_typed(LINK_ID, SECRET)
+        forgotten = self.store.forget()
+        self.assertNotEqual(forgotten.secret, SECRET)
+        self.assertEqual(codes.normalize(forgotten.secret), forgotten.secret)
+        self.assertIsNone(forgotten.link_id)
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None})
+
+    def test_the_typed_pair_is_stored_normalized_and_a_malformed_one_is_refused(self):
+        # Mutation: set_typed stores the raw text. Red: the dashed form lands in the file.
+        self.store.load()
+        stored = self.store.set_typed("wxyz-6789-abcd", " abcd 2345 efgh ")
+        self.assertEqual((stored.secret, stored.link_id), (SECRET, LINK_ID))
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+        for link_id, secret in (("WXYZ6789ABC", SECRET), (LINK_ID, "ABCD2345EFG0"), ("", ""), (None, SECRET)):
+            with self.subTest(link_id=link_id, secret=secret):
+                with self.assertRaises(ValueError) as caught:
+                    self.store.set_typed(link_id, secret)
+                self.assertNotIn("WXYZ", str(caught.exception))
+                self.assertNotIn("ABCD", str(caught.exception))
+                self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+
+    def test_the_link_id_is_set_and_cleared_keeping_the_secret(self):
+        # Mutation: clear_link_id mints a new secret. Red: the secret differs after the clear.
+        secret = self.store.load().secret
+        self.assertEqual(self.store.set_link_id("wxyz-6789-abcd").link_id, LINK_ID)
+        cleared = self.store.clear_link_id()
+        self.assertEqual((cleared.secret, cleared.link_id), (secret, None))
+        self.assertEqual(self.on_disk(), {"secret": secret, "linkId": None})
+        with self.assertRaises(ValueError):
+            self.store.set_link_id("WXYZ6789ABC")
+
+    def test_a_pairing_never_shows_its_values_in_its_repr(self):
+        # Mutation: the dataclass fields keep repr=True. Red: the secret is in the repr.
+        text = repr(self.store.set_typed(LINK_ID, SECRET))
+        self.assertNotIn(SECRET, text)
+        self.assertNotIn(LINK_ID, text)
+
+    def test_the_base_directory_is_appdata_and_its_absence_is_loud(self):
+        # Mutation: a missing APPDATA falls back to the working directory. Red: no RuntimeError.
+        self.assertEqual(config.default_base_dir({"APPDATA": "C:/Users/a b/AppData/Roaming"}),
+                         Path("C:/Users/a b/AppData/Roaming"))
+        with self.assertRaises(RuntimeError):
+            config.default_base_dir({})
+        with self.assertRaises(RuntimeError):
+            config.default_base_dir({"APPDATA": "  "})
+
+    def test_a_base_with_spaces_and_forward_slashes_works(self):
+        # Mutation: the base is split on spaces. Red: the file lands in the wrong folder.
+        spaced = (self.base / "a folder with spaces").as_posix()
+        store = config.ConfigStore(spaced)
+        secret = store.load().secret
+        self.assertEqual(json.loads((self.base / "a folder with spaces" / config.FOLDER_NAME / "config.json")
+                                    .read_text(encoding="utf-8"))["secret"], secret)
+
+
+if __name__ == "__main__":
+    unittest.main()
