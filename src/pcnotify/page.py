@@ -11,6 +11,7 @@ import json
 import secrets
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -48,6 +49,12 @@ WORDS = {
         "forget": "Olvidar este PC",
         "forget_sentence": "Olvidar este PC crea una clave nueva y quita el enlace de este PC. El enlace anterior "
                            "sigue activo en tu cuenta hasta que lo desenlaces en Pendi o caduque.",
+        "watch_waiting": "Esperando el cliente del juego en este PC.",
+        "watch_connected": "Conectado al cliente del juego.",
+        "watch_last": "Último aviso: {what}, a las {time}.",
+        "alert_loading": "empezó la pantalla de carga",
+        "alert_queue": "partida encontrada",
+        "alert_started": "la partida empezó",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -73,6 +80,12 @@ WORDS = {
         "forget": "Forget this PC",
         "forget_sentence": "Forgetting this PC makes a new key and removes this PC's link. The old link stays "
                            "active in your account until you unlink it in Pendi or it expires.",
+        "watch_waiting": "Waiting for the game client on this PC.",
+        "watch_connected": "Connected to the game client.",
+        "watch_last": "Last alert: {what}, at {time}.",
+        "alert_loading": "the loading screen started",
+        "alert_queue": "match found",
+        "alert_started": "the match started",
     },
 }
 
@@ -80,8 +93,10 @@ _STYLE = ("body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem aut
           ".code{font-family:monospace;font-size:1.4rem;letter-spacing:.1em}label{display:block;margin:.4rem 0}"
           "form{margin:.8rem 0}")
 # Polls the state; reloads when what the page shows changes; says so when the program is gone.
-_SCRIPT = ("const s=document.getElementById('state');const shown=s.dataset.shown;"
+_SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
+           "const shown=s.dataset.shown;"
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;"
+           "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown)location.reload();})"
            ".catch(()=>{s.textContent=s.dataset.closed;}),5000);")
 
@@ -107,7 +122,9 @@ def _form(action, token, inner):
 
 class PairingPage:
     def __init__(self, state, watch=None):
+        """`watch` answers the watcher's snapshot; without it the page shows no watcher line."""
         self.state = state
+        self.watch = watch
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -129,9 +146,25 @@ class PairingPage:
     def host_allowed(self, host):
         return (host or "").strip().lower() in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
 
+    def watch_text(self, lang):
+        """The watcher's line in `lang`: waiting or connected, then the last alert and its time; None
+        when no watcher runs beside the page. It names no game, no maker and no product."""
+        if self.watch is None:
+            return None
+        snapshot, words = self.watch(), WORDS[lang]
+        text = words["watch_connected" if snapshot.get("client") == "connected" else "watch_waiting"]
+        if snapshot.get("alert") in ("loading", "queue", "started") and snapshot.get("at") is not None:
+            text += " " + words["watch_last"].format(what=words["alert_" + snapshot["alert"]],
+                                                     time=time.strftime("%H:%M", time.localtime(snapshot["at"])))
+        return text
+
     def state_json(self, lang):
         snapshot = self.state.snapshot()
-        return {**snapshot, "text": WORDS[lang]["state_" + snapshot["state"]]}
+        answer = {**snapshot, "text": WORDS[lang]["state_" + snapshot["state"]]}
+        watch = self.watch_text(lang)
+        if watch is not None:
+            answer["watchText"] = watch
+        return answer
 
     def render(self, lang):
         words = {key: html.escape(value) for key, value in WORDS[lang].items()}
@@ -142,6 +175,9 @@ class PairingPage:
                  f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
                  f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
                  f'{words["state_" + snapshot["state"]]}</p>']
+        watch = self.watch_text(lang)
+        if watch is not None:
+            parts.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
         if secret is not None:
             parts += [f"<p>{words['scan']}</p>", qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules),
                       f'<p>{words["code_label"]} <span class="code">{codes.display(secret)}</span></p>',
