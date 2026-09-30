@@ -2,11 +2,11 @@
 
 Everything that touches the world is injected: the credentials reader, the address builder, the HTTP
 getter and poster, the clock, the wall clock, the sleep, the random delay, the alert and the console.
-One step() is one turn of the script's loop and answers the pause before the next; run() is the loop
-around it. The script's 15 s sleep after a ready check (S:778, S:793) is a hold on the injected clock, so
-a stop never waits for it. The arrival of InProgress after a read of another phase is the loading screen: it
-beeps and pings match_started at once, once per game. The console gets fixed lines only: no phase, no port,
-no token.
+Its `alert` is an Alerter: snapshot() reads its last_ping(). One step() is one turn of the script's loop
+and answers the pause before the next; run() is the loop around it. The script's 15 s sleep after a ready
+check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
+InProgress after a read of another phase is the loading screen: it beeps and pings match_started at once,
+once per game. The console gets fixed lines only: no phase, no port, no token.
 """
 import json
 import random
@@ -162,7 +162,10 @@ class Watcher:
         self._alert(kind)
 
     def _forget(self):
+        # S:755-757 is per connection: a fresh client already InProgress at its first read alerts nothing.
         self._found = None
+        with self._lock:
+            self._last_phase = None
         self._set_client(WAITING)
 
     def _set_client(self, value):

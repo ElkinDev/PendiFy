@@ -222,6 +222,26 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(subject.snapshot()["client"], "connected")
         self.assertEqual(self.lines.count(watcher.CONNECTED_LINE), 2)
 
+    def test_a_fresh_client_already_in_progress_after_a_lost_one_alerts_nothing_until_lobby_then_in_progress(self):
+        # Mutation: _forget keeps the last phase read. Red: the fresh client's first InProgress beeps and pings.
+        credentials = Credentials(self.fake.port)
+        subject = self.watcher(credentials=credentials)
+        self.read(subject, "Lobby")
+        self.fake.dropping = True
+        self.clock.advance(0.3)
+        subject.step()
+        self.assertEqual(subject.snapshot(), self.shown(None, client_state="waiting"))
+        self.fake = self.client_fake(phase="InProgress")
+        credentials.port = self.fake.port
+        self.read(subject, "InProgress", "InProgress")
+        self.assertEqual((credentials.reads, self.lines.count(watcher.CONNECTED_LINE)), (2, 2))
+        self.assertEqual((self.beeps, self.pings), ([], []))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress"))
+        self.read(subject, "Lobby", "InProgress", "InProgress")
+        self.assertEqual([kind for *_, kind in self.pings], [MATCH_STARTED])
+        self.assertEqual(len(self.beeps), 1)
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+
     def test_run_pauses_3_s_while_there_is_no_client_and_0_3_s_between_reads(self):
         # Mutation: the no-client pause made 0.3 s (S:739). Red: the pauses read 0.3 where 3 is due.
         self.assertEqual((watcher.NO_CLIENT_PAUSE, watcher.STEP_PAUSE), (3.0, 0.3))
