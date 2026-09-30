@@ -369,6 +369,19 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual((result, opened, self.run_file.exists(), self.store.path.exists()),
                          ((1, entry.FOLDER_FAILED_LINE.format(path=folder) + "\n", ""), [], False, False))
 
+    def test_a_data_dir_under_a_regular_file_cannot_start_and_its_line_names_the_folder(self):
+        # Mutation: the mkdir's FileExistsError left uncaught in claim(). Red: the run file line, not the folder's.
+        blocker = self.data.parent / "a regular file"
+        blocker.write_text("not a folder", encoding="utf-8")
+        data = blocker / "data"
+        folder = config.ConfigStore(data).path.parent
+        clock, opened, stop = FakeClock(), [], threading.Event()
+        stop.set()
+        result = self.run_main("--data-dir", str(data), "--worker", "http://127.0.0.1:9",
+                               opener=opened.append, stop=stop, clock=clock.clock, sleep=clock.sleep)
+        self.assertEqual((result, opened, self.boxes, blocker.read_text(encoding="utf-8")),
+                         ((1, entry.FOLDER_FAILED_LINE.format(path=folder) + "\n", ""), [], [], "not a folder"))
+
     def test_with_no_console_each_start_diagnosis_also_reaches_the_message_box_with_its_line(self):
         # Mutation: the box skipped. Red: the box shows nothing where no console is attached.
         self.run_file.parent.mkdir(parents=True)

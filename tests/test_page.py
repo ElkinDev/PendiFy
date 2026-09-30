@@ -445,6 +445,25 @@ class PairingPageTest(unittest.TestCase):
                 self.assertNotIn(self.page.token, body)
         self.assertEqual(quits, [True, True])
 
+    def test_quit_stops_the_program_even_when_its_answer_cannot_be_written(self):
+        # Mutation: the finally removed, on_quit reached only after a written answer. Red: quits stays [].
+        quits = []
+        self.page = page.PairingPage(self.state, on_quit=lambda: quits.append(True))
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+        failures = [OSError("the answer cannot be written")]
+
+        def render_stopped(lang):  # fails once, the way a write to a socket the browser closed fails
+            raise failures.pop()
+
+        self.page.render_stopped = render_stopped
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(ConnectionError):
+            self.call("POST", "/quit")  # the handler closes the socket with no answer
+        self.assertEqual((quits, failures), ([True], []))
+        self.assertEqual(err.getvalue(), " [page] a request failed: OSError\n")  # its type, no traceback
+
 
 if __name__ == "__main__":
     unittest.main()
