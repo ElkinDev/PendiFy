@@ -90,9 +90,13 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
-    if args.command == "ping":
-        return _ping(store, base, args.kind, timeout)
-    return _serve(store, base, timeout, opener, stop or threading.Event())
+    try:
+        if args.command == "ping":
+            return _ping(store, base, args.kind, timeout)
+        return _serve(store, base, timeout, opener, stop or threading.Event())
+    except config.ConfigError as failure:  # at start or mid-run: its one sentence, never a traceback
+        print(failure)
+        return 1
 
 
 if __name__ == "__main__":
