@@ -17,6 +17,8 @@
     $ShortcutName = 'pcnotify.lnk'
     $StartArgs = '-m pcnotify'
     $ProbeSeconds = 15
+    # The interpreter pip used, one line, read by uninstall.ps1 so it removes from the same Python.
+    $RecordName = 'python.txt'
 
     function Test-Flag([string]$Value) {
         return [bool]($Value -and $Value.Trim() -ne '' -and $Value.Trim() -ne '0')
@@ -25,21 +27,27 @@
     $DryRun = Test-Flag $env:PCNOTIFY_DRYRUN
     $LocalAppData = $env:LOCALAPPDATA
     if (-not $LocalAppData) { $LocalAppData = [Environment]::GetFolderPath('LocalApplicationData') }
+    $AppData = $env:APPDATA
+    if (-not $AppData) { $AppData = [Environment]::GetFolderPath('ApplicationData') }
 
     function Say([string]$Text) { Write-Host $Text }
     function Plan([string]$Text) { Write-Host ('[plan] ' + $Text) }
+    function Note([string]$Text) { if ($DryRun) { Plan $Text } else { Say $Text } }
     function Format-Arg([string]$Text) {
         if ($Text -match '\s') { return '"' + $Text + '"' }
         return $Text
     }
 
-    # Runs one candidate and reads its version and its own sys.executable. A candidate that prints
-    # nothing (the Microsoft Store alias stub in WindowsApps), fails to start, hangs past the probe
-    # bound, or answers below 3.10 does not count.
+    # Runs one candidate and reads its version, whether it is a virtual environment, and its own
+    # sys.executable. The first version line followed by an existing file counts, wherever it sits
+    # in the output, so a banner printed at startup does not hide a working Python. A candidate that
+    # prints nothing (the Microsoft Store alias stub in WindowsApps), fails to start, hangs past the
+    # probe bound, or answers below 3.10 does not count; one inside a virtual environment is skipped
+    # with a line, because pip install --user fails there.
     function Get-PythonInfo([string]$Exe, [string]$Pre) {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $Exe
-        $psi.Arguments = ($Pre + ' -c "import sys;print(sys.version.split()[0]);print(sys.executable)"').Trim()
+        $psi.Arguments = ($Pre + ' -c "import sys;print(sys.version.split()[0],sys.prefix==sys.base_prefix);print(sys.executable)"').Trim()
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -51,16 +59,22 @@
             try { $process.Kill() } catch { }
             return $null
         }
-        $lines = @($out.Result -split "`r?`n" | Where-Object { $_.Trim() -ne '' })
-        if ($lines.Count -lt 2) { return $null }
-        $match = [regex]::Match($lines[0].Trim(), '^(\d+)\.(\d+)')
-        if (-not $match.Success) { return $null }
-        $major = [int]$match.Groups[1].Value
-        $minor = [int]$match.Groups[2].Value
-        if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) { return $null }
-        $path = $lines[1].Trim()
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-        return New-Object PSObject -Property @{ Exe = $path; Version = $lines[0].Trim() }
+        $lines = @($out.Result -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+        for ($i = 0; $i -lt $lines.Count - 1; $i++) {
+            $match = [regex]::Match($lines[$i], '^((\d+)\.(\d+)\S*)\s+(True|False)$')
+            if (-not $match.Success) { continue }
+            $path = $lines[$i + 1]
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $major = [int]$match.Groups[2].Value
+            $minor = [int]$match.Groups[3].Value
+            if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) { return $null }
+            if ($match.Groups[4].Value -ne 'True') {
+                Note ('se omite ' + $path + ': es un entorno virtual')
+                return $null
+            }
+            return New-Object PSObject -Property @{ Exe = $path; Version = $match.Groups[1].Value }
+        }
+        return $null
     }
 
     # %LOCALAPPDATA%\Programs\Python\Python3*\python.exe, newest minor version first.
@@ -143,7 +157,19 @@
             }
         }
 
-        $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+        $recordFile = Join-Path (Join-Path $AppData 'pcnotify') $RecordName
+        if ($DryRun) {
+            Plan ('anotar Python en ' + $recordFile)
+        } else {
+            try {
+                $null = [System.IO.Directory]::CreateDirectory((Split-Path -Parent $recordFile))
+                [System.IO.File]::WriteAllText($recordFile, $python, (New-Object System.Text.UTF8Encoding $false))
+            } catch {
+                Say ('No se pudo anotar Python en ' + $recordFile + '; el desinstalador lo buscara por su cuenta.')
+            }
+        }
+
+        $pythonw =Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if ((Test-Path -LiteralPath $python) -and -not (Test-Path -LiteralPath $pythonw)) { $pythonw = $python }
         $startLine = (Format-Arg $pythonw) + ' ' + $StartArgs
 

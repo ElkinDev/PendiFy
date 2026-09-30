@@ -5,6 +5,9 @@
 & {
     $ShortcutName = 'pcnotify.lnk'
     $ProbeSeconds = 15
+    $PipSeconds = 120
+    # Written by install.ps1: the interpreter pip installed into, one line.
+    $RecordName = 'python.txt'
 
     function Test-Flag([string]$Value) {
         return [bool]($Value -and $Value.Trim() -ne '' -and $Value.Trim() -ne '0')
@@ -18,13 +21,14 @@
 
     function Say([string]$Text) { Write-Host $Text }
     function Plan([string]$Text) { Write-Host ('[plan] ' + $Text) }
+    function Note([string]$Text) { if ($DryRun) { Plan $Text } else { Say $Text } }
 
     # The same probe as install.ps1: a candidate counts only when it prints a version of 3.10 or
-    # newer and its own sys.executable.
+    # newer followed by its own sys.executable, and is not inside a virtual environment.
     function Get-PythonInfo([string]$Exe, [string]$Pre) {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $Exe
-        $psi.Arguments = ($Pre + ' -c "import sys;print(sys.version.split()[0]);print(sys.executable)"').Trim()
+        $psi.Arguments = ($Pre + ' -c "import sys;print(sys.version.split()[0],sys.prefix==sys.base_prefix);print(sys.executable)"').Trim()
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -36,16 +40,22 @@
             try { $process.Kill() } catch { }
             return $null
         }
-        $lines = @($out.Result -split "`r?`n" | Where-Object { $_.Trim() -ne '' })
-        if ($lines.Count -lt 2) { return $null }
-        $match = [regex]::Match($lines[0].Trim(), '^(\d+)\.(\d+)')
-        if (-not $match.Success) { return $null }
-        $major = [int]$match.Groups[1].Value
-        $minor = [int]$match.Groups[2].Value
-        if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) { return $null }
-        $path = $lines[1].Trim()
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-        return New-Object PSObject -Property @{ Exe = $path; Version = $lines[0].Trim() }
+        $lines = @($out.Result -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+        for ($i = 0; $i -lt $lines.Count - 1; $i++) {
+            $match = [regex]::Match($lines[$i], '^((\d+)\.(\d+)\S*)\s+(True|False)$')
+            if (-not $match.Success) { continue }
+            $path = $lines[$i + 1]
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $major = [int]$match.Groups[2].Value
+            $minor = [int]$match.Groups[3].Value
+            if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) { return $null }
+            if ($match.Groups[4].Value -ne 'True') {
+                Note ('se omite ' + $path + ': es un entorno virtual')
+                return $null
+            }
+            return New-Object PSObject -Property @{ Exe = $path; Version = $match.Groups[1].Value }
+        }
+        return $null
     }
 
     function Get-LocalPython {
@@ -75,24 +85,65 @@
         return $null
     }
 
+    # True only when pip itself answers that the package is not found, so a Python that fails to
+    # start or has no pip never reads as a removal.
+    function Test-Gone([string]$Exe) {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $Exe
+        $psi.Arguments = '-m pip show pcnotify'
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        try { $process = [System.Diagnostics.Process]::Start($psi) } catch { return $false }
+        $out = $process.StandardOutput.ReadToEndAsync()
+        $err = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($PipSeconds * 1000)) {
+            try { $process.Kill() } catch { }
+            return $false
+        }
+        return ($process.ExitCode -eq 1 -and ($out.Result + $err.Result) -match 'not found')
+    }
+
+    # The interpreter install.ps1 recorded, when the record names a file that still exists.
+    function Get-RecordedPython([string]$RecordFile) {
+        if (-not (Test-Path -LiteralPath $RecordFile -PathType Leaf)) { return $null }
+        $recorded = ''
+        try { $recorded = ([System.IO.File]::ReadAllText($RecordFile)).Trim() } catch { }
+        if ($recorded -and (Test-Path -LiteralPath $recorded -PathType Leaf)) { return $recorded }
+        Say ('El Python anotado en ' + $RecordFile + ' ya no existe; se busca otro.')
+        return $null
+    }
+
     function Invoke-Uninstall {
         $code = 0
         Say 'pcnotify: desinstalador'
         if ($DryRun) { Say 'Modo de prueba (PCNOTIFY_DRYRUN): se muestra el plan y no se cambia nada.' }
-        $info = Find-Python
-        if (-not $info) {
+        $recordFile = Join-Path (Join-Path $AppData 'pcnotify') $RecordName
+        $python = Get-RecordedPython $recordFile
+        if ($python) {
+            Say ('Python: ' + $python + ' (anotado en ' + $recordFile + ')')
+        } else {
+            $info = Find-Python
+            if ($info) {
+                Say ('Python: ' + $info.Exe + ' (' + $info.Version + ')')
+                $python = $info.Exe
+            }
+        }
+        if (-not $python) {
             Say 'No se encontro Python 3.10 o mas nuevo, asi que no hay paquete que quitar con pip.'
         } else {
-            Say ('Python: ' + $info.Exe + ' (' + $info.Version + ')')
             $pipArgs = @('-m', 'pip', 'uninstall', '-y', 'pcnotify')
             if ($DryRun) {
-                Plan ($info.Exe + ' ' + ($pipArgs -join ' '))
+                Plan ($python + ' ' + ($pipArgs -join ' '))
+                Plan ('comprobar: ' + $python + ' -m pip show pcnotify')
             } else {
-                & $info.Exe @pipArgs | Out-Host
-                if ($LASTEXITCODE -ne 0) {
-                    Say ('pip no pudo quitar pcnotify (codigo ' + $LASTEXITCODE + ').')
-                    $code = 1
+                & $python @pipArgs | Out-Host
+                if (-not (Test-Gone $python)) {
+                    Say ('pcnotify sigue instalado en ' + $python + ' (pip uninstall, codigo ' + $LASTEXITCODE + '); no se borra nada mas.')
+                    return 1
                 }
+                Say 'Paquete pcnotify quitado.'
             }
         }
 
