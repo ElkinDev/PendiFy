@@ -17,6 +17,7 @@ from . import config, page, pairing, worker
 TICK_SECONDS = 1.0
 REFUSED_LINE = "refused: the pairing of this PC was not accepted; link it again from the page"
 NOT_LINKED_LINE = "not linked: start the program without arguments and link this PC first"
+ALREADY_RUNNING_LINE = ""  # inert seam: the pins of item 6 and 8 are committed before the code
 
 
 def _data_dir(value):
@@ -39,8 +40,10 @@ def _arguments(argv):
                         help="a directory used instead of %%APPDATA%%, for test runs")
     common.add_argument("--worker", type=_worker_address, default=argparse.SUPPRESS,
                         help="http://127.0.0.1:<port> or http://localhost:<port> instead of the Worker, for test runs")
+    common.add_argument("--client-lockfile", default=argparse.SUPPRESS, help="inert seam")
     parser = argparse.ArgumentParser(prog=f"python -m {__package__}", parents=[common],
                                      description="Pairs this PC by a QR on a loopback page and sends alerts.")
+    parser.add_argument("--dry", action="store_true", help="inert seam")
     commands = parser.add_subparsers(dest="command")
     ping = commands.add_parser("ping", parents=[common], help="send one alert with the stored pair")
     ping.add_argument("kind", choices=worker.KINDS)
@@ -86,7 +89,7 @@ def _serve(store, base, timeout, opener, stop):
     return 0
 
 
-def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS):
+def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None):
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)

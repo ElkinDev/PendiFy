@@ -34,6 +34,22 @@ class PackageShapeTest(unittest.TestCase):
                             if name.split(".")[0] not in sys.stdlib_module_names | {support.PACKAGE}]
         self.assertEqual(outside, [])
 
+    def test_winsound_is_imported_only_behind_its_guard(self):
+        # Mutation: `import winsound` at the top of a module, outside its try. Red: one unguarded import.
+        guarded, every = set(), []
+        for path in package_files():
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import) and "winsound" in [alias.name for alias in node.names]:
+                    every.append((path.name, node.lineno))
+                if isinstance(node, ast.Try) and any(
+                        isinstance(handler.type, ast.Name) and handler.type.id in ("ImportError", "ModuleNotFoundError")
+                        for handler in node.handlers):
+                    guarded |= {(path.name, inner.lineno) for statement in node.body for inner in ast.walk(statement)
+                                if isinstance(inner, ast.Import)}
+        self.assertEqual(len(every), 1)
+        self.assertEqual([place for place in every if place not in guarded], [])
+
     def test_the_tree_holds_no_exe_dll_or_pyd(self):
         # Mutation: a launcher.exe beside the package. Red: the walk finds it.
         found = []

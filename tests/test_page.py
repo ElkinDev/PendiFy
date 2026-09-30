@@ -1,10 +1,12 @@
 """PairingPageTest: the loopback page, its fences and its words (design P2, P5, P6, residuals a and e)."""
 import contextlib
+import html
 import http.client
 import io
 import json
 import re
 import socket
+import time
 import unittest
 import urllib.parse
 from pathlib import Path
@@ -206,6 +208,35 @@ class PairingPageTest(unittest.TestCase):
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
                                              else None)[2])
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
+
+    def test_the_watcher_line_shows_in_both_languages_follows_the_watcher_and_names_no_game(self):
+        # Mutation: the watcher's line left out of the state answer. Red: no watchText in /state.
+        snapshot = {"client": "waiting", "alert": None, "at": None}
+        watched = page.PairingPage(self.state, watch=lambda: dict(snapshot))
+        watched.start()
+        self.addCleanup(watched.close)
+
+        def get(path, language):
+            connection = http.client.HTTPConnection("127.0.0.1", watched.port, timeout=5)
+            self.addCleanup(connection.close)
+            connection.request("GET", path, headers={"Host": f"127.0.0.1:{watched.port}", "Accept-Language": language})
+            return connection.getresponse().read().decode("utf-8")
+
+        shown = get("/", "es")
+        self.assertIn('id="watch"', shown)
+        self.assertIn(page.WORDS["es"]["watch_waiting"], shown)
+        self.assertEqual(json.loads(get("/state", "es"))["watchText"], page.WORDS["es"]["watch_waiting"])
+        at = 1_790_000_000.0
+        for alert, language in (("loading", "es"), ("queue", "en"), ("started", "es")):
+            snapshot.update(client="connected", alert=alert, at=at)
+            words = page.WORDS[language]
+            expected = words["watch_connected"] + " " + words["watch_last"].format(
+                what=words["alert_" + alert], time=time.strftime("%H:%M", time.localtime(at)))
+            self.assertEqual(json.loads(get("/state", language))["watchText"], expected)
+            self.assertIn(html.escape(expected), get("/", language))
+            self.assertIsNone(GAME_WORDS.search(expected), expected)
+        self.assertNotIn('id="watch"', self.html())
+        self.assertNotIn("watchText", json.loads(self.call("GET", "/state")[2]))
 
 
 if __name__ == "__main__":

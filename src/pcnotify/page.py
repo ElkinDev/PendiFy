@@ -106,7 +106,7 @@ def _form(action, token, inner):
 
 
 class PairingPage:
-    def __init__(self, state):
+    def __init__(self, state, watch=None):
         self.state = state
         self.token = secrets.token_urlsafe(32)
         self.server = None
