@@ -24,6 +24,13 @@ TURN_WALL = 10.0  # the watcher's wall clock moves this far per turn, so each ev
 FAILED_LINE = watcher.STEP_FAILED_LINE.format("RuntimeError")
 
 
+class Listening:
+    """An alert that only listens: tell(name, at) is the call the Alerter's ping thread makes."""
+
+    def listen(self, callback):
+        self.tell = callback
+
+
 def at(turn):
     """The watcher's wall time during `turn`."""
     return WALL + TURN_WALL * turn
@@ -160,10 +167,10 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
 
     def test_a_note_from_another_thread_waits_for_the_lock_and_none_is_lost_while_events_is_read(self):
         # Mutation: the lock removed around the note. Red: the ping's thread does not wait for the held lock.
-        alerter = self.alerter()
-        subject = self.make(alerter)
+        listening = Listening()
+        subject = self.make(listening)
         with subject._lock:  # the lock events() reads under: a note made meanwhile has to wait for it
-            noting = threading.Thread(target=alerter, args=(QUEUE_FOUND,), daemon=True)
+            noting = threading.Thread(target=listening.tell, args=("sent", PING_WALL), daemon=True)
             noting.start()
             noting.join(0.3)
             self.assertTrue(noting.is_alive())
@@ -171,8 +178,8 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
         self.assertFalse(noting.is_alive())
         self.assertEqual(subject.events(), [(1, PING_WALL, "ping", "sent")])
         # Many notes from a thread while this one reads: every copy is whole and in order, and none is lost.
-        count = 400
-        many = threading.Thread(target=lambda: [alerter(QUEUE_FOUND) for _ in range(count)], daemon=True)
+        count = 2000
+        many = threading.Thread(target=lambda: [listening.tell("sent", PING_WALL) for _ in range(count)], daemon=True)
         many.start()
         while many.is_alive():
             seqs = [event[0] for event in subject.events()]
