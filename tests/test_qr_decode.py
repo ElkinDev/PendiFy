@@ -6,6 +6,7 @@ the proof of record (design section 4); this case proves the matrix is a QR code
 """
 import base64
 import hashlib
+import re
 import struct
 import subprocess
 import tempfile
@@ -17,6 +18,10 @@ from support import LINK_ID, SECRET
 
 qr = support.module("qr")
 plate_almena = support.module("plate_almena")
+config = support.module("config")
+page = support.module("page")
+pairing = support.module("pairing")
+worker = support.module("worker")
 
 JAR = Path("C:/Users/nikle/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.4/"
            "955fcd6bcd0723ddfb8ee6ed502d5fdf0e9676a9/core-3.5.4.jar")
@@ -32,6 +37,38 @@ CARDS = ("#FFFFFF", "#1E1A31")
 # Eight secrets, each a version 3 pairing address; the design lane's sample first.
 SCENE_SECRETS = ("K7QM4PXD9HTR", SECRET, LINK_ID, "HJKM2345NPQR", "MNPQ2345RSTV", "Z9Y8X7W6V5T4", "EFGH6789JKMN",
                  "QRST2345VWXY")
+
+
+# The sponsored QR of the linked page's aside: its address, and the one shape it is drawn with, a light field over the
+# whole square and one dark path of closed runs one module tall.
+SPONSOR_ADDRESS = "https://pendiapp.com"
+SPONSOR_DRAWING = re.compile(r'<svg class="qr2" viewBox="0 0 (\d+) \1" role="img" aria-label="[^"<>]*" '
+                             r'shape-rendering="crispEdges"><rect width="\1" height="\1" fill="#FFFFFF"/>'
+                             r'<path fill="#1E1533" d="((?:M\d+ \d+h\d+v1h-\d+z)+)"/></svg>')
+
+
+def linked_page():
+    """The pairing page of a linked PC, rendered from a real state over a config file in a temporary folder."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        store = config.ConfigStore(Path(folder))
+        state = pairing.PairingState(store, lambda secret: worker.Refused(), clock=support.FakeClock())
+        state.typed(LINK_ID, store.read().secret)
+        return page.PairingPage(state).render("es")
+
+
+def run_modules(drawing):
+    """The sponsored QR's drawing read back as rows of modules, True dark; any other shape is refused."""
+    match = SPONSOR_DRAWING.fullmatch(drawing)
+    if match is None:
+        raise AssertionError(f"not the sponsored QR's one-path drawing: {drawing[:160]}")
+    side = int(match.group(1))
+    rows = [[False] * side for _ in range(side)]
+    for x, y, width, back in re.findall(r"M(\d+) (\d+)h(\d+)v1h-(\d+)z", match.group(2)):
+        if width != back or int(x) + int(width) > side or int(y) >= side:
+            raise AssertionError(f"a run that does not close inside the square: M{x} {y}h{width}v1h-{back}z")
+        for column in range(int(x), int(x) + int(width)):
+            rows[int(y)][column] = True
+    return rows
 
 
 def matrix_text(modules):
@@ -88,6 +125,20 @@ class QrDecodeTest(unittest.TestCase):
                                                  for row in support.svg_samples(drawing, 4)] for drawing in drawings])
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
+
+    def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_7_8_and_10_px_a_module(self):
+        # Mutation: the runs drawn from another text. Red: ZXing reads that text. Mutation: the quiet zone drawn 2
+        # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules.
+        drawings = re.findall(r'<svg class="qr2".*?</svg>', linked_page())
+        self.assertEqual(len(drawings), 1)
+        rows = run_modules(drawings[0])
+        code = qr.encode(SPONSOR_ADDRESS.encode("ascii"))
+        self.assertEqual(rows, support.quiet_padded(code.modules, 4))
+        scaled = [[[rows[r // size][c // size] for c in range(len(rows) * size)] for r in range(len(rows) * size)]
+                  for size in (7, 8, 10)]
+        status, decoded, errors = zxing_decode(scaled)
+        self.assertEqual(status, 0, errors[-1500:])
+        self.assertEqual(decoded, [SPONSOR_ADDRESS] * 3)
 
 
 def png_size(path):

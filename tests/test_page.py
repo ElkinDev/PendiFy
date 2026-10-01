@@ -55,16 +55,60 @@ PING_TEXTS = {"sent": ("enviado", "sent"),
               "refused": ("rechazado por tu cuenta", "refused by your account"),
               "not_delivered": ("no entregado", "not delivered"), "failed": ("falló el envío", "sending failed")}
 WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
-# The words of a waiting page with a watcher and a quit button, in the order the page before the design showed
-# them (page.py at 8f6b90661), with the key's summary before its label (brief pcpg-hide, change 1; the summary shows the code since brief pcpg-port); None is the key
-# as codes.display prints it. The card «Este PC» sits right after the watcher line (brief pcctl-r2, placement A); the
-# page given no start with Windows draws no switch in it.
-PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "show_code",
-              "code_label", None, "check", "log_title", "log_help", "typed_title", "link_id_label", "secret_label",
-              "save", "forget", "forget_sentence", "forget", "quit")
+# The program's name (owner 2026-10-01): the title and the h1 of both documents; the sentence they read before is the
+# tagline under the title row.
+NAME = "PendiFy"
+# The foot: the creator and the repository on every pairing page, «Salir» after them only beside a quit. The link is
+# the page's one address out; it loads nothing, and the pins that allow no outside address take out exactly its start
+# tag, so any other one still shows.
+REPO = "https://github.com/ElkinDev/PendiFy"
+CREDIT = {"es": "Creado por", "en": "Created by"}
+CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
+# The words of a waiting page with a watcher and a quit button, in the order the page shows them; an entry that is not
+# a key of WORDS is printed as it is, and None is the key as codes.display prints it. The card «Este PC» sits right
+# after the watcher line (brief pcctl-r2, placement A); the page given no start with Windows draws no switch in it.
+# The code is shown, its key under the mask and the reveal after it; the lower part is one fold; the foot names the
+# creator and the repository before «Salir».
+PAGE_ORDER = (NAME, NAME, "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "code_label",
+              None, "show_code", "check", "log_title", "log_help", "fold", "typed_title", "link_id_label",
+              "secret_label", "save", "forget", "forget_sentence", "forget", "credit", "ElkinDev", "·",
+              "github.com/ElkinDev/PendiFy", "quit")
 # The language switch's two labels, the same in both languages, sit in the header between the title tag and the
 # title row (lane pclang, owner report OR-96).
 SWITCH_LABELS = ["ES", "EN"]
+# The reveal's two labels, the mask's name, the fold's summary and the words of the sponsored aside.
+SHOW = {"es": "Mostrar el código", "en": "Show the code"}
+HIDE = {"es": "Ocultar el código", "en": "Hide the code"}
+MASK_LABEL = {"es": "Clave oculta", "en": "Key hidden"}
+FOLD = {"es": "Más opciones: escribir los valores del enlace u olvidar este PC",
+        "en": "More options: type the link values, or forget this PC"}
+SPONSOR = {"es": {"by": "Patrocinado por Pendiapp.com", "cap": "Escanéalo para abrir pendiapp.com",
+                  "qr": "Código QR de pendiapp.com",
+                  "note": "Este PC ya está enlazado, por eso ya no se muestra su código. «Olvidar este PC», en «Más "
+                          "opciones», crea un código nuevo para enlazar."},
+           "en": {"by": "Sponsored by Pendiapp.com", "cap": "Scan it to open pendiapp.com",
+                  "qr": "QR code of pendiapp.com",
+                  "note": "This PC is already linked, so its code is no longer shown. «Forget this PC», under «More "
+                          "options», makes a new code to link."}}
+# The mask over the key: three groups of the same four 8 by 8 heads, whatever the key, named for a screen reader.
+MASK = re.compile(r'<span class="mask" role="img" aria-label="([^"]*)">(<span class="grp">((?:<svg class="mx" '
+                  r'viewBox="0 0 8 8" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true">'
+                  r'(?:(?!</?svg).)*</svg>){4})</span>)\2\2</span>')
+# Each figure's own move, once every 30 s, only while the system asks for no less motion; the hop is gone.
+MOVES = ("@media (prefers-reduced-motion:no-preference){\n"
+         ".px{transform-origin:50% 100%}\n"
+         ".px:nth-child(1){animation:px-archer 30s steps(1,end) infinite}\n"
+         ".px:nth-child(2){animation:px-knight 30s steps(1,end) infinite}\n"
+         ".px:nth-child(3){animation:px-mage 30s steps(1,end) infinite}\n"
+         ".px:nth-child(4){animation:px-creature 30s steps(1,end) infinite}\n"
+         "@keyframes px-archer{0%{transform:none}2%{transform:scaleX(-1)}5%,100%{transform:none}}\n"
+         "@keyframes px-knight{0%{transform:none}5%{transform:translateX(3px)}6.5%{transform:translateX(6px)}"
+         "8%{transform:translateX(3px)}9.5%,100%{transform:none}}\n"
+         "@keyframes px-mage{0%{transform:none}10%{transform:translateY(-3px)}11.5%{transform:translateY(-6px)}"
+         "16%{transform:translateY(-3px)}17.5%,100%{transform:none}}\n"
+         "@keyframes px-creature{0%{transform:none}18%{transform:translate(3px,-6px)}19%{transform:translate(3px,-3px)}"
+         "20%{transform:translate(0,-6px)}21%{transform:translate(0,-3px)}22%{transform:translate(-3px,-6px)}"
+         "23%{transform:translate(-3px,-3px)}24%,100%{transform:none}}}\n")
 
 
 class PageText(HTMLParser):
@@ -112,10 +156,15 @@ def without_icon(document):
     return icon_tags().sub("", document)
 
 
+def without_credit(document):
+    """The document with the foot's one link out taken out, its start tag only, once."""
+    return document.replace(CREDIT_LINK, "", 1)
+
+
 def outside_references(document):
     """Every href and url() of a page that is neither a fragment of the page itself nor the QR plate's data URI
-    nor the icon's."""
-    document = without_icon(document)
+    nor the icon's nor the foot's one link to the repository."""
+    document = without_credit(without_icon(document))
     found = re.findall(r'\bhref\s*=\s*"([^"]*)"', document) + re.findall(r"url\(([^)]*)\)", document)
     return [ref for ref in found if not ref.startswith("#") and ref != plate_almena.PLATE_DATA_URI]
 
@@ -320,8 +369,8 @@ class PairingPageTest(unittest.TestCase):
         extra = '<object data="data:image/png;base64,AAAA"></object>'
         added = shown.replace("</body>", extra + "</body>", 1)
         self.assertEqual(added.count(extra), 1)
-        self.assertEqual(KeyPlace(added, codes.display(secret)).data_places, [[{}], []])
-        self.assertEqual(KeyPlace(shown, codes.display(secret)).data_places, [[{}]])
+        self.assertEqual(KeyPlace(added, codes.display(secret)).data_places, [[], []])
+        self.assertEqual(KeyPlace(shown, codes.display(secret)).data_places, [[]])
 
     def data_places_with(self, extra):
         """KeyPlace's data_places on the unlinked page with `extra` added outside every details."""
@@ -332,15 +381,15 @@ class PairingPageTest(unittest.TestCase):
 
     def test_a_data_uri_with_a_leading_space_in_a_poster_is_a_place_outside_the_details(self):
         # A browser strips the space before the scheme, so the poster loads the PNG.
-        self.assertEqual(self.data_places_with('<video poster=" data:image/png;base64,AAAA"></video>'), [[{}], []])
+        self.assertEqual(self.data_places_with('<video poster=" data:image/png;base64,AAAA"></video>'), [[], []])
 
     def test_a_data_uri_with_a_leading_space_in_a_table_background_is_a_place_outside_the_details(self):
         self.assertEqual(self.data_places_with('<table background=" data:image/png;base64,AAAA"></table>'),
-                         [[{}], []])
+                         [[], []])
 
     def test_a_data_uri_with_an_upper_case_scheme_is_a_place_outside_the_details(self):
         # A browser folds the scheme's case, so DATA: is data:.
-        self.assertEqual(self.data_places_with('<video poster="DATA:image/png;base64,AAAA"></video>'), [[{}], []])
+        self.assertEqual(self.data_places_with('<video poster="DATA:image/png;base64,AAAA"></video>'), [[], []])
 
     def test_the_typed_road_stores_a_normalized_pair_and_refuses_a_malformed_one(self):
         # Mutation: the typed fields stored without normalizing. Red: the dashed form lands in the file.
@@ -389,7 +438,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(f'<html lang="{expected}">', shown)
                 self.assertIn(page.WORDS[expected]["forget"], shown)
                 self.assertIsNone(GAME_WORDS.search(shown))
-                self.assertNotIn("http", shown)
+                self.assertNotIn("http", without_credit(shown))
                 self.assertIsNone(re.search(r"\bsrc\s*=|<img|<link|@import", without_icon(shown)))
                 self.assertEqual(outside_references(shown), [])
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
@@ -409,11 +458,11 @@ class PairingPageTest(unittest.TestCase):
         for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
             with self.subTest(lang=lang):
                 shown, words = self.html(accept), page.WORDS[lang]
-                expected = [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER]
+                expected = [codes.display(secret) if key is None else words.get(key, key) for key in PAGE_ORDER]
                 self.assertEqual(PageText(shown).texts, expected[:1] + SWITCH_LABELS + expected[1:])
                 self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
                 for outside in ("<link", "src=", "@import", "@font-face", "http"):
-                    self.assertNotIn(outside, without_icon(shown))
+                    self.assertNotIn(outside, without_credit(without_icon(shown)))
                 self.assertEqual(outside_references(shown), [])
                 # The pairing address is only in the QR's own modules: the page draws the scene of the encoder's
                 # symbol over the one plate (SceneDecodeTest reads it with ZXing).
@@ -422,7 +471,7 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
         refused = list(PAGE_ORDER)
         refused.insert(refused.index("save") + 1, "typed_refused")
-        expected = [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused]
+        expected = [codes.display(secret) if key is None else page.WORDS["es"].get(key, key) for key in refused]
         self.assertEqual(PageText(self.html()).texts, expected[:1] + SWITCH_LABELS + expected[1:])
 
     def test_each_document_carries_one_tab_icon_from_a_data_uri_in_its_head(self):
@@ -437,18 +486,35 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(links[0], document.split("</head>")[0])
                 self.assertEqual(document.count('rel="icon"'), 1)
 
-    def test_the_pairing_page_title_row_shows_the_icon_left_of_the_title(self):
-        # Mutation: the img placed after the h1. Red: the row does not open with the img. Mutation: the alt text
-        # set to the title. Red: the row's img carries a non-empty alt.
+    def test_the_title_and_the_h1_read_the_name_on_every_page_and_the_old_sentence_is_the_tagline(self):
+        # Mutation: the h1 left as the sentence. Red: the row's h1 is not the name. Mutation: the img placed after the
+        # h1. Red: the row does not open with the img. Mutation: the stopped page's title left as the sentence. Red:
+        # its <title> is not the name.
         uri = icon_uri()
-        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
-            with self.subTest(lang=lang):
-                shown = self.html(accept)
-                title = html.escape(page.WORDS[lang]["title"])
-                self.assertEqual(shown.count("<img"), 1)
-                self.assertEqual(shown.count("<h1>"), 1)
-                self.assertIn(f'<div class="title-row"><img alt="" width="32" height="32" src="{uri}"><h1>{title}'
-                              f'</h1></div>', shown)
+        self.assertEqual((page.WORDS["es"]["title"], page.WORDS["en"]["title"]),
+                         ("Avisos de este PC", "Alerts from this PC"))
+        langs = (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en"))
+        pages = {"waiting": {lang: self.html(accept) for accept, lang in langs}}
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        pages["linked"] = {lang: self.html(accept) for accept, lang in langs}
+        for _ in range(3):
+            self.state.record_ping(worker.Refused())
+        pages["relink"] = {lang: self.html(accept) for accept, lang in langs}
+        for name, documents in pages.items():
+            for lang, shown in documents.items():
+                with self.subTest(page=name, lang=lang):
+                    tagline = html.escape(page.WORDS[lang]["title"])
+                    self.assertEqual((shown.count("<img"), shown.count("<h1>"), shown.count("<title>")), (1, 1, 1))
+                    self.assertIn(f"<title>{NAME}</title>", shown)
+                    self.assertIn(f'<div class="title-row"><img alt="" width="32" height="32" src="{uri}"><h1>{NAME}'
+                                  f'</h1></div><p class="tagline">{tagline}</p><p class="intro">', shown)
+        self.assertIn('action="/relink"', pages["relink"]["es"])
+        for lang in ("es", "en"):
+            with self.subTest(page="stopped", lang=lang):
+                stopped = self.page.render_stopped(lang)
+                self.assertEqual((stopped.count("<title>"), stopped.count("<h1>")), (1, 1))
+                self.assertIn(f"<title>{NAME}</title>", stopped)
+                self.assertIn(f"<h1>{NAME}</h1>", stopped)
         self.assertIn(".title-row{display:flex;align-items:center;gap:12px;margin:0 0 8px}", page._STYLE)
         self.assertIn(".title-row img{flex:none;image-rendering:pixelated}", page._STYLE)
         self.assertNotIn("<img", self.page.render_stopped("es"))
@@ -460,40 +526,183 @@ class PairingPageTest(unittest.TestCase):
         _, headers, shown = self.call("GET", "/")
         self.assertEqual(headers["content-security-policy"], TODAY_POLICY)
         for document in (shown, self.page.render("en"), self.page.render_stopped("es")):
+            document = without_credit(document)
             sources = re.findall(r'\b(?:src|href)\s*=\s*"([^"]*)"', document)
             self.assertIn(icon_uri(), sources)
             self.assertEqual([source for source in sources if not source.startswith(("data:", "#"))], [])
             self.assertEqual([source for source in sources if source.startswith(("http", "//"))], [])
             self.assertNotIn("http", document)
 
-    def test_the_qr_and_the_key_are_served_only_inside_one_closed_details_whose_summary_shows_the_code(self):
-        # Mutation: the QR drawn before the details, as on main. Red: the svg and its data URI have no details
-        # around them. Mutation: the details rendered open. Red: its attributes hold "open". Mutation: the timer's
-        # 60000 turned to 600000. Red: the script pin misses it.
-        secret = self.secret()
+    def test_the_code_is_shown_unfolded_and_its_key_sits_under_twelve_heads_until_the_reveal(self):
+        # Mutation: the details kept over the QR, as on main. Red: the QR and its plate sit inside a details.
+        # Mutation: the key rendered shown. Red: data-shown is not "false". Mutation: a head drawn from the key's
+        # characters. Red: the masks of two keys differ. Mutation: the timer's 60000 turned to 600000. Red: the
+        # script pin misses it.
+        first = self.secret()
+        masks = []
         for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
             with self.subTest(lang=lang):
-                shown = self.html(accept)
-                self.assertEqual(shown.count(codes.display(secret)), 1)
-                self.assertNotIn(secret, shown)
-                place = KeyPlace(shown, codes.display(secret))
-                self.assertEqual(place.places, [[{}]])
-                self.assertEqual(place.qr_places, [[{}]])
-                self.assertEqual(place.data_places, [[{}]])
-                self.assertEqual(place.details, [{}])
+                shown, words, key = self.html(accept), page.WORDS[lang], codes.display(first)
+                self.assertEqual(shown.count(key), 1)
+                self.assertNotIn(first, shown)
+                place = KeyPlace(shown, key)
+                self.assertEqual((place.places, place.qr_places, place.data_places, place.details),
+                                 ([[]], [[]], [[]], [{"class": "fold"}]))
                 self.assertEqual(shown.count("data:image/webp;base64,"), 1)
-                self.assertIn(f'<figure class="key-card"><details><summary>'
-                              f"{html.escape(page.WORDS[lang]['show_code'])}</summary>", shown)
-                self.assertIn(".key-card summary::-webkit-details-marker{display:none}", shown)
-        self.assertEqual((page.WORDS["es"]["show_code"], page.WORDS["en"]["show_code"]),
-                         ("Mostrar el código", "Show the code"))
-        self.assertNotIn("show_key", page.WORDS["es"])
-        self.assertNotIn("show_key", page.WORDS["en"])
-        # The one timer: opened, the details closes 60 s later; any toggle clears the timer first.
-        self.assertIn("const d=document.querySelector('.key-card details');let hide;"
-                      "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
-                      "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});", page._SCRIPT)
+                cards = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)
+                self.assertEqual(len(cards), 1)
+                card = cards[0]
+                self.assertTrue(card.startswith('<figure class="key-card"><svg class="qr"'), card[:120])
+                self.assertEqual((card.count("<details"), card.count("<summary")), (0, 0))
+                mask = MASK.search(card)
+                self.assertIsNotNone(mask, "no mask of three groups of the same four heads in the code card")
+                self.assertEqual(mask.group(1), MASK_LABEL[lang])
+                self.assertEqual(mask.group(0).count('<svg class="mx"'), 12)
+                self.assertEqual(len(set(re.findall(r'<svg class="mx".*?</svg>', mask.group(3)))), 4)
+                self.assertTrue(card.endswith(
+                    f'<p class="key" data-shown="false"><span class="key-label">{words["code_label"]}</span> '
+                    f'<span class="key-val">{mask.group(0)}<span class="code" id="code">{key}</span></span></p>'
+                    f'<button type="button" class="reveal" aria-controls="code" data-show="{SHOW[lang]}" '
+                    f'data-hide="{HIDE[lang]}">{SHOW[lang]}</button>{page._PARTY}</figure>'), card[-600:])
+                # The key's text is only the code's own: never in an attribute, a label or a name.
+                values = re.findall(r'=\s*"([^"]*)"', shown)
+                self.assertEqual([value for value in values if key in value or first in value], [])
+                masks.append(mask.group(0))
+        self.assertEqual(len(masks), 2, "a language's code card holds no mask")
+        self.assertEqual(masks[0], masks[1].replace(MASK_LABEL["en"], MASK_LABEL["es"]))
+        # The same heads whatever the key: the new key «Olvidar este PC» makes is masked by the same bytes.
+        self.assertEqual(self.call("POST", "/forget")[0], 303)
+        again = self.html("es-CO,es;q=0.9")
+        self.assertNotEqual(self.secret(), first)
+        self.assertIn(f'<span class="code" id="code">{codes.display(self.secret())}</span>', again)
+        self.assertEqual([found.group(0) for found in MASK.finditer(again)], masks[:1])
+        for lang in ("es", "en"):
+            self.assertEqual(tuple(page.WORDS[lang].get(name) for name in ("show_code", "hide_code", "mask")),
+                             (SHOW[lang], HIDE[lang], MASK_LABEL[lang]))
+        # The reveal shows the key and flips its label; 60 s after a show the key is masked again; one timer,
+        # cleared on every press.
+        self.assertIn("const k=document.querySelector('.key'),r=document.querySelector('.reveal');let hide;"
+                      "function showKey(on){k.dataset.shown=String(on);r.textContent=on?r.dataset.hide:r.dataset.show;"
+                      "clearTimeout(hide);if(on)hide=setTimeout(()=>showKey(false),60000);}"
+                      "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));", page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("setTimeout("), 1)
+        self.assertNotIn("details", page._SCRIPT)
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        linked = self.html()
+        self.assertEqual([marker for marker in ('class="key"', 'class="reveal"', 'class="mask"') if marker in linked],
+                         [])
+
+    def test_the_lower_part_is_one_fold_closed_unless_the_typed_link_was_refused(self):
+        # Mutation: the fold rendered open. Red: the waiting page's details carries open. Mutation: open left out on
+        # a refused typed link. Red: the refused page's fold is closed.
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown, words = self.html(accept), page.WORDS[lang]
+                self.assertEqual(KeyPlace(shown, "\0").details, [{"class": "fold"}])
+                self.assertIn(f'<details class="fold"><summary>{FOLD[lang]}</summary><section class="more">'
+                              f'<div class="panel"><h2>{html.escape(words["typed_title"])}</h2>', shown)
+                self.assertIn("</form></div></section></details>", shown)
+                self.assertEqual(page.WORDS[lang].get("fold"), FOLD[lang])
+        self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
+        refused = self.html()
+        self.assertEqual(KeyPlace(refused, "\0").details, [{"class": "fold", "open": None}])
+        self.assertIn(f'<details class="fold" open><summary>{FOLD["es"]}</summary>', refused)
+        self.assertIn(page.WORDS["es"]["typed_refused"], refused)
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        self.assertEqual(KeyPlace(self.html(), "\0").details, [{"class": "fold"}])
+
+    def test_the_foot_names_the_creator_and_the_repository_on_every_page(self):
+        # Mutation: the foot drawn only beside a quit, as on main. Red: the page with nothing to stop has no credit.
+        # Mutation: the link without rel noopener. Red: the credit differs.
+        def credit(lang):
+            return (f'<footer class="foot"><p class="credit">{CREDIT[lang]} <b>ElkinDev</b> · {CREDIT_LINK}'
+                    "github.com/ElkinDev/PendiFy</a></p>")
+
+        quits = page.PairingPage(self.state, on_quit=lambda: None)
+        documents = {}
+        for lang in ("es", "en"):
+            documents[("waiting", lang)] = (self.page.render(lang), "</footer>")
+            documents[("waiting with quit", lang)] = (quits.render(lang), '<form method="post" action="/quit">')
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for lang in ("es", "en"):
+            documents[("linked", lang)] = (self.page.render(lang), "</footer>")
+        for _ in range(3):
+            self.state.record_ping(worker.Refused())
+        for lang in ("es", "en"):
+            documents[("relink", lang)] = (self.page.render(lang), "</footer>")
+        for (name, lang), (shown, after) in documents.items():
+            with self.subTest(page=name, lang=lang):
+                self.assertEqual(shown.count("<footer"), 1)
+                self.assertIn(credit(lang) + after, shown)
+                self.assertEqual(shown.count("http"), 1)
+        self.assertEqual((page.WORDS["es"].get("credit"), page.WORDS["en"].get("credit")), (CREDIT["es"], CREDIT["en"]))
+
+    def test_the_linked_and_the_relink_pages_show_the_sponsored_qr_and_the_waiting_page_never(self):
+        # Mutation: the aside drawn whatever the state. Red: the waiting page holds it. Mutation: the note kept on
+        # the relink page. Red: its aside ends with the note.
+        def side(lang, note):
+            words = SPONSOR[lang]
+            return (re.escape(f'<aside class="side"><figure class="sponsor"><figcaption class="sponsor-by">{words["by"]}'
+                              '</figcaption><div class="arcade"><i></i><i></i><i></i><i></i><svg class="qr2" '
+                              f'viewBox="0 0 33 33" role="img" aria-label="{words["qr"]}" shape-rendering="crispEdges">'
+                              '<rect width="33" height="33" fill="#FFFFFF"/><path fill="#1E1533" d="')
+                    + r"(?:M\d+ \d+h\d+v1h-\d+z)+"
+                    + re.escape(f'"/></svg></div><p class="sponsor-cap">{words["cap"]}</p>{page._PARTY}</figure>'
+                                + (f'<p class="note">{words["note"]}</p>' if note else "") + "</aside></section>"))
+
+        for lang in ("es", "en"):
+            waiting = self.page.render(lang)
+            self.assertEqual([marker for marker in ("<aside", "qr2", SPONSOR[lang]["by"]) if marker in waiting], [])
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for lang in ("es", "en"):
+            with self.subTest(page="linked", lang=lang):
+                linked = self.page.render(lang)
+                self.assertEqual(linked.count("<aside"), 1)
+                self.assertRegex(linked, side(lang, True))
+        for _ in range(3):
+            self.state.record_ping(worker.Refused())
+        for lang in ("es", "en"):
+            with self.subTest(page="relink", lang=lang):
+                offered = self.page.render(lang)
+                self.assertIn('action="/relink"', offered)
+                self.assertEqual(offered.count("<aside"), 1)
+                self.assertRegex(offered, side(lang, False))
+                self.assertNotIn(SPONSOR[lang]["note"], offered)
+        for lang in ("es", "en"):
+            words = page.WORDS[lang]
+            self.assertEqual(tuple(words.get(name) for name in ("sponsor_by", "sponsor_cap", "sponsor_qr", "sponsor_note")),
+                             tuple(SPONSOR[lang][name] for name in ("by", "cap", "qr", "note")))
+
+    def test_the_party_holds_exactly_the_four_figures_on_every_page_that_draws_it(self):
+        # Mutation: a fifth figure or another child in the party. Red: .px:nth-child(1..4) would name other figures.
+        self.assertRegex(page._PARTY, r'\A<div class="party" aria-hidden="true">(?:<svg class="px" viewBox="0 0 16 16" '
+                                      r'width="48" height="48" shape-rendering="crispEdges">(?:(?!</?svg|<div).)*'
+                                      r"</svg>){4}</div>\Z")
+        self.assertEqual(self.html().count('<div class="party"'), 1)
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        self.assertEqual(self.html().count(page._PARTY), 1)
+
+    def test_the_stylesheet_moves_each_figure_alone_and_drops_the_hop_and_the_summary(self):
+        # Mutation: the hop kept beside the moves. Red: a hop rule in the style. Mutation: a move outside the guard.
+        # Red: the guard's block misses it, or an animation of a figure shows twice.
+        style = page._STYLE
+        self.assertIsNone(re.search(r"\bhop\b", style))
+        self.assertEqual([gone for gone in (".key-card summary", ".key-card details", ".shown{", "repeat(9,auto)",
+                                            "1440px", "min(max(1040px,85vw)", "#watch,") if gone in style], [])
+        self.assertIn(MOVES, style)
+        self.assertEqual((style.count("@keyframes px-"), style.count("animation:px-")), (4, 4))
+        self.assertIn('@media (prefers-reduced-motion:no-preference){#state[data-shown^="true"]::before{animation:'
+                      'breathe 2.4s ease-in-out infinite}}\n@keyframes breathe{50%{opacity:.3}}\n', style)
+        # The seat's corrections of the design sheet: the sponsored QR from its track, the watcher line keeps its cap
+        # unless paused, an explicit row for an eleventh child, the fold's paragraphs at 71ch; no px cap on the page.
+        for rule in ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}",
+                     "grid-template-rows:repeat(10,auto) 1fr;",
+                     ".link:has(.key-card)>:is(#state,#watch[data-paused],.pc,.log-card),"
+                     ".link:has(.side)>:is(#state,#watch[data-paused],.pc,.log-card){max-width:none}",
+                     ".fold .panel p{max-width:71ch}",
+                     "@media (min-width:880px){.qr2{width:min(330px,calc(clamp(340px,34vw,522px) - 82px));"
+                     "height:min(330px,calc(clamp(340px,34vw,522px) - 82px))}}"):
+            self.assertIn(rule, style)
 
     def test_the_theme_button_of_the_site_is_served_with_its_words_its_head_read_and_its_rules(self):
         # Mutation: the head read left out. Red: the head holds no pendi-theme read. Mutation: the dark variables
