@@ -291,6 +291,27 @@ class PairingPageTest(unittest.TestCase):
         self.assertIn(codes.display(secret), again)
         self.assertEqual(self.store.read(), config.Pairing(secret, None))
 
+    def test_only_the_icon_itself_is_taken_out_of_the_linked_page(self):
+        # A second 32 px image in the icon's tag shape but with another payload is not the icon: the linked page's
+        # "no data: outside the icon" pin must still see it.
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        linked = self.html()
+        extra = '<img alt="" width="32" height="32" src="data:image/png;base64,AAAA">'
+        added = linked.replace("</body>", extra + "</body>", 1)
+        self.assertEqual(added.count(extra), 1)
+        self.assertIn("data:", without_icon(added))
+        self.assertNotIn("data:", without_icon(linked))
+
+    def test_only_the_icon_itself_is_exempt_from_the_key_places(self):
+        # A PNG data URI outside every details is not the icon: KeyPlace must report it as a place outside them.
+        secret = self.secret()
+        shown = self.html()
+        extra = '<object data="data:image/png;base64,AAAA"></object>'
+        added = shown.replace("</body>", extra + "</body>", 1)
+        self.assertEqual(added.count(extra), 1)
+        self.assertEqual(KeyPlace(added, codes.display(secret)).data_places, [[{}], []])
+        self.assertEqual(KeyPlace(shown, codes.display(secret)).data_places, [[{}]])
+
     def test_the_typed_road_stores_a_normalized_pair_and_refuses_a_malformed_one(self):
         # Mutation: the typed fields stored without normalizing. Red: the dashed form lands in the file.
         before = self.store.read()
