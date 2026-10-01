@@ -2,8 +2,9 @@
 
 The page speaks the language kept in config.json when there is one, else the browser's first Accept-Language tag as
 before; one resolver serves the page, /state (the poll's sentences and the log's lines) and the stopped page. The
-switch is pendiapp.com's header markup, a span .langsw with ES then EN, the current one aria-current="true", right
-before the theme button; each entry is the submit button of a small form posting to /lang, fenced as /theme is.
+switch is pendiapp.com's header markup, one form .langsw that is the group (role="group", named «Idioma» or
+"Language") with ES then EN, the current one aria-current="true", right before the theme button; each entry is a
+submit button of that form posting its value to /lang, fenced as /theme is.
 """
 import contextlib
 import html
@@ -33,12 +34,13 @@ EVENTS = [(1, 1_700_000_000.0, "started", None), (2, 1_700_000_001.0, "connected
 
 
 def switch(lang, token, name):
-    """The switch as pendiapp.com's header draws it, on this page's form fence: ES then EN, the current one marked."""
+    """The switch as pendiapp.com's header draws it, on this page's form fence: one form that is the group, named in
+    the page's language, its token, then ES and EN, the current one marked."""
     current = ' aria-current="true"'
-    entries = "".join(f'<form method="post" action="/lang"><input type="hidden" name="token" value="{token}">'
-                      f'<button type="submit" name="lang" value="{code}"{current if code == lang else ""}>'
-                      f"{code.upper()}</button></form>" for code in ("es", "en"))
-    return f'<span class="langsw" aria-label="{name}">{entries}</span>'
+    entries = "".join(f'<button type="submit" name="lang" value="{code}"{current if code == lang else ""}>'
+                      f"{code.upper()}</button>" for code in ("es", "en"))
+    return (f'<form class="langsw" role="group" aria-label="{name}" method="post" action="/lang">'
+            f'<input type="hidden" name="token" value="{token}">{entries}</form>')
 
 
 class PageLanguageTest(unittest.TestCase):
@@ -156,6 +158,7 @@ class PageLanguageTest(unittest.TestCase):
                     self.assertEqual('action="/relink"' in document, state_name == "refused")
                     self.assertEqual(header(document), switch(lang, self.page.token, GROUP_NAMES[lang]))
                     self.assertEqual(document.count('class="langsw"'), 1)
+                    self.assertEqual(document.count('action="/lang"'), 1)
                     self.assertEqual(document.split("</head>")[1].count('aria-current="true"'), 1)
         self.call("POST", "/lang", {"lang": "en"})
         self.assertEqual(header(self.shown(SPANISH)), switch("en", self.page.token, "Language"))

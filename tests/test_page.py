@@ -503,8 +503,10 @@ class PairingPageTest(unittest.TestCase):
                 shown = self.html(accept)
                 self.assertEqual(shown.count('<button id="theme-toggle"'), 1)
                 # The header opens with the language switch, right before the button (lane pclang, OR-96).
-                self.assertRegex(shown, re.escape('<main class="page"><header class="bar"><span class="langsw" ')
-                                 + r"[^<]*>(?:(?!</span>).)*</span>"
+                self.assertRegex(shown, re.escape('<main class="page"><header class="bar"><form class="langsw" '
+                                                  f'role="group" aria-label="{page.WORDS[lang]["language"]}" '
+                                                  'method="post" action="/lang">')
+                                 + r"(?:(?!</form>).)*</form>"
                                  + re.escape(f'<button id="theme-toggle" class="icon-btn" type="button" '
                                              f'aria-pressed="false" aria-label="'
                                              f'{html.escape(page.WORDS[lang]["theme_toggle"])}"><svg class="moon"'))

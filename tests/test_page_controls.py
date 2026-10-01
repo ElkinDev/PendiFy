@@ -47,9 +47,9 @@ WATCH_LINE = re.compile(r'<p id="watch" role="status"(?: data-paused="")?>(.*?)<
 # The card's title, the one new word of round 2, as the sheet gives it.
 THIS_PC = {"es": "Este PC", "en": "This PC"}
 CARD_OPEN = '<div class="panel pc" role="group" aria-labelledby="pc-title">'
-FORM_ACTIONS = re.compile(r'<form method="post" action="([^"]+)"')
+FORM_ACTIONS = re.compile(r'<form [^>]*?\baction="([^"]+)"')
 # The language switch's two forms open every page's header, ahead of the card's (lane pclang, owner report OR-96).
-SWITCH_ACTIONS = ["/lang", "/lang"]
+SWITCH_ACTIONS = ["/lang"]
 FOREIGN_HOSTS = ("evil.example", "127.0.0.1", "localhost.evil.example:{port}", "127.0.0.2:{port}", "")
 WRONG_TOKENS = (False, "wrong")
 
