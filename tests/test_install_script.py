@@ -36,6 +36,11 @@ WINGET_LINE = (
 PLAN = "[plan] "
 FOUND = "Python: "
 STUB = "rem the Microsoft Store alias stub prints nothing"
+# What the installer asks the interpreter it installed with: where pip laid pcnotify.ico beside the modules.
+ICON_READ = ("import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];"
+             "print(os.path.join(os.path.dirname(u.find_spec('pcnotify').origin),'pcnotify.ico'))")
+ICON_GUARD = re.compile(r"^if \(\$iconPath -and \(Test-Path -LiteralPath \$iconPath -PathType Leaf\)\) \{ "
+                        r"try \{ \$shortcut\.IconLocation = \$iconPath \+ ',0' \} catch \{ \} \}$")
 
 
 def _powershell():
@@ -176,7 +181,7 @@ class InstallScriptTest(unittest.TestCase):
     @NEEDS_POWERSHELL
     def test_dry_run_as_a_file_prints_the_plan_in_order(self):
         # Mutation: PCNOTIFY_SOURCE ignored (the default source always used), red; the python.txt
-        # plan line dropped, red.
+        # plan line dropped, red; the icon plan line dropped, red.
         desktop, programs = _known_folder("Desktop"), _known_folder("Programs")
         done = _file_form(self.env())
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -186,14 +191,15 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(os.path.normcase(found[0].split(" (")[0]),
                          os.path.normcase(sys.executable))
         plan = _plan(lines)
-        self.assertEqual(len(plan), 5, plan)
+        self.assertEqual(len(plan), 6, plan)
         self.assertTrue(plan[0].endswith(
             " -m pip install --user --upgrade --force-reinstall --no-deps --no-warn-script-location "
             + DEFAULT_SOURCE), plan[0])
         self.assertEqual(plan[1], "anotar Python en " + str(self.record))
-        self.assertEqual(plan[2], "acceso directo: " + str(desktop / "pcnotify.lnk"))
-        self.assertEqual(plan[3], "acceso directo: " + str(programs / "pcnotify.lnk"))
-        self.assertTrue(plan[4].startswith("iniciar: ") and plan[4].endswith(" -m pcnotify"), plan[4])
+        self.assertEqual(plan[2], "icono: " + plan[0].split(" -m pip ")[0] + ' -c "' + ICON_READ + '"')
+        self.assertEqual(plan[3], "acceso directo: " + str(desktop / "pcnotify.lnk"))
+        self.assertEqual(plan[4], "acceso directo: " + str(programs / "pcnotify.lnk"))
+        self.assertTrue(plan[5].startswith("iniciar: ") and plan[5].endswith(" -m pcnotify"), plan[5])
         self.assertLess(lines.index(FOUND + found[0]), lines.index(PLAN + plan[0]))
 
         source = r"C:\some folder\pcnotify-main.zip"
@@ -206,7 +212,7 @@ class InstallScriptTest(unittest.TestCase):
         done = _file_form(self.env(PCNOTIFY_NOSTART="1"))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         plan = _plan(_lines(done))
-        self.assertEqual(len(plan), 4, plan)
+        self.assertEqual(len(plan), 5, plan)
         self.assertFalse([line for line in plan if line.startswith("iniciar: ")])
 
     @NEEDS_POWERSHELL
@@ -274,6 +280,56 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual([sorted(a - b) for a, b in zip(after, before)], [[], []])
         self.assertFalse((self.local / "Programs").exists())
         self.assertEqual(list(self.appdata.iterdir()), [])
+        # The dry run names the icon read and runs nothing for it (brief pcico, pin 3).
+        icon = [line for line in _plan(_lines(done)) if line.startswith("icono: ")]
+        self.assertEqual(len(icon), 1, done.stdout)
+        self.assertTrue(icon[0].endswith(' -c "' + ICON_READ + '"'), icon[0])
+
+    def test_the_shortcut_icon_is_set_only_behind_a_test_that_the_file_exists(self):
+        # Mutation: the Test-Path guard dropped (IconLocation set from whatever the read printed), red.
+        text = INSTALL.read_text(encoding="ascii")
+        lines = [line.strip() for line in text.splitlines() if "IconLocation" in line]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], ICON_GUARD)
+        self.assertEqual(text.count("ICON_READ"), 0)
+        self.assertEqual(text.count("pcnotify.ico"), 1)
+
+    def test_the_icon_read_drops_the_current_folder_before_the_lookup(self):
+        # Mutation: the removal dropped from the line (the folder the line runs in searched first), red on the text
+        # and on the run from a folder that holds a decoy pcnotify package.
+        text = INSTALL.read_text(encoding="ascii")
+        lines = [line.strip() for line in text.splitlines() if line.strip().startswith("$iconArgs = @('-c', '")]
+        self.assertEqual(len(lines), 1, lines)
+        code = lines[0][len("$iconArgs = @('-c', '"):-len("')")].replace("''", "'")
+        self.assertEqual(code, ICON_READ)
+        drop = code.find("sys.path[:]=[p for p in sys.path if p]")
+        self.assertNotEqual(drop, -1, code)
+        self.assertLess(drop, code.index("find_spec"))
+        base = ROOT / "build" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as work:
+            decoy = Path(work) / "pcnotify"
+            decoy.mkdir()
+            (decoy / "__init__.py").write_text("", encoding="ascii")
+            env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+            done = subprocess.run([sys.executable, "-c", code], cwd=work, env=env, capture_output=True, text=True,
+                                  timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(os.path.normcase(done.stdout.strip()),
+                         os.path.normcase(str(ROOT / "src" / "pcnotify" / "pcnotify.ico")))
+
+    def test_a_failed_icon_read_still_reaches_the_shortcut_save(self):
+        # Mutation: a return in the icon read's catch (a failed read stops the install), red. Mutation: the read
+        # left outside any try, red.
+        text = INSTALL.read_text(encoding="ascii")
+        read = text.index("& $python @iconArgs")
+        save = text.index("$shortcut.Save()")
+        self.assertLess(read, save)
+        opened = text.rfind("try {", 0, read)
+        self.assertNotEqual(opened, -1)
+        self.assertNotIn("}", text[opened + len("try {"):read], "the icon read is not inside a try")
+        self.assertIsNone(re.search(r"\b(return|exit|throw|break)\b", text[read:save]))
+        self.assertLess(text.index("catch { $iconPath = $null }", read), text.index("Creando accesos directos"))
 
     @NEEDS_POWERSHELL
     def test_a_banner_before_the_version_does_not_hide_a_working_python(self):

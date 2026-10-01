@@ -15,7 +15,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, config, plate_almena, qr
+from . import codes, config, icon, plate_almena, qr
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
@@ -24,9 +24,13 @@ MAX_FORM_BYTES = 4096
 DRAIN_BYTES = 64 * 1024
 # With no usable length the socket is read up to DRAIN_BYTES while bytes keep coming, each read waiting this long.
 DRAIN_WAIT = 0.1
-# img-src data: is the QR scene's plate, one image inlined as a data URI; no image loads from any origin.
+# img-src data: serves the QR scene's plate and the program's icon, each inlined as a data URI; none loads from an origin.
 POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+# The program's icon (icon.py, written by tools/make_icon.py), its 32 px PNG inlined as a data URI: the tab icon of both
+# documents and the image left of the pairing page's title, allowed by img-src data: with no new origin.
+ICON_URI = "data:image/png;base64," + icon.PNG_32
+_TAB_ICON = f'<link rel="icon" type="image/png" href="{ICON_URI}">'
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                  ("Content-Security-Policy", POLICY), ("X-Content-Type-Options", "nosniff"))
 
@@ -168,6 +172,8 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "body>h1,body>p{max-width:40rem;margin-inline:auto}\n"
           ".page{max-width:1040px;margin:0 auto}\n"
           "h1{margin:0 0 8px;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.01em}\n"
+          ".title-row{display:flex;align-items:center;gap:12px;margin:0 0 8px}.title-row h1{margin:0}\n"
+          ".title-row img{flex:none;image-rendering:pixelated}\n"
           ".intro{margin:0 0 24px;max-width:46ch;color:var(--ink2)}\n"
           "#state{display:flex;gap:12px;align-items:flex-start;max-width:40rem;margin:0;padding:12px 16px;"
           "border-radius:12px;background:var(--tint);font-weight:500}\n"
@@ -434,7 +440,8 @@ class PairingPage:
         token = html.escape(self.token)
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in their
         # own cards under it; quit at the foot. The words and their order are the page's before the design.
-        link = [f"<h1>{words['title']}</h1>", f'<p class="intro">{words["intro"]}</p>',
+        link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{words["title"]}</h1>'
+                f"</div>", f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
                 f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
                 f'{words["state_" + snapshot["state"]]}</p>']
@@ -479,7 +486,7 @@ class PairingPage:
                 f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
                 f"{foot}</main>")
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
-                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
+                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title>{_TAB_ICON}<style>{_STYLE}'
                 f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def render_stopped(self, lang):
@@ -488,7 +495,7 @@ class PairingPage:
         theme = self.state.theme()
         kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
-                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
+                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title>{_TAB_ICON}<style>{_STYLE}'
                 f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
 

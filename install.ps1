@@ -170,9 +170,24 @@
             }
         }
 
-        $pythonw =Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+        $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if ((Test-Path -LiteralPath $python) -and -not (Test-Path -LiteralPath $pythonw)) { $pythonw = $python }
         $startLine = (Format-Arg $pythonw) + ' ' + $StartArgs
+
+        # The icon pip laid beside the modules, asked of the interpreter that installed them. A failed read or a
+        # missing file leaves the shortcuts with the interpreter's own icon, as before; it never stops the install.
+        # Under -c the first search path entry is '', the folder the line runs in, so it goes before the lookup:
+        # a pcnotify folder there never answers for the installed package.
+        $iconArgs = @('-c', 'import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];print(os.path.join(os.path.dirname(u.find_spec(''pcnotify'').origin),''pcnotify.ico''))')
+        $iconPath = $null
+        if ($DryRun) {
+            Plan ('icono: ' + (Format-Arg $python) + ' ' + (($iconArgs | ForEach-Object { Format-Arg $_ }) -join ' '))
+        } else {
+            try {
+                $read = @(& $python @iconArgs 2>$null)
+                if ($LASTEXITCODE -eq 0 -and $read.Count -gt 0) { $iconPath = ([string]$read[-1]).Trim() }
+            } catch { $iconPath = $null }
+        }
 
         Say 'Creando accesos directos...'
         foreach ($folderName in @('Desktop', 'Programs')) {
@@ -193,6 +208,7 @@
                 $shortcut.Arguments = $StartArgs
                 $shortcut.WorkingDirectory = $env:USERPROFILE
                 $shortcut.Description = 'pcnotify'
+                if ($iconPath -and (Test-Path -LiteralPath $iconPath -PathType Leaf)) { try { $shortcut.IconLocation = $iconPath + ',0' } catch { } }
                 $shortcut.Save()
                 Say ('Acceso directo: ' + $link)
             } catch {
