@@ -305,9 +305,9 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
             since = self.arrive(subject)  # the clock road
             self.game.clock(CLOCK)
             self.step_at(subject, since + 1.0)
+            self.game.answer = None
             self.read(subject, "EndOfGame", "Lobby", "InProgress")  # the wait road
             since = self.clock()
-            self.game.answer = None
             self.step_at(subject, since + 120.0)
             self.read(subject, "EndOfGame", "Lobby", "InProgress")  # the lost road
             since, credentials.port, self.fake.dropping = self.clock(), None, True
