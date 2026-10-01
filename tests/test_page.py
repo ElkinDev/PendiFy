@@ -276,7 +276,8 @@ class PairingPageTest(unittest.TestCase):
         linked = self.html()
         for value in ('<svg class="qr"', "data:", secret, codes.display(secret), LINK_ID, codes.display(LINK_ID),
                       'action="/relink"'):
-            self.assertNotIn(value, linked)
+            # The icon's own data URI stays on every page (brief pcico); no other data: may.
+            self.assertNotIn(value, without_icon(linked))
         self.call("POST", "/relink")  # nothing offered: a no-op
         self.assertEqual(self.store.read().link_id, LINK_ID)
         for _ in range(3):
@@ -788,6 +789,10 @@ class PairingPageTest(unittest.TestCase):
                     self.assertIn(html.escape(words[key]), body)
                 self.assertIsNone(GAME_WORDS.search(body), body)
                 self.assertNotIn(self.page.token, body)
+        # The stop runs after the answer is written, on the server's thread: the reader may finish first.
+        deadline = time.monotonic() + 2.0
+        while len(quits) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertEqual(quits, [True, True])
 
     def test_quit_stops_the_program_even_when_its_answer_cannot_be_written(self):
