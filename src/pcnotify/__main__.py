@@ -178,8 +178,18 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
     try:
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
         watch, alerter = _watcher(args, store, state, base, timeout, stop, delay, beep)
-        # The page's quit sets the same stop event as Ctrl+C: the watcher, the page and the run file end below.
-        pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=stop.set, on_pause=watch.pause,
+
+        def quit_page():
+            # The page's quit marks the record closing at once, since a tick can be held in a slow check before
+            # the finally runs, then sets the same stop event as Ctrl+C: the watcher, the page and the run file
+            # end below.
+            try:
+                run.mark_closing()
+            except OSError:
+                pass  # unmarked, the finally marks it again; the stop goes on
+            stop.set()
+
+        pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events)
         url = pairing_page.start()
         watching = threading.Thread(target=watch.run, daemon=True)
@@ -197,7 +207,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             pass
         finally:
             stop.set()
-            try:  # first, so a start made while this one stops waits for it instead of opening a closing page
+            # First, so a start made while this one stops waits for it instead of opening a closing page: Ctrl+C
+            # and Ctrl+Break are marked only here, and the page's quit, marked already, is marked again.
+            try:
                 run.mark_closing()
             except OSError:
                 pass  # unmarked, a start meanwhile opens this page as before; the stop goes on

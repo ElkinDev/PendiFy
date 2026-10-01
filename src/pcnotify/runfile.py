@@ -24,6 +24,10 @@ FILE_NAME = "run.json"
 # create and its port once its page listens.
 REREAD_SECONDS = 1.0
 REREAD_STEP = 0.05
+# A start re-reading the file holds it for about a millisecond, and Windows refuses this holder's remove or replace
+# meanwhile: each is tried REFUSED_TRIES times, REFUSED_STEP apart, 40 ms of waits in all.
+REFUSED_TRIES = 5
+REFUSED_STEP = 0.01
 _STILL_ACTIVE = 259
 _ERROR_ACCESS_DENIED = 5
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -174,7 +178,8 @@ class RunFile:
             self._sleep(REREAD_STEP)
 
     def publish(self, port):
-        """This process's pid and its page's port, written over the claim in one move."""
+        """This process's pid and its page's port, written over the claim in one move; PermissionError when the
+        move is still refused after its retries."""
         self._write({"pid": self._pid, "port": port})
         self._port = port
 
@@ -189,23 +194,37 @@ class RunFile:
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 json.dump(record, out)
-            os.replace(temp, self.path)
+            self._retried(os.replace, temp, self.path)
         except BaseException:
             if os.path.exists(temp):
                 os.remove(temp)
             raise
 
     def release(self):
-        """Removes the file when this process holds it and it still names this process."""
+        """Removes the file when this process holds it and it still names this process; a remove still refused
+        after its retries leaves the file and raises nothing."""
         if not self._held:
             return
         self._held = False
         holder = self._read()
         if holder is not None and holder["pid"] == self._pid:
             try:
-                os.remove(self.path)
+                self._retried(os.remove, self.path)
             except FileNotFoundError:
                 pass
+            except PermissionError:
+                pass  # refused to the end: the file stays, and a start waiting on it takes it over once this pid dies
+
+    def _retried(self, move, *args):
+        """`move(*args)`, tried again REFUSED_STEP later while a reader makes the system refuse it, REFUSED_TRIES
+        times in all; the last refusal raises."""
+        for attempt in range(1, REFUSED_TRIES + 1):
+            try:
+                return move(*args)
+            except PermissionError:
+                if attempt == REFUSED_TRIES:
+                    raise
+                self._sleep(REFUSED_STEP)
 
     def _live_holder(self):
         """The record of a live process other than this one, or None."""
