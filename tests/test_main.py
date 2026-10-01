@@ -192,15 +192,30 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(self.store.read().link_id, LINK_ID)
         self.assertEqual(fake.bodies(), [{"secret": self.store.read().secret}])
 
-    def test_the_page_does_not_open_once_linked(self):
-        # Mutation: the browser opened whatever the state. Red: the opener is called.
+    def test_a_start_by_a_person_opens_the_page_once_linked(self):
+        # Mutation: the browser opened only while the code shows. Red: the opener is never called on a linked PC.
         self.store.set_typed(LINK_ID, SECRET)
         opened, stop = [], threading.Event()
         stop.set()
         code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
-                                       opener=opened.append, stop=stop)
-        self.assertEqual((code, opened, err), (0, [], ""))
-        self.assertRegex(out, r"^page: http://127\.0\.0\.1:\d+/\n$")
+                                       opener=lambda url: opened.append(url) or True, stop=stop)
+        self.assertEqual((code, err, len(opened)), (0, "", 1))
+        self.assertRegex(opened[0], r"^http://127\.0\.0\.1:\d+/$")
+        self.assertEqual(out, f"page: {opened[0]}\n")
+
+    def test_a_quiet_start_opens_nothing_linked_or_not(self):
+        # Mutation: --quiet no longer guards the opener. Red: the opener is called at logon.
+        for linked in (False, True):
+            with self.subTest(linked=linked):
+                if linked:
+                    self.store.set_typed(LINK_ID, SECRET)
+                opened, stop = [], threading.Event()
+                stop.set()
+                code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                               "--quiet", opener=lambda url: opened.append(url) or True, stop=stop)
+                self.assertEqual((code, opened, err), (0, [], ""))
+                self.assertRegex(out, r"^page: http://127\.0\.0\.1:\d+/\n$")
+                self.assertEqual(self.store.read().link_id is not None, linked)
 
     def read_run(self):
         try:
