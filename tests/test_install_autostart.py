@@ -169,7 +169,7 @@ class InstallAutostartTest(unittest.TestCase):
 
     def test_a_real_uninstall_run_removes_the_value_after_the_package(self):
         # Mutation: the removal left out of Invoke-Uninstall. Red: the value outlives the run.
-        folders = [scripts._known_folder("Desktop"), scripts._known_folder("Programs")]
+        folders = [scripts._checked_folder(scripts._known_folder(name)) for name in ("Desktop", "Programs")]
         if any((folder / "PendiFy.lnk").exists() for folder in folders):
             self.skipTest("a real PendiFy shortcut exists; this run is not dry and must not reach it")
         fake = self.tmp / "recorded" / "python.cmd"

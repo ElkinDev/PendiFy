@@ -94,6 +94,19 @@ def _known_folder(name):
     return Path(done.stdout.strip())
 
 
+def _checked_folder(folder):
+    """The folder _known_folder read, refused unless it is one absolute path to an existing directory.
+
+    A failed or noisy PowerShell read turns into an empty, relative or multi-line path, and Path("") is
+    the current folder: a test that then runs a script for real could reach a real file. It raises, so
+    the test errors instead of skipping or running.
+    """
+    text = str(folder)
+    if "\n" in text or "\r" in text or not folder.is_absolute() or not folder.is_dir():
+        raise RuntimeError("the known folder read is not one absolute existing directory: " + repr(text))
+    return folder
+
+
 def _lines(done):
     return [line.rstrip() for line in done.stdout.splitlines() if line.strip()]
 
@@ -198,6 +211,23 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(english.group(1).count(UNINSTALL_LINE), 1)
         self.assertEqual(text.count(UNINSTALL_LINE), 2)
 
+    def test_a_folder_read_that_is_not_one_absolute_directory_is_refused(self):
+        # Mutation: the is_absolute check dropped. Red: Path("") (an empty answer, the current folder) and the
+        # relative path to an existing directory pass.
+        a_file = self.tmp / "a-file"
+        a_file.write_text("x", encoding="ascii")
+        refused = {
+            "empty": Path(""),
+            "relative": Path(os.path.relpath(self.fakes)),
+            "not a directory": a_file,
+            "two lines": Path(str(self.tmp) + "\n" + str(self.tmp)),
+        }
+        for label, folder in refused.items():
+            with self.subTest(answer=label):
+                with self.assertRaises(RuntimeError):
+                    _checked_folder(folder)
+        self.assertEqual(_checked_folder(self.fakes), self.fakes)
+
     @NEEDS_POWERSHELL
     def test_dry_run_as_a_file_prints_the_plan_in_order(self):
         # Mutation: PENDIFY_SOURCE ignored (the default source always used), red; the python.txt
@@ -292,7 +322,7 @@ class InstallScriptTest(unittest.TestCase):
     def test_dry_run_writes_no_shortcut_and_no_file(self):
         # Mutation: the python.txt write not guarded by the dry run, red. (The shortcut step unguarded
         # reds the snapshot too, but would write a real shortcut, so it is not the named mutation.)
-        folders = [_known_folder("Desktop"), _known_folder("Programs")]
+        folders = [_checked_folder(_known_folder("Desktop")), _checked_folder(_known_folder("Programs"))]
         before = [{p.name for p in folder.iterdir()} for folder in folders]
         done = _file_form(self.env())
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -425,7 +455,7 @@ class InstallScriptTest(unittest.TestCase):
     @NEEDS_POWERSHELL
     def test_uninstall_reports_a_package_pip_left_in_place_and_exits_1(self):
         # Mutation: the pip show check after pip uninstall removed (the removal assumed), red.
-        folders = [_known_folder("Desktop"), _known_folder("Programs")]
+        folders = [_checked_folder(_known_folder("Desktop")), _checked_folder(_known_folder("Programs"))]
         if any((folder / "PendiFy.lnk").exists() for folder in folders):
             self.skipTest("a real PendiFy shortcut exists; this run is not dry and must not reach it")
         fake = self.tmp / "recorded" / "python.cmd"
