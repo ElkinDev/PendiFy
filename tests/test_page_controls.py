@@ -314,7 +314,7 @@ class PageControlsTest(unittest.TestCase):
             with self.subTest(language=language, linked=True):
                 shown = self.call("GET", "/", language=language)[2]
                 self.assertIsNotNone(after_watch.search(shown))
-                self.assertLess(shown.index(CARD_OPEN), shown.index('</section><section class="more">'))
+                self.assertLess(shown.index(CARD_OPEN), shown.index('</section><details class="fold"'))
         self.call("POST", "/forget")  # the pairing page: the key card in its own column
         for language in ("es", "en"):
             with self.subTest(language=language, linked=False):
@@ -322,7 +322,7 @@ class PageControlsTest(unittest.TestCase):
                 self.assertIsNotNone(after_watch.search(shown))
                 places = [shown.index(marker) for marker in ('<section class="link">', '<p id="watch"', CARD_OPEN,
                                                              '<p class="scan"', '<figure class="key-card"',
-                                                             'action="/check"', '</section><section class="more">')]
+                                                             'action="/check"', '</section><details class="fold"')]
                 self.assertEqual(places, sorted(places))
                 texts = PageText(shown).texts
                 self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:texts.index(page.WORDS[language]["scan"])],

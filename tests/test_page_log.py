@@ -63,7 +63,7 @@ LANGUAGES = (("es", 3), ("en-US,en;q=0.8", 4))
 # The card's two words, as the sheet writes them.
 TITLES = {"es": ("Actividad", "Lo que el programa vio y avisó desde que empezó en este PC."),
           "en": ("Activity", "What the program saw and alerted since it started on this PC.")}
-LINK = re.compile(r'<section class="link">(.*?)</section><section class="more">', re.S)
+LINK = re.compile(r'<section class="link">(.*?)</section><details class="fold"', re.S)
 LOG_CARD = re.compile(r'<div class="panel log-card">.*?</ol></div></div>', re.S)
 PC_CARD = re.compile(r'<div class="panel pc"[^>]*>.*?</div>', re.S)  # the card «Este PC» holds no div of its own
 
@@ -220,10 +220,17 @@ class PageLogTest(unittest.TestCase):
                     return (f'<form method="post" action="/relink"><input type="hidden" name="token" '
                             f'value="{token}"><button type="submit">{html.escape(words["relink"])}</button></form>')
 
+                # The sponsored aside ends the section, drawn in its own column (the page's design of 2026-10-01);
+                # the first column ends before it, with the relink and the card.
+                self.assertEqual(link.count('<aside class="side">'), 1)
+                self.assertTrue(link.endswith("</aside>"))
+                link = link[:link.index('<aside class="side">')]
                 self.assertTrue(link.endswith(relink(self.page.token) + card))
                 self.assertLessEqual(PC_CARD.search(link).end(), link.index(relink(self.page.token)))
                 # Without the events the column is the same up to and including the relink form: it does not move.
                 without = LINK.search(self.get("/", language, bare)).group(1)
+                self.assertTrue(without.endswith("</aside>"))
+                without = without[:without.index('<aside class="side">')]
                 self.assertNotIn('class="panel log-card"', without)
                 self.assertTrue(without.endswith(relink(bare.token)))
                 self.assertEqual(link[:link.index(relink(self.page.token))].replace(self.page.token, "TOKEN"),
