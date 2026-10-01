@@ -109,7 +109,7 @@ License: MIT
     python -m pcnotify
     python -m pcnotify ping <kind>
 
-The first loads the config, starts the page and opens it in the default browser while the PC is not paired.
+The first loads the config, starts the page and opens it in the default browser, paired or not.
 It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps, and when the match itself starts it beeps and sends the started alert.
 Add `--dry` to watch and alert without accepting. Add `--quiet` for the start by the system at logon, the line the start with Windows switch writes (`pythonw -m pcnotify --quiet`): it never opens the browser, a start that ends well shows no window, and a second quiet start prints `already running` and exits. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
 The second sends one alert with the stored pair and prints one line with the answer.
