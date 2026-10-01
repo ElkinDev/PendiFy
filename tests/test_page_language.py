@@ -93,7 +93,8 @@ class PageLanguageTest(unittest.TestCase):
             self.assertIn(f'<html lang="{lang}"><head>', document)
             self.assertIn(f"<title>{html.escape(words['title'])}</title>", document)
             self.assertIn(html.escape(words["log_title"]), document)
-            self.assertEqual(document.count('aria-current="true"'), 1)
+            # One entry marked in the body; the style's own rule names the attribute too.
+            self.assertEqual(document.split("</head>")[1].count('aria-current="true"'), 1)
             self.assertIn(switch(lang, self.page.token, GROUP_NAMES[lang]), document)
         if state is not None:
             self.assertEqual(state["lang"], lang)
@@ -155,7 +156,7 @@ class PageLanguageTest(unittest.TestCase):
                     self.assertEqual('action="/relink"' in document, state_name == "refused")
                     self.assertEqual(header(document), switch(lang, self.page.token, GROUP_NAMES[lang]))
                     self.assertEqual(document.count('class="langsw"'), 1)
-                    self.assertEqual(document.count('aria-current="true"'), 1)
+                    self.assertEqual(document.split("</head>")[1].count('aria-current="true"'), 1)
         self.call("POST", "/lang", {"lang": "en"})
         self.assertEqual(header(self.shown(SPANISH)), switch("en", self.page.token, "Language"))
         self.assertEqual((page.WORDS["es"]["language"], page.WORDS["en"]["language"]), ("Idioma", "Language"))
