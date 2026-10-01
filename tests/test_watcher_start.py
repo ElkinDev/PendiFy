@@ -168,6 +168,47 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
             self.step_at(subject, since + second)
         self.assertEqual((len(self.beeps), len(self.pings), self.game.count()), (2, 1, asks))
 
+    def test_a_clock_of_zero_on_every_read_never_fires_the_wait_and_a_clock_above_zero_is_then_the_start(self):
+        # Mutation: the restart on a number not above zero dropped. Red: the ping on the wait at 120 s.
+        self.game.clock(0)
+        subject = self.watcher()
+        since = self.arrive(subject)
+        for second in range(1, 301):
+            self.step_at(subject, since + second)
+        self.assertEqual((len(self.beeps), self.pings, self.game.count()), (1, [], 301))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "loading"))
+        self.assertNotIn(watcher.STARTED_ON_WAIT_LINE, self.lines)
+        self.game.clock(CLOCK)
+        self.step_at(subject, since + 301)
+        self.assertEqual((len(self.beeps), self.pings), (2, [STARTED_PING]))
+        self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)),
+                         (0, 1))
+
+    def assert_the_wait_runs_from_the_last_number(self, seconds):
+        """The clock answering `seconds` until second 100, then no clock: the wait fires at 220 s, not at 219 s."""
+        self.game.clock(seconds)
+        subject = self.watcher()
+        since = self.arrive(subject)
+        for second in range(1, 101):
+            self.step_at(subject, since + second)
+        self.game.answer = None
+        for second in range(101, 220):
+            self.step_at(subject, since + second)
+        self.assertEqual((len(self.beeps), self.pings, self.game.count()), (1, [], 220))
+        self.assertNotIn(watcher.STARTED_ON_WAIT_LINE, self.lines)
+        self.step_at(subject, since + 220.0)
+        self.assertEqual((len(self.beeps), self.pings), (2, [STARTED_PING]))
+        self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)),
+                         (1, 0))
+
+    def test_the_wait_runs_from_the_last_clock_of_zero_and_fires_120_s_after_it_with_no_clock(self):
+        # Mutation: the restart on a number not above zero dropped. Red: the ping on the wait at 120 s.
+        self.assert_the_wait_runs_from_the_last_number(0)
+
+    def test_a_negative_clock_restarts_the_wait_as_zero_does(self):
+        # Mutation: the restart on zero only (== 0). Red: the ping on the wait at 120 s.
+        self.assert_the_wait_runs_from_the_last_number(-0.5)
+
     def test_the_wait_fires_only_on_a_step_whose_phase_read_was_in_progress(self):
         # Mutation: the wait firing on any phase. Red: the ping at 120 s while the phase read is Reconnect.
         subject = self.watcher()
