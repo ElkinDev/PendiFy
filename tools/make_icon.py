@@ -4,7 +4,8 @@
     python tools/make_icon.py --check   exits 1 when a committed file differs from what this would write
 
 pcnotify.ico holds five frames: 16 (the 16 grid), 32 (the 32 grid), and 48, 64 and 256 from the 32 grid by nearest
-neighbour, each pixel taking the source cell floor((x + 0.5) * 32 / size). The frames up to 64 are 32-bit BGRA bitmaps
+neighbour. At 64 and 256 each pixel takes the source cell floor((x + 0.5) * 32 / size); at 48 it takes the cell
+SOURCE_48 names, the table of the reviewed 48 px render. The frames up to 64 are 32-bit BGRA bitmaps
 with their AND mask, the 256 frame is a PNG: the layout Windows reads since Vista. icon.py holds the 32 and 16 px
 frames as PNG in base64 for the page. The PNGs are compressed by the small deflate below, not by zlib.compress, so
 their bytes do not change with the zlib build an interpreter carries.
@@ -26,6 +27,12 @@ MODULE_PATH = ROOT / "src" / "pcnotify" / "icon.py"
 SIZES = (16, 32, 48, 64, 256)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TRANSPARENT = (0, 0, 0, 0)
+
+# The source cell of each output row and column of the 48 frame, the same table for both axes: the nearest-neighbour
+# table of the reviewed 48 px render, read from its pixels. It differs from floor((x + 0.5) * 32 / 48) at 4, 16, 19,
+# 22 and 25, where the render took the cell before.
+SOURCE_48 = (0, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 10, 11, 12, 12, 13, 14, 14, 15, 16, 16, 17, 18, 19, 19,
+             20, 21, 21, 22, 23, 23, 24, 25, 25, 26, 27, 27, 28, 29, 29, 30, 31, 31)
 
 # Deflate's fixed tables (RFC 1951, 3.2.5): length codes 257 to 285 and distance codes 0 to 29.
 LENGTH_BASE = (3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163,
@@ -138,10 +145,11 @@ def frame(size):
     """The frame of `size` as (r, g, b, a) rows, top row first."""
     grid = icon_grid.GRIDS[16] if size == 16 else icon_grid.GRIDS[32]
     n = len(grid)
+    source = SOURCE_48 if size == 48 else [(2 * i + 1) * n // (2 * size) for i in range(size)]
     rows = []
     for y in range(size):
-        line = grid[(2 * y + 1) * n // (2 * size)]
-        rows.append([_colour(line[(2 * x + 1) * n // (2 * size)]) for x in range(size)])
+        line = grid[source[y]]
+        rows.append([_colour(line[source[x]]) for x in range(size)])
     return rows
 
 

@@ -132,17 +132,27 @@ def decode_ico(data):
     return frames
 
 
+# The 48 frame's source cell per row and column, written here on its own (never read from the tool): the
+# nearest-neighbour table of the reviewed 48 px render, which the owner approved.
+SOURCE_48 = [0, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 10, 11, 12, 12, 13, 14, 14, 15, 16, 16, 17, 18, 19, 19,
+             20, 21, 21, 22, 23, 23, 24, 25, 25, 26, 27, 27, 28, 29, 29, 30, 31, 31]
+
+
 def expected_rows(grid_module, size):
-    """The frame of `size` as Change 2 draws it: the 16 grid at 16, else the 32 grid, each pixel taking the
-    source cell floor((x + 0.5) * n / size)."""
+    """The frame of `size`: the 16 grid at 16, else the 32 grid; at 48 each pixel takes the source cell SOURCE_48
+    names, at the other sizes the cell floor((x + 0.5) * n / size)."""
     grid = grid_module.GRIDS[16] if size == 16 else grid_module.GRIDS[32]
     n = len(grid)
+    if size == 48:
+        source = SOURCE_48
+    else:
+        source = [math.floor((i + 0.5) * n / size) for i in range(size)]
     rows = []
     for y in range(size):
-        line = grid[math.floor((y + 0.5) * n / size)]
+        line = grid[source[y]]
         row = []
         for x in range(size):
-            cell = line[math.floor((x + 0.5) * n / size)]
+            cell = line[source[x]]
             if cell == ".":
                 row.append(TRANSPARENT)
             else:
@@ -184,8 +194,8 @@ class IconFileTest(unittest.TestCase):
         self.assertEqual(tool.build_icon_module(), tool.build_icon_module())
 
     def test_the_icon_holds_five_frames_each_equal_to_its_grid(self):
-        # Mutation: the 48 frame scaled from x * 32 // 48 (the cell's left edge, not its centre). Red: the 48 frame
-        # differs from the grid rule. Mutation: the AND mask left all zero. Red: the decoder sees an opaque bit over
+        # Mutation: one SOURCE_48 entry moved by one (in the tool, the icon regenerated). Red: the 48 frame differs
+        # from the test's own table. Mutation: the AND mask left all zero. Red: the decoder sees an opaque bit over
         # a transparent pixel.
         grid = load_tool("icon_grid")
         frames = decode_ico(ICO.read_bytes())
