@@ -37,7 +37,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 ### Qué envía y a quién
 
-Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pcnotify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego.
+Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pcnotify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego. Para saber cuándo empieza la partida lee el reloj del juego en este mismo PC, y no lo guarda ni lo envía.
 
 ### `--dry`
 
@@ -82,7 +82,7 @@ The button at the top right switches between the light and the dark theme, and t
 
 ### What it sends and to whom
 
-It only sends, to Pendi's link service, the alert kind (match found or match started) together with the link id and this PC's secret, which live in `%APPDATA%\pcnotify\config.json`. The service delivers it to the account you linked. It sends no name, no match history and nothing else from the game.
+It only sends, to Pendi's link service, the alert kind (match found or match started) together with the link id and this PC's secret, which live in `%APPDATA%\pcnotify\config.json`. The service delivers it to the account you linked. It sends no name, no match history and nothing else from the game. To tell when the match starts it reads the game's clock on this same PC, and neither keeps nor sends it.
 
 ### `--dry`
 
@@ -96,7 +96,7 @@ License: MIT
     python -m pcnotify ping <kind>
 
 The first loads the config, starts the page and opens it in the default browser while the PC is not paired.
-It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps and sends the started alert.
+It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps, and when the match itself starts it beeps and sends the started alert.
 Add `--dry` to watch and alert without accepting. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
 The second sends one alert with the stored pair and prints one line with the answer.
 
