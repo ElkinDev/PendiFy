@@ -90,17 +90,22 @@ TODAY_POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; s
 # The program's icon as the page carries it: the tab icon in the head and, on the pairing page, the image left of the
 # title, both the 32 px PNG of icon.py as a data URI.
 ICON_PREFIX = "data:image/png;base64,"
-ICON_TAGS = re.compile(r'<link rel="icon" type="image/png" href="data:image/png;base64,[A-Za-z0-9+/=]+">'
-                       r'|<img alt="" width="32" height="32" src="data:image/png;base64,[A-Za-z0-9+/=]+">')
 
 
 def icon_uri():
     return ICON_PREFIX + support.module("icon").PNG_32
 
 
+def icon_tags():
+    """The icon's two tags, each only with the icon's own data URI; the same shape with another payload is not it."""
+    uri = re.escape(icon_uri())
+    return re.compile(f'<link rel="icon" type="image/png" href="{uri}">'
+                      f'|<img alt="" width="32" height="32" src="{uri}">')
+
+
 def without_icon(document):
     """The document with the icon's own link and image taken out, for the pins that allow no other image."""
-    return ICON_TAGS.sub("", document)
+    return icon_tags().sub("", document)
 
 
 def outside_references(document):
@@ -120,6 +125,7 @@ class KeyPlace(HTMLParser):
         super().__init__()
         self.key, self.open_details, self.details, self.places = key, [], [], []
         self.qr_places, self.data_places = [], []
+        self.icon = icon_uri()
         self.feed(document)
         self.close()
 
@@ -127,7 +133,7 @@ class KeyPlace(HTMLParser):
         if tag == "svg" and ("class", "qr") in attrs:
             self.qr_places.append(list(self.open_details))
         self.data_places += [list(self.open_details) for _, value in attrs
-                             if (value or "").startswith("data:") and not (value or "").startswith(ICON_PREFIX)]
+                             if (value or "").startswith("data:") and value != self.icon]
         if tag == "details":
             self.open_details.append(dict(attrs))
             self.details.append(dict(attrs))

@@ -24,7 +24,7 @@ MAX_FORM_BYTES = 4096
 DRAIN_BYTES = 64 * 1024
 # With no usable length the socket is read up to DRAIN_BYTES while bytes keep coming, each read waiting this long.
 DRAIN_WAIT = 0.1
-# img-src data: is the QR scene's plate, one image inlined as a data URI; no image loads from any origin.
+# img-src data: serves the QR scene's plate and the program's icon, each inlined as a data URI; none loads from an origin.
 POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 # The program's icon (icon.py, written by tools/make_icon.py), its 32 px PNG inlined as a data URI: the tab icon of both
