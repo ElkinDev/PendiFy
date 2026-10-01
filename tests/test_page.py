@@ -592,6 +592,53 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual([marker for marker in ('class="key"', 'class="reveal"', 'class="mask"') if marker in linked],
                          [])
 
+    def assert_the_key_reads_with_scripts_off(self, document):
+        """The page's head holds one <noscript> whose only child is a <style> that shows the code and hides the
+        mask and the reveal, the way a browser with scripts blocked reads the key; the key itself stays where it was,
+        once in the document and never inside the noscript."""
+        key = codes.display(self.secret())
+        found = re.findall(r"<noscript>(.*?)</noscript>", document, re.S)
+        self.assertEqual(len(found), 1, "no noscript, or more than one, on a page that draws the key")
+        self.assertLess(document.index("<noscript>"), document.index("</head>"))
+        style = re.fullmatch(r"<style>([^<]*)</style>", found[0])
+        self.assertIsNotNone(style, f"the noscript holds more than one style: {found[0][:200]}")
+        rules = {selector.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", style.group(1))
+                 for selector in selectors.split(",")}
+        # The same selector as the mask's own rule, later in the document, so it wins with scripts off.
+        self.assertEqual(rules.get('.key[data-shown="false"] .code'), "visibility:visible")
+        self.assertEqual((rules.get(".mask"), rules.get(".reveal")), ("display:none", "display:none"))
+        self.assertNotIn(key, found[0])
+        self.assertEqual(document.count(key), 1)
+        self.assertEqual(KeyPlace(document, key).places, [[]])
+        self.assertEqual(outside_references(document), [])
+        self.assertIn('<p class="key" data-shown="false">', document)
+
+    def test_the_waiting_page_shows_its_key_with_scripts_off_in_both_languages(self):
+        # Mutation: the noscript style dropped. Red: no noscript. Mutation: the key written inside the noscript.
+        # Red: the key counted twice.
+        for accept in ("es-CO,es;q=0.9", "en-US,en;q=0.9"):
+            with self.subTest(accept=accept):
+                self.assert_the_key_reads_with_scripts_off(self.html(accept))
+
+    def test_the_waiting_page_with_the_button_refused_shows_its_key_with_scripts_off(self):
+        wait = html.escape(page.WORDS["es"]["button_wait"])
+        for _ in range(20):  # the button is refused once its window of checks is full
+            self.assertEqual(self.call("POST", "/check")[0], 303)
+            refused = self.html("es-CO,es;q=0.9")
+            if wait in refused:
+                break
+        self.assertIn(wait, refused)
+        self.assert_the_key_reads_with_scripts_off(refused)
+
+    def test_the_page_after_a_relink_shows_its_key_with_scripts_off(self):
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for _ in range(3):
+            self.state.record_ping(worker.Refused())
+        self.assertEqual(self.call("POST", "/relink")[0], 303)
+        again = self.html("en-US,en;q=0.9")
+        self.assertIn('<svg class="qr"', again)
+        self.assert_the_key_reads_with_scripts_off(again)
+
     def test_the_lower_part_is_one_fold_closed_unless_the_typed_link_was_refused(self):
         # Mutation: the fold rendered open. Red: the waiting page's details carries open. Mutation: open left out on
         # a refused typed link. Red: the refused page's fold is closed.
