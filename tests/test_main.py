@@ -281,7 +281,7 @@ class MainCommandTest(unittest.TestCase):
                 stop, pings = threading.Event(), len(fake.requests)
                 accepts = client_fake.count("POST", support.CLIENT_ACCEPT_PATH)
                 thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
-                                                    "--client-lockfile", str(lockfile), *argv, opener=None,
+                                                    "--client-lockfile", str(lockfile), *argv, opener=lambda url: True,
                                                     stop=stop, delay=lambda: 0)
                 fake.wait_for(pings + 1, limit=3)
                 stop.set()
@@ -312,7 +312,8 @@ class MainCommandTest(unittest.TestCase):
         lockfile.write_text(f"LeagueClient:4242:{client_fake.port}:{TOKEN}:https", encoding="utf-8")
         stop = threading.Event()
         thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
-                                            "--client-lockfile", str(lockfile), "--dry", opener=None, stop=stop)
+                                            "--client-lockfile", str(lockfile), "--dry",
+                                            opener=lambda url: True, stop=stop)
         fake.wait_for(1, limit=3)
         stop.set()
         thread.join(5)

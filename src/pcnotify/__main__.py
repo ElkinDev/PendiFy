@@ -178,7 +178,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         try:
             run.publish(pairing_page.port)
             print(f"page: {url}", flush=True)
-            if not args.quiet and state.snapshot()["showCode"] and not opener(url):
+            if not args.quiet and not opener(url):  # a start by a person opens the page, linked or not
                 print("open the address above in a browser", flush=True)
             watching.start()
             while True:
