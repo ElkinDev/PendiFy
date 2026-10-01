@@ -560,7 +560,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual(mask.group(0).count('<svg class="mx"'), 12)
                 self.assertEqual(len(set(re.findall(r'<svg class="mx".*?</svg>', mask.group(3)))), 4)
                 self.assertTrue(card.endswith(
-                    f'<p class="key" data-shown="false"><span class="key-label">{words["code_label"]}</span> '
+                    f'<p class="key" data-shown="false"><span class="key-label">{html.escape(words["code_label"])}</span> '
                     f'<span class="key-val">{mask.group(0)}<span class="code" id="code">{key}</span></span></p>'
                     f'<button type="button" class="reveal" aria-controls="code" data-show="{SHOW[lang]}" '
                     f'data-hide="{HIDE[lang]}">{SHOW[lang]}</button>{page._PARTY}</figure>'), card[-600:])
@@ -652,7 +652,7 @@ class PairingPageTest(unittest.TestCase):
 
         for lang in ("es", "en"):
             waiting = self.page.render(lang)
-            self.assertEqual([marker for marker in ("<aside", "qr2", SPONSOR[lang]["by"]) if marker in waiting], [])
+            self.assertEqual([marker for marker in ("<aside", '<svg class="qr2"', SPONSOR[lang]["by"]) if marker in waiting], [])
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         for lang in ("es", "en"):
             with self.subTest(page="linked", lang=lang):
