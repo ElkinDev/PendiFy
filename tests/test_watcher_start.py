@@ -14,7 +14,7 @@ import unittest
 
 import support
 from support import LINK_ID, SECRET
-from test_watcher import GAME_WORDS, MATCH_STARTED, TOKEN, Credentials, WatcherFixture
+from test_watcher import GAME_WORDS, MATCH_STARTED, QUEUE_FOUND, TOKEN, Credentials, WatcherFixture
 
 client = support.module("client")
 watcher = support.module("watcher")
@@ -51,7 +51,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assertEqual((watcher.LOADING_LINE, watcher.STARTED_LINE, watcher.STARTED_ON_WAIT_LINE),
                          ("loading screen: waiting for the match to start", "match started: alerting",
                           "match started: the game gave no clock, alerting on the wait"))
-        self.assertEqual(support.module("worker").KINDS, ("lol_queue_found", "lol_match_started"))
+        self.assertEqual(support.module("worker").KINDS, (QUEUE_FOUND, MATCH_STARTED))  # no new kind
 
     def test_the_arrival_of_in_progress_beeps_once_pings_nothing_and_shows_the_loading_screen(self):
         # Mutation: the arrival firing match_started at once, as before. Red: a ping and the alert "started".
@@ -283,7 +283,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         held_from, asks = self.clock(), self.game.count()
         self.steps_until(subject, held_from + 15.0)
         self.read(subject, "Lobby", "Matchmaking")
-        self.assertEqual((self.game.count(), [kind for *_, kind in self.pings]), (asks, ["lol_queue_found"]))
+        self.assertEqual((self.game.count(), [kind for *_, kind in self.pings]), (asks, [QUEUE_FOUND]))
 
     def test_the_request_to_the_game_s_port_carries_no_authorization_and_reads_the_clock_path_only(self):
         # Mutation: the token passed to the game's port. Red: an Authorization header on the game's port.
