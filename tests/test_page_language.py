@@ -142,9 +142,10 @@ class PageLanguageTest(unittest.TestCase):
 
     def test_the_switch_is_the_sites_markup_right_before_the_theme_button_on_each_page_state(self):
         # Mutation: EN drawn before ES. Red: the markup differs. Mutation: the switch drawn after the theme button.
-        # Red: the header does not open with the switch.
+        # Red: the header does not open with the credit and then the switch.
         def header(document):
-            return re.search(r'<header class="bar">(.*?)<button id="theme-toggle"', document).group(1)
+            return re.search(r'<header class="bar"><p class="credit">(?:(?!</p>).)*</p>(.*?)<button id="theme-toggle"',
+                             document).group(1)
 
         for state_name in ("waiting", "linked", "refused"):
             if state_name == "linked":

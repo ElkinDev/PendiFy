@@ -35,9 +35,9 @@ FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer
                  ("Content-Security-Policy", POLICY), ("X-Content-Type-Options", "nosniff"))
 # The program's name (owner 2026-10-01): the title and the h1 of the pairing page and of the stopped page.
 NAME = "PendiFy"
-# The foot's credit: the creator's handle and the repository, a link out that opens in a new tab with no opener and
-# no referrer. A link loads nothing, so the policy above is unchanged.
-CREATOR = "ElkinDev"
+# The top bar's credit: the creator's handle and the repository, a link out that opens in a new tab with no opener
+# and no referrer. A link loads nothing, so the policy above is unchanged.
+CREATOR = "Niklerk"
 REPOSITORY = "https://github.com/ElkinDev/PendiFy"
 # The address the linked page's sponsored QR encodes.
 SPONSOR_ADDRESS = "https://pendiapp.com"
@@ -272,7 +272,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".key{display:grid;gap:2px;margin:0}\n"
           ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
           # The header's actions as pendiapp.com's .nav-actions holds them: the language switch, then the theme button.
-          ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}\n"
+          ".bar{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}\n"
           # pendiapp.com's language switch (assets/styles.css, .langsw), its variables mapped to the page's own:
           # --hairline to --hair, --muted to --ink2, --brand and --on-brand as they are. Each entry is a submit
           # button, so the page's button look is set back to the site's link: no minimum height, no border, no fill,
@@ -439,9 +439,9 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
            # The program's name in the title row, and the sentence it took the place of under it.
            ".tagline{margin:0 0 16px;font-size:16px;line-height:24px;font-weight:500;color:var(--ink)}\n"
            "@media (min-width:880px){.tagline{font-size:18px;line-height:28px}}\n"
-           # The creator and the repository at the foot, «Salir» stays right.
-           ".foot{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px 24px}\n"
+           # The creator and the repository first in the top bar, at the left end of the row of its two controls.
            ".credit{margin:0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+           ".bar .credit{margin-right:auto}\n"
            ".credit b{font-weight:600;color:var(--ink)}\n"
            ".credit a{color:var(--brand);text-decoration:underline;text-decoration-thickness:1px;"
            "text-underline-offset:3px;border-radius:4px}\n"
@@ -907,12 +907,12 @@ class PairingPage:
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         quit_form = "" if self.on_quit is None else _form("quit", token, quit_button)
-        foot = (f'<footer class="foot"><p class="credit">{words["credit"]} <b>{CREATOR}</b> · <a href="{REPOSITORY}" '
-                f'target="_blank" rel="noopener noreferrer">{REPOSITORY.removeprefix("https://")}</a></p>{quit_form}'
-                "</footer>")
+        foot = "" if self.on_quit is None else f'<footer class="foot">{quit_form}</footer>'
+        credit = (f'<p class="credit">{words["credit"]} <b>{CREATOR}</b> · <a href="{REPOSITORY}" target="_blank" '
+                  f'rel="noopener noreferrer">{REPOSITORY.removeprefix("https://")}</a></p>')
         # The typed link and the forget in one fold, open when the typed values were refused so the note shows.
         fold = " open" if snapshot["typedRefused"] else ""
-        bar = (f'<header class="bar">{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
+        bar = (f'<header class="bar">{credit}{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
                f'type="button" aria-pressed="false" '
                f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
         theme = self.state.theme()
