@@ -126,19 +126,27 @@ class QrDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 
-    def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_7_8_and_10_px_a_module(self):
+    def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_6_7_8_and_10_px_a_module(self):
         # Mutation: the runs drawn from another text. Red: ZXing reads that text. Mutation: the quiet zone drawn 2
-        # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules.
-        drawings = re.findall(r'<svg class="qr2".*?</svg>', linked_page())
+        # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules. The sizes are
+        # the page's own: every side its style gives the code, a whole number of px a module (lane pcnw, OR-99: 198 px
+        # under 360 px). Mutation: the 359 px rule left out. Red: the sides are 7, 8 and 10 px a module only.
+        shown = linked_page()
+        drawings = re.findall(r'<svg class="qr2".*?</svg>', shown)
         self.assertEqual(len(drawings), 1)
         rows = run_modules(drawings[0])
         code = qr.encode(SPONSOR_ADDRESS.encode("ascii"))
         self.assertEqual(rows, support.quiet_padded(code.modules, 4))
+        sides = [int(side) for side in re.findall(r"\.qr2\{(?:display:block;)?width:(?:min\()?(\d+)px", shown)]
+        self.assertEqual(sorted(sides), [198, 231, 264, 330])
+        self.assertEqual([side % len(rows) for side in sides], [0] * 4)
+        sizes = sorted(side // len(rows) for side in sides)
+        self.assertEqual(sizes, [6, 7, 8, 10])
         scaled = [[[rows[r // size][c // size] for c in range(len(rows) * size)] for r in range(len(rows) * size)]
-                  for size in (7, 8, 10)]
+                  for size in sizes]
         status, decoded, errors = zxing_decode(scaled)
         self.assertEqual(status, 0, errors[-1500:])
-        self.assertEqual(decoded, [SPONSOR_ADDRESS] * 3)
+        self.assertEqual(decoded, [SPONSOR_ADDRESS] * 4)
 
 
 def png_size(path):

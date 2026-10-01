@@ -769,6 +769,14 @@ class PairingPageTest(unittest.TestCase):
                      "@media (min-width:880px){.qr2{width:min(330px,calc(clamp(340px,34vw,522px) - 82px));"
                      "height:min(330px,calc(clamp(340px,34vw,522px) - 82px))}}"):
             self.assertIn(rule, style)
+        # Lane pcnw (OR-99): under 360 px the sponsored code is 198 px square, 6 px a module, so a 320 px window keeps
+        # the sponsor's frame inside its gutters; the rule comes after the 399 px one so it wins. Mutation: the rule
+        # placed before the 399 px one. Red: its index is not past the 399 px rule's.
+        narrow = "@media (max-width:359px){.qr2{width:198px;height:198px}}\n"
+        under_400 = "@media (max-width:399px){.qr2{width:231px;height:231px}}\n"
+        self.assertEqual((style.count(narrow), style.count(under_400)), (1, 1))
+        self.assertGreater(style.index(narrow), style.index(under_400))
+        self.assertIn(".qr2{display:block;width:264px;height:264px;outline:4px solid var(--px-line)}\n", style)
 
     def test_the_theme_button_of_the_site_is_served_with_its_words_its_head_read_and_its_rules(self):
         # Mutation: the head read left out. Red: the head holds no pendi-theme read. Mutation: the dark variables
