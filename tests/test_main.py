@@ -24,6 +24,7 @@ from support import LINK_ID, SECRET, error
 config = support.module("config")
 entry = support.module("__main__")
 page = support.module("page")
+runfile = support.module("runfile")
 watcher = support.module("watcher")
 worker = support.module("worker")
 
@@ -38,6 +39,10 @@ READ_ONLY_WINDOWS_ONLY = ("the read-only attribute refuses a remove on Windows o
 ROOT_WRITES = "root writes into a folder whatever its mode, so no folder can refuse it a new file"
 EVERYONE = "*S-1-1-0"  # the well-known SID of Everyone: a deny for it binds this user, no account name looked up
 QUIT_TOKEN = re.compile(r'<form method="post" action="/quit"><input type="hidden" name="token" value="([^"]+)">')
+# The closing copy's port: below the dynamic range, so the page a start serves itself can never have it.
+CLOSING_PORT = 1023
+CLOSING_BOUND = 15.0  # how long a start waits for a closing copy to let its run file go
+PAGE_LINE = re.compile(r"page: (http://127\.0\.0\.1:\d+/)\n")
 
 
 def answers(port):
@@ -192,15 +197,30 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(self.store.read().link_id, LINK_ID)
         self.assertEqual(fake.bodies(), [{"secret": self.store.read().secret}])
 
-    def test_the_page_does_not_open_once_linked(self):
-        # Mutation: the browser opened whatever the state. Red: the opener is called.
+    def test_a_start_by_a_person_opens_the_page_once_linked(self):
+        # Mutation: the browser opened only while the code shows. Red: the opener is never called on a linked PC.
         self.store.set_typed(LINK_ID, SECRET)
         opened, stop = [], threading.Event()
         stop.set()
         code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
-                                       opener=opened.append, stop=stop)
-        self.assertEqual((code, opened, err), (0, [], ""))
-        self.assertRegex(out, r"^page: http://127\.0\.0\.1:\d+/\n$")
+                                       opener=lambda url: opened.append(url) or True, stop=stop)
+        self.assertEqual((code, err, len(opened)), (0, "", 1))
+        self.assertRegex(opened[0], r"^http://127\.0\.0\.1:\d+/$")
+        self.assertEqual(out, f"page: {opened[0]}\n")
+
+    def test_a_quiet_start_opens_nothing_linked_or_not(self):
+        # Mutation: --quiet no longer guards the opener. Red: the opener is called at logon.
+        for linked in (False, True):
+            with self.subTest(linked=linked):
+                if linked:
+                    self.store.set_typed(LINK_ID, SECRET)
+                opened, stop = [], threading.Event()
+                stop.set()
+                code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                               "--quiet", opener=lambda url: opened.append(url) or True, stop=stop)
+                self.assertEqual((code, opened, err), (0, [], ""))
+                self.assertRegex(out, r"^page: http://127\.0\.0\.1:\d+/\n$")
+                self.assertEqual(self.store.read().link_id is not None, linked)
 
     def read_run(self):
         try:
@@ -252,6 +272,75 @@ class MainCommandTest(unittest.TestCase):
                 self.assertEqual(seen["run"], {"pid": os.getpid(), "port": int(seen["url"].split(":")[2].strip("/"))})
                 self.assertFalse(self.run_file.exists())
 
+    def closing_holder(self):
+        """A copy still closing after its quit: alive (the process that started this test), its port published
+        and its record marked closing."""
+        self.run_file.parent.mkdir(parents=True, exist_ok=True)
+        record = {"pid": os.getppid(), "port": CLOSING_PORT, "closing": True}
+        self.run_file.write_text(json.dumps(record), encoding="utf-8")
+        return record
+
+    def test_the_stop_marks_the_run_file_closing_before_it_waits_for_the_watcher(self):
+        # Mutation: the mark written after the joins. Red: the record still reads not closing while the stop waits
+        # for a watcher that takes time.
+        client_fake = support.FakeClient(phase="ReadyCheck")
+        self.addCleanup(client_fake.close)
+        lockfile = self.no_client.parent.parent / "a client" / "lockfile"
+        lockfile.parent.mkdir(parents=True)
+        lockfile.write_text(f"LeagueClient:4242:{client_fake.port}:{TOKEN}:https", encoding="utf-8")
+        opened, seen, stop = [], {}, threading.Event()
+
+        def delay():  # the watcher's accept delay: its thread is still in it when the program stops
+            running = os.path.getsize(self.run_file)  # the size only: a read could hold the file under the mark
+            stop.set()
+            deadline = time.monotonic() + 2
+            while os.path.getsize(self.run_file) == running and time.monotonic() < deadline:
+                time.sleep(0.01)
+            seen["record"] = self.read_run()
+            return 0
+
+        code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                       "--client-lockfile", str(lockfile),
+                                       opener=lambda url: opened.append(url) or True, stop=stop, delay=delay)
+        port = int(opened[0].split(":")[2].strip("/"))
+        self.assertEqual((code, err, seen.get("record")), (0, "", {"pid": os.getpid(), "port": port, "closing": True}))
+        self.assertFalse(self.run_file.exists())  # released after the joins, as before
+
+    def test_a_start_against_a_closing_holder_waits_for_its_release_then_starts_its_own_page(self):
+        # Mutation: the closing mark ignored. Red: the closing copy's page opened and no page of its own started.
+        # Mutation: the wait bounded by REREAD_SECONDS. Red: the page-not-known line before the release at 3 s.
+        steps = round(3 / runfile.REREAD_STEP)  # the closing copy lets its file go 3 fake seconds in
+        for flags, opens in (((), 1), (("--quiet",), 0)):
+            with self.subTest(flags=flags):
+                self.closing_holder()
+                clock = FakeClock(*[lambda: None] * (steps - 1), self.run_file.unlink)
+                opened, stop = [], threading.Event()
+                stop.set()  # the start that goes on ends at its first tick
+                code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                               *flags, opener=lambda url, opened=opened: opened.append(url) or True,
+                                               stop=stop, clock=clock.clock, sleep=clock.sleep)
+                served = PAGE_LINE.fullmatch(out)
+                self.assertEqual((code, err, served is not None), (0, "", True), out)
+                self.assertEqual(opened, [served.group(1)] * opens)
+                self.assertNotIn(f"http://127.0.0.1:{CLOSING_PORT}/", opened)
+                self.assertAlmostEqual(clock.now, 3.0)
+                self.assertFalse(self.run_file.exists())  # its own run file, released at its own stop
+
+    def test_a_closing_holder_that_never_lets_go_ends_as_the_page_not_known_and_opens_nothing(self):
+        # Mutation: the closing check at the bound removed. Red: the closing copy's page opened.
+        # Mutation: the bound doubled. Red: the fake clock reads past it.
+        for flags, line in (((), entry.PAGE_NOT_KNOWN_LINE), (("--quiet",), entry.QUIET_RUNNING_LINE)):
+            with self.subTest(flags=flags):
+                record = self.closing_holder()
+                clock, opened, stop = FakeClock(), [], threading.Event()
+                stop.set()  # a start that wrongly goes on ends at its first tick
+                result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9", *flags,
+                                       opener=opened.append, stop=stop, clock=clock.clock, sleep=clock.sleep)
+                self.assertEqual((result, opened, self.read_run()), ((0, line + "\n", ""), [], record))
+                self.assertGreaterEqual(clock.now, CLOSING_BOUND)
+                self.assertLess(clock.now, CLOSING_BOUND + 2 * runfile.REREAD_STEP)
+                self.assertFalse(self.store.path.exists())  # no page, so no first load of the config
+
     def test_the_watcher_runs_beside_the_page_and_dry_turns_the_accept_off(self):
         # Mutation: --dry ignored, the accept left on. Red: an accept posted under --dry.
         self.store.set_typed(LINK_ID, SECRET)
@@ -266,7 +355,7 @@ class MainCommandTest(unittest.TestCase):
                 stop, pings = threading.Event(), len(fake.requests)
                 accepts = client_fake.count("POST", support.CLIENT_ACCEPT_PATH)
                 thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
-                                                    "--client-lockfile", str(lockfile), *argv, opener=None,
+                                                    "--client-lockfile", str(lockfile), *argv, opener=lambda url: True,
                                                     stop=stop, delay=lambda: 0)
                 fake.wait_for(pings + 1, limit=3)
                 stop.set()
@@ -297,7 +386,8 @@ class MainCommandTest(unittest.TestCase):
         lockfile.write_text(f"LeagueClient:4242:{client_fake.port}:{TOKEN}:https", encoding="utf-8")
         stop = threading.Event()
         thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base,
-                                            "--client-lockfile", str(lockfile), "--dry", opener=None, stop=stop)
+                                            "--client-lockfile", str(lockfile), "--dry",
+                                            opener=lambda url: True, stop=stop)
         fake.wait_for(1, limit=3)
         stop.set()
         thread.join(5)
@@ -477,6 +567,47 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(result["run"], (0, f"page: {opened[0]}\n", ""))
         for key in ("stopped", "start_again"):
             self.assertIn(html.escape(page.WORDS["en"][key]), body)
+
+
+    def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):
+        # Mutation: the page's quit only sets the stop. Red: the record still reads not closing while the tick
+        # is held in a slow check on a PC not linked and the page already serves the stopped page.
+        held, release = threading.Event(), threading.Event()
+        fake = self.fake(lambda path, body: (held.set(), release.wait(10), (200, {"linkId": LINK_ID}))[2])
+        self.addCleanup(release.set)  # runs before the fake closes: a red never leaves its handler held
+        seen, stop = {}, threading.Event()
+
+        def request(port, method, path, body=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                headers = {"Host": f"127.0.0.1:{port}", "Accept-Language": "en"}
+                if body is not None:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                return response.status, response.read().decode("utf-8")
+            finally:
+                connection.close()
+
+        def opener(url):  # the browser: its first fetch makes the page open, so the first tick checks
+            seen["port"] = int(url.split(":")[2].strip("/"))
+            request(seen["port"], "GET", "/state")
+            seen["token"] = QUIT_TOKEN.search(request(seen["port"], "GET", "/")[1]).group(1)
+            return True
+
+        thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base, opener=opener,
+                                            stop=stop)
+        self.assertTrue(held.wait(5))  # the tick is inside its check
+        status = request(seen["port"], "POST", "/quit", urllib.parse.urlencode({"token": seen["token"]}))[0]
+        stopped = stop.wait(5)  # the quit's callable sets the stop last, so its mark is written by now
+        record = self.read_run()
+        release.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual((status, stopped, record), (200, True, {"pid": os.getpid(), "port": seen["port"],
+                                                                 "closing": True}))
+        self.assertEqual(result["run"][0], 0)
+        self.assertFalse(self.run_file.exists())  # released at the end, as before
 
 
 if __name__ == "__main__":

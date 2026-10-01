@@ -19,7 +19,12 @@ a resume is a fresh connection, so a game already under way then alerts nothing.
 rests for every count it has not honored, so a pause and a resume that both land inside one sleep or one step still
 rest it once. A pause that lands inside a step posts no accept after the delay and starts no alert, and its started
 line is not said. The pause lives in memory only: every start is active.
+
+The log (lane pclog): a ring of the last LOG_LINES events, each (seq, at, kind, detail), noted where the console line
+of the same moment is said, the ping's result through the Alerter's listen at the ping's own time; seq rises by one
+from 1 and never repeats in a run. events() answers a copy for the page. It lives in memory only, as the pause does.
 """
+import collections
 import json
 import random
 import threading
@@ -38,6 +43,7 @@ NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
+LOG_LINES = 50  # the events the log keeps, the newest
 
 CONNECTED_LINE = "connected to the game client"
 LOST_LINE = "lost the game client, looking for it again"
@@ -98,6 +104,13 @@ class Watcher:
         self._pauses = 0  # every pause counted by the page's thread, under the lock; the loop compares it
         self._honored = 0  # the count of the last pause the loop has rested for; read and written by it only
         self._resting = False  # the loop's own record that it has acted on a pause; read and written by it only
+        self._events = collections.deque(maxlen=LOG_LINES)  # the log, (seq, at, kind, detail); under the lock
+        self._seq = 0  # the last event's seq, under the lock; never reset in a run of the program
+        self._ran = False  # run() has noted the start; read and written by the loop only
+        self._waiting_due = True  # the next turn with no client notes waiting: after the start and after a resume
+        listen = getattr(alert, "listen", None)
+        if callable(listen):  # an Alerter tells each ping's result; the tests' plain fakes have no listen
+            listen(self._on_ping)
 
     def stop(self):
         self._stop.set()
@@ -122,6 +135,9 @@ class Watcher:
         """The loop: a step, then its pause, until stopped. A step that breaks is said by its type and the
         client is looked for again, so the watcher never ends while the page says it runs."""
         while not self._stop.is_set():
+            if not self._ran:
+                self._ran = True
+                self._note("started")
             with self._lock:
                 pauses = self._pauses
             paused = self._paused.is_set()
@@ -135,10 +151,15 @@ class Watcher:
                 if self._resting:
                     self._resting = False
                     self._log(RESUMED_LINE)
+                    self._note("resumed")
+                    self._waiting_due = True
                 try:
                     pause = self.step()
                 except Exception as failure:
+                    connected = self._found is not None  # the log says lost only of a client this turn had
                     self._log(STEP_FAILED_LINE.format(type(failure).__name__))
+                    if connected:
+                        self._note("lost")
                     self._forget()
                     pause = NO_CLIENT_PAUSE
             if self._stop.is_set():
@@ -154,11 +175,16 @@ class Watcher:
         if self._found is None:
             found = self._credentials.read()
             if found is None:
+                if self._waiting_due:  # once per waiting period; never right after lost, whose line says the search
+                    self._waiting_due = False
+                    self._note(WAITING)
                 self._watch(None)  # the watch outlives a lost client
                 return NO_CLIENT_PAUSE
             self._found = found
             self._set_client(CONNECTED)
             self._log(CONNECTED_LINE)
+            self._note(CONNECTED)
+            self._waiting_due = False
         base = self._addresses(self._found.port)
         token = self._found.token
         phase = None
@@ -171,6 +197,7 @@ class Watcher:
                 self._on_phase(phase, base, token)
         except client.ClientUnreachable:  # S:796-798
             self._log(LOST_LINE)
+            self._note("lost")
             self._forget()
             phase = None
         self._watch(phase)
@@ -185,12 +212,33 @@ class Watcher:
             return {"client": self._client_state, "phase": self._last_phase, "alert": name, "at": at,
                     "pingResult": ping, "pingAt": ping_at, "paused": self._paused.is_set()}
 
+    def events(self):
+        """The log: the last LOG_LINES events of this run, oldest first, as (seq, at, kind, detail) in a list the
+        caller may keep or change."""
+        with self._lock:
+            return list(self._events)
+
+    def _note(self, kind, detail=None, at=None):
+        """One event in the log: the next seq, the wall time unless the event brings its own, the kind and its
+        detail; under the lock events() reads with, since a ping is noted from the Alerter's thread."""
+        at = self._wall() if at is None else at
+        with self._lock:
+            self._seq += 1
+            self._events.append((self._seq, at, kind, detail))
+
+    def _on_ping(self, name, at):
+        """The Alerter's listener: a ping's result name and its own time."""
+        self._note("ping", name, at)
+
     def _on_phase(self, phase, base, token):
         # An arrival is InProgress after a read of another phase. The first read is not one: an alert for a game
         # already under way says nothing (S:755-757). A first read of InProgress or of Reconnect is such a game, so
         # it sets the latch, and the InProgress that follows (after a Reconnect of that same game, or the one the
         # Reconnect ends in) says nothing either. Reconnect, InProgress or an unknown phase keeps the latch.
         # A boundary ends a watch with no alert; a first read of InProgress or Reconnect leaves a running one on.
+        # The log notes a phase that differs from the last read, before what it leads to (the accept, the loading).
+        if phase != self._last_phase:
+            self._note("phase", phase)
         if phase in GAME_BOUNDARY_PHASES:
             self._start_alerted = False
             self._watch_since = None
@@ -221,6 +269,7 @@ class Watcher:
         status = self._post(base + client.ACCEPT_PATH, token, client.CLIENT_TIMEOUT)
         if status in (200, 204):
             self._log(ACCEPTED_LINE)
+            self._note("accepted")
             self._fire(QUEUE_FOUND)  # S:790
             self._hold()
 
@@ -233,6 +282,7 @@ class Watcher:
         with self._lock:
             self._last_alert = (LOADING, self._wall())
         self._log(LOADING_LINE)
+        self._note(LOADING)
         self._watch_since = self._next_live = self._clock()
 
     def _watch(self, phase):
@@ -268,6 +318,8 @@ class Watcher:
             return
         if line is not None:
             self._log(line)
+        if kind == MATCH_STARTED:  # noted on the kind, so a start fired with no line is still in the log
+            self._note("match_started")
         with self._lock:
             self._last_alert = (_ALERT_NAMES[kind], self._wall())
         self._alert(kind)
@@ -289,6 +341,7 @@ class Watcher:
         self._hold_until = None
         self._start_alerted = False
         self._log(PAUSED_LINE)
+        self._note("paused")
 
     def _set_client(self, value):
         with self._lock:

@@ -1,9 +1,9 @@
 """Writes the program's icon from tools/icon_grid.py, standard library only, the same bytes on every run.
 
-    python tools/make_icon.py           writes src/pcnotify/pcnotify.ico and src/pcnotify/icon.py
+    python tools/make_icon.py           writes src/pendify/pendify.ico and src/pendify/icon.py
     python tools/make_icon.py --check   exits 1 when a committed file differs from what this would write
 
-pcnotify.ico holds five frames: 16 (the 16 grid), 32 (the 32 grid), and 48, 64 and 256 from the 32 grid by nearest
+pendify.ico holds five frames: 16 (the 16 grid), 32 (the 32 grid), and 48, 64 and 256 from the 32 grid by nearest
 neighbour. At 64 and 256 each pixel takes the source cell floor((x + 0.5) * 32 / size); at 48 it takes the cell
 SOURCE_48 names, the table of the reviewed 48 px render. The frames up to 64 are 32-bit BGRA bitmaps
 with their AND mask, the 256 frame is a PNG: the layout Windows reads since Vista. icon.py holds the 32 px frame
@@ -22,8 +22,8 @@ if str(HERE) not in sys.path:
 import icon_grid  # noqa: E402  (the grid file beside this one)
 
 ROOT = HERE.parent
-ICO_PATH = ROOT / "src" / "pcnotify" / "pcnotify.ico"
-MODULE_PATH = ROOT / "src" / "pcnotify" / "icon.py"
+ICO_PATH = ROOT / "src" / "pendify" / "pendify.ico"
+MODULE_PATH = ROOT / "src" / "pendify" / "icon.py"
 SIZES = (16, 32, 48, 64, 256)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TRANSPARENT = (0, 0, 0, 0)
@@ -180,7 +180,7 @@ def build_ico():
 
 
 def build_icon_module():
-    lines = ['"""The program\'s icon for the page: the 32 px frame of pcnotify.ico as PNG in base64.',
+    lines = ['"""The program\'s icon for the page: the 32 px frame of pendify.ico as PNG in base64.',
              "",
              "Written by tools/make_icon.py from tools/icon_grid.py: run the tool, never edit this file by hand.",
              '"""']

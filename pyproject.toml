@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pcnotify"
+name = "pendify"
 version = "0.1.0"
 description = "Pairs this PC with a phone account by a QR on a loopback page and sends it two kinds of alerts."
 readme = "README.md"
@@ -19,9 +19,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ElkinDev/pcnotify"
-Source = "https://github.com/ElkinDev/pcnotify"
+Homepage = "https://github.com/ElkinDev/PendiFy"
+Source = "https://github.com/ElkinDev/PendiFy"
 
 # pip lays the icon beside the modules; install.ps1 points the shortcuts at it.
 [tool.setuptools.package-data]
-pcnotify = ["*.ico"]
+pendify = ["*.ico"]

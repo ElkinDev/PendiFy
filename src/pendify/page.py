@@ -43,6 +43,7 @@ WORDS = {
         "code_label": "Clave de este PC:",
         "show_code": "Mostrar el código",
         "theme_toggle": "Cambiar entre tema claro y oscuro",
+        "language": "Idioma",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -84,6 +85,18 @@ WORDS = {
         "ping_failed": "falló el envío",
         "watch_phase": "Ahora: {phase}.",
         "watch_ping": "Aviso al teléfono: {result}, a las {time}.",
+        "log_started": "El programa empezó.",
+        "log_waiting": "Esperando el cliente del juego.",
+        "log_connected": "Conectado al cliente del juego.",
+        "log_lost": "Se perdió el cliente del juego. Buscándolo de nuevo.",
+        "log_accepted": "Partida aceptada.",
+        "log_loading": "Pantalla de carga: esperando que empiece la partida.",
+        "log_match_started": "La partida empezó.",
+        "log_ping": "Aviso al teléfono: {result}.",
+        "log_paused": "Avisos en pausa.",
+        "log_resumed": "Avisos reanudados.",
+        "log_title": "Actividad",
+        "log_help": "Lo que el programa vio y avisó desde que empezó en este PC.",
         "quit": "Salir",
         "this_pc": "Este PC",
         "pause": "Pausar avisos",
@@ -92,7 +105,7 @@ WORDS = {
         "autostart_help": "Al encender el PC el programa empieza solo, sin abrir esta página.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
-                       "pythonw -m pcnotify (o python -m pcnotify para verlo en una consola).",
+                       "pythonw -m pendify (o python -m pendify para verlo en una consola).",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -102,6 +115,7 @@ WORDS = {
         "code_label": "This PC's key:",
         "show_code": "Show the code",
         "theme_toggle": "Switch between light and dark theme",
+        "language": "Language",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -143,6 +157,18 @@ WORDS = {
         "ping_failed": "sending failed",
         "watch_phase": "Now: {phase}.",
         "watch_ping": "Alert to the phone: {result}, at {time}.",
+        "log_started": "The program started.",
+        "log_waiting": "Waiting for the game client.",
+        "log_connected": "Connected to the game client.",
+        "log_lost": "Lost the game client. Looking for it again.",
+        "log_accepted": "Match accepted.",
+        "log_loading": "Loading screen: waiting for the match to start.",
+        "log_match_started": "The match started.",
+        "log_ping": "Alert to the phone: {result}.",
+        "log_paused": "Alerts paused.",
+        "log_resumed": "Alerts resumed.",
+        "log_title": "Activity",
+        "log_help": "What the program saw and alerted since it started on this PC.",
         "quit": "Quit",
         "this_pc": "This PC",
         "pause": "Pause alerts",
@@ -150,8 +176,8 @@ WORDS = {
         "autostart_label": "Start with Windows",
         "autostart_help": "When the PC turns on, the program starts by itself, without opening this page.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
-        "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pcnotify "
-                       "(or python -m pcnotify to see it in a console).",
+        "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
+                       "(or python -m pendify to see it in a console).",
     },
 }
 
@@ -160,8 +186,17 @@ PHASE_WORDS = {"None": "phase_none", "Lobby": "phase_lobby", "Matchmaking": "pha
                "ReadyCheck": "phase_readycheck", "ChampSelect": "phase_champselect", "InProgress": "phase_inprogress",
                "EndOfGame": "phase_endofgame", "PreEndOfGame": "phase_endofgame", "WaitingForStats": "phase_endofgame"}
 PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
+# The log's lines (lane pclog round 1, the words of briefs/pclog-design-2026-10-01.md): each kind the watcher notes to
+# its word; a phase reads its phase word and a period, a ping its result's word. Lost, the pause and a ping that was
+# not sent are flagged, so a drawing can mark a failure.
+LOG_WORDS = {"started": "log_started", "waiting": "log_waiting", "connected": "log_connected", "lost": "log_lost",
+             "accepted": "log_accepted", "loading": "log_loading", "match_started": "log_match_started",
+             "paused": "log_paused", "resumed": "log_resumed"}
+LOG_WARNS = frozenset({"lost", "paused"})
+# A line of these kinds ends the phase collapse: the same phase after a reconnect or a resume is shown again.
+LOG_PHASE_BREAKS = frozenset({"lost", "connected", "paused", "resumed"})
 
-# The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
+# The design's stylesheet (page design, round 2 of 2026-09-30): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
 # action="/relink" or action="/quit" of a form it does not show.
 # The theme's colours, light and dark. The system's choice sets them; the theme button's choice, kept in data-theme
@@ -214,7 +249,18 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
           ".key-card details[open] summary{margin-bottom:16px}\n"
-          ".bar{display:flex;justify-content:flex-end;margin:0 0 8px}\n"
+          # The header's actions as pendiapp.com's .nav-actions holds them: the language switch, then the theme button.
+          ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}\n"
+          # pendiapp.com's language switch (assets/styles.css, .langsw), its variables mapped to the page's own:
+          # --hairline to --hair, --muted to --ink2, --brand and --on-brand as they are. Each entry is a submit
+          # button, so the page's button look is set back to the site's link: no minimum height, no border, no fill,
+          # the group's font; the page's button focus ring stays. The switch is one form, the pill: .langsw's inline
+          # flex and the page's form{margin:0} already sit it inline as the span did, so no rule is added for it.
+          ".langsw{display:inline-flex;border:1px solid var(--hair);border-radius:999px;padding:2px;font-size:.8rem;"
+          "font-weight:600}\n"
+          ".langsw button{min-height:0;padding:.28rem .62rem;border:0;border-radius:999px;background:transparent;"
+          "color:var(--ink2);font:inherit}\n"
+          '.langsw button[aria-current="true"]{background:var(--brand);color:var(--on-brand)}\n'
           ".icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;min-height:0;padding:0;"
           "border-radius:999px;border:1px solid var(--hair);background:transparent;color:var(--ink);cursor:pointer;"
           "transition:background .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1)}\n"
@@ -270,7 +316,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
           ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
           "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n"
-          # The card «Este PC» of placement A (mockup-pcnotify-controls-r2-2026-10-01.html, its separate style block
+          # The card «Este PC» of placement A (controls design, round 2 of 2026-10-01, its separate style block
           # without placement B's rules): the resume in the filled pair of «Comprobar ahora», the paused watcher line
           # in the refused pair with a two-bar mark, the switch of the start with Windows under a hairline.
           "form[action='/resume'] button{background:var(--brand);color:var(--on-brand)}\n"
@@ -293,21 +339,48 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".pc{display:grid;gap:16px;max-width:40rem;margin:24px 0 0}\n"
           ".pc h2{margin:0}\n"
           ".pc form{justify-self:start}\n"
-          ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n")
+          ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n"
+          # The card «Actividad» of form A (log design, round 2 of 2026-10-01, its separate style block without
+          # candidate B's rules): a list of 224 px that scrolls inside the card, each line its time in tabular figures
+          # beside its text, a failure's text in the danger colour, the focus ring of the page's buttons.
+          ".log-card{max-width:40rem;margin:16px 0 0}\n"
+          ".log-card h2{margin:0 0 4px}\n"
+          ".log{max-height:224px;overflow-y:auto;overscroll-behavior:contain;border-radius:12px}\n"
+          ".log:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          ".log ol{margin:0;padding:0;list-style:none}\n"
+          ".log li{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:16px;padding:4px 0;"
+          "font-size:14px;line-height:20px}\n"
+          ".log time{color:var(--ink2);font-variant-numeric:tabular-nums}\n"
+          ".log .warn{color:var(--danger)}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
 # beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
-# a page that draws the switch only (rendered from enabled(), the read /state answers, so a reload cannot loop);
-# says so when the program is gone.
+# a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
+# /state answers, so a reload cannot loop, and a poll landing between a change and its post's answer cannot reload
+# the page under the post); the language too, against the one the page was drawn in (<html lang>), so a second tab
+# or another browser turns to a language chosen with the switch; says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
 # showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
-           "const shown=s.dataset.shown;const paused=s.dataset.paused;"
+           "const shown=s.dataset.shown;const paused=s.dataset.paused;const lang=document.documentElement.lang;"
            "const sw=document.querySelector('input[name=autostart]');"
+           # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
+           # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
+           "const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
+           "g.setAttribute('tabindex','0');else g.removeAttribute('tabindex');}if(g)tabStop();"
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
-           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"
-           "location.reload();})"
+           "||j.lang!==lang||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
+           "location.reload();"
+           # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
+           # first, built as elements with their text (never as markup); the card keeps the last 50, as the ring
+           # does. An answer with no log changes nothing.
+           "if(g&&j.log){const o=g.firstElementChild;let last=Number(g.dataset.seq);"
+           "for(const l of j.log){if(l.seq<=last)continue;const li=document.createElement('li');"
+           "const t=document.createElement('time');t.setAttribute('datetime',l.time);t.textContent=l.time;"
+           "const x=document.createElement('span');if(l.warn)x.className='warn';x.textContent=l.text;"
+           "li.append(t,x);o.insertBefore(li,o.firstChild);last=l.seq;}g.dataset.seq=String(last);"
+           "while(o.children.length>50)o.lastElementChild.remove();tabStop();}})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
            # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
            # toggle, so a close by hand leaves none running.
@@ -435,24 +508,45 @@ def _clock_time(at):
     return time.strftime("%H:%M", time.localtime(at))
 
 
+def _log_time(at):
+    """A wall time as the log says it, hours, minutes and seconds in this PC's zone."""
+    return time.strftime("%H:%M:%S", time.localtime(at))
+
+
 def _form(action, token, inner):
     return (f'<form method="post" action="/{action}"><input type="hidden" name="token" value="{token}">'
             f"{inner}</form>")
 
 
+_CURRENT = ' aria-current="true"'
+
+
+def _switch(words, token, lang):
+    """pendiapp.com's language switch: ES then EN, the page's language marked aria-current. The page changes state
+    only by a POST with its token, so the switch is one form to /lang that is the group, named «Idioma» or "Language"
+    for a screen reader, and each entry is a submit button posting its own value. `words` are escaped already."""
+    entries = "".join(f'<button type="submit" name="lang" value="{code}"{_CURRENT if code == lang else ""}>'
+                      f"{code.upper()}</button>" for code in config.LANGS)
+    return (f'<form class="langsw" role="group" aria-label="{words["language"]}" method="post" action="/lang">'
+            f'<input type="hidden" name="token" value="{token}">{entries}</form>')
+
+
 class PairingPage:
-    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None):
+    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
         with Windows; without it, or where it is not available, /autostart is no route and /state says nothing of
         it. Beside a watcher the page draws the card «Este PC» after the watcher line: the pause, or the resume while
-        paused, and the switch of the start with Windows where it is available."""
+        paused, and the switch of the start with Windows where it is available. `events` answers the watcher's
+        events, oldest first; with it /state carries the log's lines and the page draws them in the card «Actividad»,
+        without it no log key and no card."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
         self.on_pause, self.on_resume = on_pause, on_resume
         self.autostart = autostart if autostart is not None and autostart.available else None
+        self.events = events
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -473,6 +567,11 @@ class PairingPage:
 
     def host_allowed(self, host):
         return (host or "").strip().lower() in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
+
+    def language_of(self, accept_language):
+        """The page's language, the one resolver of every page, /state and the stopped page: the switch's choice
+        kept in the config file when there is one, else the browser's first Accept-Language tag (language())."""
+        return self.state.lang() or language(accept_language)
 
     def watch_text(self, lang):
         """The watcher's line in `lang`: waiting or connected, then the phase while connected once one is read,
@@ -502,17 +601,59 @@ class PairingPage:
                                                     time=_clock_time(snapshot["pingAt"])))
         return " ".join(parts)
 
+    @staticmethod
+    def _log_lines(events, lang):
+        """The log's lines in `lang`, oldest first, each {seq, time, text, warn}. A phase whose word is the word of
+        the last phase line kept is dropped, so the three phases that end a match give one line, until a line of
+        LOG_PHASE_BREAKS is kept: the same phase after a reconnect or a resume is shown again. A kind or a ping
+        result the page does not know is dropped."""
+        words, lines, last_phase = WORDS[lang], [], None
+        for seq, at, kind, detail in events:
+            if kind == "phase":
+                text = words[PHASE_WORDS.get(detail, "phase_other")] + "."
+                if text == last_phase:
+                    continue
+                last_phase = text
+            elif kind == "ping" and detail in PING_RESULTS:
+                text = words["log_ping"].format(result=words["ping_" + detail])
+            elif kind in LOG_WORDS:
+                text = words[LOG_WORDS[kind]]
+            else:
+                continue
+            lines.append({"seq": seq, "time": _log_time(at), "text": text,
+                          "warn": kind in LOG_WARNS or (kind == "ping" and detail != "sent")})
+            if kind in LOG_PHASE_BREAKS:
+                last_phase = None
+        return lines
+
+    def _log_card(self, words, lang):
+        """The card «Actividad» (form A, frames A1 to A6): its title, its helper, and the list named by both, the
+        newest line first, carrying the highest seq it draws for the poll (0 before any line). `words` are escaped
+        already. Rendered with no tab stop: the script sets one while the list scrolls."""
+        lines = self._log_lines(self.events(), lang)
+        items = []
+        for line in reversed(lines):
+            span = '<span class="warn">' if line["warn"] else "<span>"
+            items.append(f'<li><time datetime="{line["time"]}">{line["time"]}</time>{span}{html.escape(line["text"])}'
+                         f"</span></li>")
+        last = lines[-1]["seq"] if lines else 0
+        return (f'<div class="panel log-card"><h2 id="log-title">{words["log_title"]}</h2><p id="log-help">'
+                f'{words["log_help"]}</p><div class="log" role="region" aria-labelledby="log-title" '
+                f'aria-describedby="log-help" data-seq="{last}"><ol>{"".join(items)}</ol></div></div>')
+
     def state_json(self, lang):
         """The state for the page's poll: the state line's sentence, and beside a watcher its line and whether it
         is paused, and where the start with Windows is available whether it is on."""
         snapshot = self.state.snapshot()
         seen = self.watch() if self.watch is not None else None
-        answer = {**snapshot, "text": WORDS[lang][_state_word(snapshot, seen)]}
+        answer = {**snapshot, "text": WORDS[lang][_state_word(snapshot, seen)], "lang": lang}
         if seen is not None:
             answer["watchText"] = self._watch_text(seen, lang)
             answer["paused"] = _paused(seen)
         if self.autostart is not None:
             answer["autostart"] = self.autostart.enabled()
+        if self.events is not None:
+            answer["log"] = self._log_lines(self.events(), lang)
         return answer
 
     def render(self, lang):
@@ -537,6 +678,13 @@ class PairingPage:
             held = ' data-paused=""' if _paused(seen) else ""
             link += [f'<p id="watch" role="status"{held}>{html.escape(self._watch_text(seen, lang))}</p>',
                      self._card(words, token, _paused(seen))]
+        # The card «Actividad» follows the card «Este PC»; on the page that still shows the code (frame A6) and on the
+        # page that offers the relink it ends the first column instead, so neither the code nor the relink control
+        # moves. No card without the events.
+        log_card = None if self.events is None else self._log_card(words, lang)
+        last = secret is not None or snapshot["relinkOffered"]
+        if log_card is not None and not last:
+            link.append(log_card)
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
             drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
@@ -554,6 +702,8 @@ class PairingPage:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
         if snapshot["relinkOffered"]:
             link.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
+        if log_card is not None and last:
+            link.append(log_card)
         typed = [f"<h2>{words['typed_title']}</h2>",
                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
                                        f'autocomplete="off"></label><label>{words["secret_label"]} <input '
@@ -565,7 +715,8 @@ class PairingPage:
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
-        bar = (f'<header class="bar"><button id="theme-toggle" class="icon-btn" type="button" aria-pressed="false" '
+        bar = (f'<header class="bar">{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
+               f'type="button" aria-pressed="false" '
                f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
         theme = self.state.theme()
         kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
@@ -607,6 +758,19 @@ class PairingPage:
         said as act() says it and answered as a failed save is."""
         try:
             self.state.set_theme(choice)
+        except ValueError:
+            return "refused"
+        except config.ConfigError as failure:
+            _say_failure(failure)
+            self.state.config_failed()
+            return "failed"
+        return "kept"
+
+    def set_lang(self, choice):
+        """/lang: the switch's choice kept in the config file; "kept", or "refused" for a value that is not es or
+        en, which changes nothing, or "failed" for a config file that cannot be replaced, said as act() says it."""
+        try:
+            self.state.set_lang(choice)
         except ValueError:
             return "refused"
         except config.ConfigError as failure:
@@ -686,7 +850,7 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            lang = language(self.headers.get("Accept-Language"))
+            lang = page.language_of(self.headers.get("Accept-Language"))
             if seen and path in ("/", "/state"):
                 page.state.page_seen()
             if path == "/":
@@ -724,7 +888,7 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            routes = ("/check", "/typed", "/forget", "/relink", "/theme")
+            routes = ("/check", "/typed", "/forget", "/relink", "/theme", "/lang")
             routes += ("/quit",) if page.on_quit is not None else ()
             routes += ("/pause",) if page.on_pause is not None else ()
             routes += ("/resume",) if page.on_resume is not None else ()
@@ -748,7 +912,7 @@ def _handler(page):
                 # when the answer cannot be written, and that failure goes on to the server's handle_error.
                 try:
                     self._send(200, "text/html; charset=utf-8",
-                               page.render_stopped(language(self.headers.get("Accept-Language"))))
+                               page.render_stopped(page.language_of(self.headers.get("Accept-Language"))))
                 finally:
                     page.on_quit()
                 return
@@ -758,6 +922,10 @@ def _handler(page):
                     return self._refuse(400)
                 if outcome == "kept":
                     return self._send(204, "text/plain; charset=utf-8", "")
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
+            if path == "/lang":  # es or en, then the page again, drawn in it; anything else changes nothing
+                if page.set_lang(form.get("lang", "")) == "refused":
+                    return self._refuse(400)
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/autostart":  # on is 1 or 0; anything else changes nothing
                 if form.get("on") not in ("1", "0"):

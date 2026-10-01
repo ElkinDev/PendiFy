@@ -133,6 +133,69 @@ class ConfigStoreTest(unittest.TestCase):
         self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "theme": "sepia"}))
         self.assertIsNone(self.store.read_theme())
 
+    def test_the_language_choice_is_written_beside_the_pair_and_the_theme_and_every_other_write_keeps_it(self):
+        # Mutation: _write drops the stored language. Red: the choice is gone after a link id is stored. Mutation:
+        # set_lang writes the theme's key. Red: the file holds no lang. Lane pclang, owner report OR-96.
+        self.store.set_typed(LINK_ID, SECRET)
+        self.assertIsNone(self.store.read_lang())
+        self.assertEqual(self.store.set_lang("en"), "en")
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID, "lang": "en"})
+        self.assertEqual(self.store.read_lang(), "en")
+        self.store.set_theme("dark")
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID, "theme": "dark", "lang": "en"})
+        self.store.set_typed(LINK_ID, SECRET)
+        self.store.set_link_id(LINK_ID)
+        self.store.clear_link_id()
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": None, "theme": "dark", "lang": "en"})
+        # forget keeps the theme (a new secret, no link id, the choice stays), so it keeps the language too.
+        forgotten = self.store.forget()
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None, "theme": "dark", "lang": "en"})
+        self.assertEqual((self.store.read_lang(), self.store.read_theme()), ("en", "dark"))
+        self.assertEqual(self.store.set_lang("es"), "es")
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None, "theme": "dark", "lang": "es"})
+        self.store.set_theme("system")
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None, "lang": "es"})
+        self.assertEqual(self.store.load().secret, forgotten.secret)
+        self.assertEqual(sorted(os.listdir(self.folder)), ["config.json"])
+
+    def test_a_language_other_than_es_or_en_is_refused_and_the_file_is_untouched(self):
+        # Mutation: set_lang writes any value. Red: "fr" lands in config.json. Mutation: the value checked after the
+        # write. Red: the bytes differ after a refused value.
+        self.store.set_typed(LINK_ID, SECRET)
+        self.store.set_lang("es")
+        before = self.store.path.read_bytes()
+        for value in ("", "fr", "ES", "En", "es-CO", " es", "es ", "system", None, 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store.set_lang(value)
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertEqual(self.store.read_lang(), "es")
+
+    def test_a_file_without_a_language_or_with_a_foreign_one_reads_none_and_an_unreadable_one_raises(self):
+        # Mutation: read_lang answers the raw value. Red: "fr" comes back. Mutation: a missing key read as "es".
+        # Red: an old file answers a choice nobody made.
+        old = json.dumps({"secret": SECRET, "linkId": LINK_ID, "theme": "dark"})
+        self.write_raw(old)
+        self.assertIsNone(self.store.read_lang())
+        self.assertEqual((self.store.load(), self.store.read_theme()), (config.Pairing(SECRET, LINK_ID), "dark"))
+        self.assertEqual(self.store.path.read_text(encoding="utf-8"), old)
+        self.store.set_link_id(LINK_ID)
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID, "theme": "dark"})
+        for value in ("fr", "EN", "", 1, ["es"], {"es": True}, None):
+            with self.subTest(value=value):
+                self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "lang": value}))
+                self.assertIsNone(self.store.read_lang())
+        for text in ("", "{not json", "[]", '"es"'):
+            with self.subTest(text=text):
+                self.write_raw(text)
+                self.assertIsNone(self.store.read_lang())
+        self.store.path.unlink()
+        self.assertIsNone(self.store.read_lang())
+        self.store.path.mkdir()
+        for read in (self.store.read_theme, self.store.read_lang):
+            with self.subTest(read=read.__name__), self.assertRaises(config.ConfigError) as raised:
+                read()
+            self.assertEqual(str(raised.exception), config.UNAVAILABLE.format(path=self.store.path))
+
     def test_forget_mints_a_new_secret_and_clears_the_link_id(self):
         # Mutation: forget keeps the secret and only clears the link id. Red: the secret is unchanged.
         self.store.set_typed(LINK_ID, SECRET)

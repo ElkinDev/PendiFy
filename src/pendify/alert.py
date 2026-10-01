@@ -3,7 +3,8 @@
 Every alert beeps and names a kind (S:336-355). The ping's result goes to the pairing state through record_ping,
 as lane lnk5a's ping command answers it, so three refusals in a row offer the relink, and its name and time stay
 for the page as the last ping. With no link id nothing is sent and nothing is queued. sound() is the beep
-alone, with no kind and no ping. The console gets fixed lines only.
+alone, with no kind and no ping. The console gets fixed lines only. listen() names the one callback told each ping's
+result name and time right after they are recorded (the watcher's log, lane pclog).
 """
 import threading
 import time
@@ -69,6 +70,7 @@ class Alerter:
         self._lock = threading.Lock()
         self._pending = []
         self._last_ping = (None, None)
+        self._listener = None
 
     def __call__(self, kind):
         """Beeps; with a stored link id, sends the ping of `kind` on a thread of its own."""
@@ -85,6 +87,13 @@ class Alerter:
             self._pending = [event for event in self._pending if not event.is_set()] + [done]
         self._start(lambda: self._send(pair, kind, done))
 
+    def listen(self, callback):
+        """`callback(name, at)` is told each ping's result name and wall time on the ping's thread, right after the
+        last ping records them; a later call replaces it. A callback that raises is swallowed: the record stands and
+        the ping's line is said."""
+        with self._lock:
+            self._listener = callback
+
     def sound(self):
         """Beeps and nothing else: no ping, nothing queued, the last ping as it was."""
         self._beep()
@@ -96,9 +105,15 @@ class Alerter:
             except Exception as failure:  # a refused input raises a fixed sentence; it still ends as failed
                 result = worker.Failed(type(failure).__name__)
             self._state.record_ping(result)
-            name = _result_name(result)
+            name, at = _result_name(result), self._wall()
             with self._lock:
-                self._last_ping = (name, self._wall())
+                self._last_ping = (name, at)
+                listener = self._listener
+            if listener is not None:
+                try:
+                    listener(name, at)
+                except Exception:  # the log's listener never costs the ping its record or its line
+                    pass
             self._log(PING_LINES[name])
         finally:
             done.set()

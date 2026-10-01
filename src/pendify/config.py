@@ -1,5 +1,6 @@
 """The config file: the secret and the link id, under the user's profile (design P1, P6), and the page's theme
-choice when there is one (light or dark; the system's choice is no key).
+choice when there is one (light or dark; the system's choice is no key), and its language choice when there is one
+(es or en; with none the page follows the browser).
 
 The file is `<base>/<folder>/config.json`, where the base is %APPDATA% in a real run and is injected
 everywhere else, so no test touches the real profile. A write goes to a temp file in the same folder
@@ -27,7 +28,9 @@ REPLACE_PAUSES = (0.2,) * 5
 # The theme button's choices; "system" follows the system and is kept as no key.
 THEMES = ("light", "dark")
 SYSTEM_THEME = "system"
-# _write's default: the stored theme choice is kept.
+# The language switch's choices; with no key the page follows the browser's language.
+LANGS = ("es", "en")
+# _write's default: the stored theme and language choices are kept.
 _KEEP = object()
 
 
@@ -82,18 +85,12 @@ class ConfigStore:
     def read_theme(self):
         """The stored theme choice, light or dark, or None when there is none (the system's). A file that is
         there and cannot be read raises ConfigError, as read() does; a missing, corrupt or foreign value is None."""
-        try:
-            raw = self.path.read_bytes()
-        except FileNotFoundError:
-            return None
-        except OSError:
-            raise self._unavailable() from None
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except ValueError:
-            return None
-        theme = data.get("theme") if isinstance(data, dict) else None
-        return theme if theme in THEMES else None
+        return _choice(self._stored(), "theme", THEMES)
+
+    def read_lang(self):
+        """The stored language choice, es or en, or None when there is none (the browser's). A file that is there
+        and cannot be read raises ConfigError, as read_theme() does; a missing, corrupt or foreign value is None."""
+        return _choice(self._stored(), "lang", LANGS)
 
     def set_theme(self, choice):
         """The theme button's choice written beside the pair: light or dark kept, system kept as no key. Any
@@ -104,6 +101,15 @@ class ConfigStore:
         with self._lock:
             self._write(self._current(), theme=theme)
             return theme
+
+    def set_lang(self, choice):
+        """The language switch's choice, es or en, written beside the pair and the theme. Any other value is
+        refused and nothing is written. Answers the stored choice."""
+        if choice not in LANGS:
+            raise ValueError("the language is not es or en")
+        with self._lock:
+            self._write(self._current(), lang=choice)
+            return choice
 
     def load(self):
         """The stored pair; when there is none, a first load: a new secret, written (P1)."""
@@ -153,14 +159,34 @@ class ConfigStore:
     def _unavailable(self):
         return ConfigError(UNAVAILABLE.format(path=self.path))
 
-    def _write(self, pairing, theme=_KEEP):
-        """The pair, and the theme choice: the stored one kept unless set_theme passes its own."""
+    def _stored(self):
+        """The file's object, or None when the file is missing, corrupt or not an object. A file that is there and
+        cannot be read raises ConfigError."""
+        try:
+            raw = self.path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise self._unavailable() from None
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except ValueError:  # JSONDecodeError and UnicodeDecodeError alike
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _write(self, pairing, theme=_KEEP, lang=_KEEP):
+        """The pair, and the theme and language choices: each stored one kept unless set_theme or set_lang passes
+        its own."""
         folder = self.path.parent
-        if theme is _KEEP:
-            theme = self.read_theme()
+        if theme is _KEEP or lang is _KEEP:
+            stored = self._stored()
+            theme = _choice(stored, "theme", THEMES) if theme is _KEEP else theme
+            lang = _choice(stored, "lang", LANGS) if lang is _KEEP else lang
         values = {"secret": pairing.secret, "linkId": pairing.link_id}
         if theme is not None:
             values["theme"] = theme
+        if lang is not None:
+            values["lang"] = lang
         data = json.dumps(values).encode("utf-8")
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -189,3 +215,9 @@ class ConfigStore:
             except PermissionError:
                 self._pause(pause)
         return os.replace(temp, self.path)
+
+
+def _choice(stored, key, allowed):
+    """The value of `key` in the file's object when it is one of `allowed`, else None (missing, corrupt or foreign)."""
+    value = stored.get(key) if stored is not None else None
+    return value if isinstance(value, str) and value in allowed else None

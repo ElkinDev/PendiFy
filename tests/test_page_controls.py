@@ -3,7 +3,7 @@
 The pause and the resume of the watcher and the start with Windows are three POST routes fenced as every other
 (host, length, token; 303 to the page); the state line says a linked PC's alerts are paused; /state carries
 paused and autostart so the page's poll follows a second tab. The start with Windows runs on a MemoryRegistry.
-The controls are drawn as placement A of mockups/mockup-pcnotify-controls-r2-2026-10-01.html (frames A1 to A6): one
+The controls are drawn as placement A of the controls design, round 2 of 2026-10-01 (frames A1 to A6): one
 card «Este PC» right after the watcher line, holding the pause or, while paused, the resume, then the switch of the
 start with Windows when one is available; while paused the watcher line is the sheet's paused block.
 """
@@ -47,7 +47,9 @@ WATCH_LINE = re.compile(r'<p id="watch" role="status"(?: data-paused="")?>(.*?)<
 # The card's title, the one new word of round 2, as the sheet gives it.
 THIS_PC = {"es": "Este PC", "en": "This PC"}
 CARD_OPEN = '<div class="panel pc" role="group" aria-labelledby="pc-title">'
-FORM_ACTIONS = re.compile(r'<form method="post" action="([^"]+)"')
+FORM_ACTIONS = re.compile(r'<form [^>]*?\baction="([^"]+)"')
+# The language switch's two forms open every page's header, ahead of the card's (lane pclang, owner report OR-96).
+SWITCH_ACTIONS = ["/lang"]
 FOREIGN_HOSTS = ("evil.example", "127.0.0.1", "localhost.evil.example:{port}", "127.0.0.2:{port}", "")
 WRONG_TOKENS = (False, "wrong")
 
@@ -232,7 +234,7 @@ class PageControlsTest(unittest.TestCase):
                 shown = self.call("GET", "/", language=language)[2]
                 self.assertEqual(shown.count(CARD_OPEN), 1)
                 self.assertIn(self.card(language, switch=False), shown)
-                self.assertEqual(FORM_ACTIONS.findall(shown), ["/pause", "/typed", "/forget", "/quit"])
+                self.assertEqual(FORM_ACTIONS.findall(shown), SWITCH_ACTIONS + ["/pause", "/typed", "/forget", "/quit"])
                 self.assertNotIn('action="/resume"', shown)
                 self.assertIn(THIS_PC[language], PageText(shown).texts)
                 self.assertNotIn(page.WORDS[language]["resume"], PageText(shown).texts)
@@ -248,7 +250,8 @@ class PageControlsTest(unittest.TestCase):
                 words = page.WORDS[language]
                 shown = self.call("GET", "/", language=language)[2]
                 self.assertIn(self.card(language, paused=True, switch=False), shown)
-                self.assertEqual(FORM_ACTIONS.findall(shown), ["/resume", "/typed", "/forget", "/quit"])
+                self.assertEqual(FORM_ACTIONS.findall(shown),
+                                 SWITCH_ACTIONS + ["/resume", "/typed", "/forget", "/quit"])
                 self.assertNotIn('action="/pause"', shown)
                 self.assertIn(f'<p id="watch" role="status" data-paused="">{html.escape(words["watch_paused"])}</p>'
                               f"{CARD_OPEN}", shown)
@@ -340,7 +343,7 @@ class PageControlsTest(unittest.TestCase):
         # registry holds the value turned on in the first.
         poll = page._SCRIPT[:page._SCRIPT.index("location.reload();")]
         self.assertIn("const sw=document.querySelector('input[name=autostart]');", poll[:poll.index("setInterval(")])
-        self.assertTrue(poll.endswith("||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"))
+        self.assertTrue(poll.endswith("||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"))
         self.assertEqual(page._SCRIPT.count("j.autostart"), 2)  # both in the guarded compare, none elsewhere
         # A page with no switch: the compare is behind sw, the only switch. With no available Autostart neither the
         # page nor /state carries it; a page with no watcher draws no switch, though its /state answers autostart.

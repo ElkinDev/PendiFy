@@ -1,6 +1,6 @@
 """The start with Windows: the per-user Run value, no administrator.
 
-The value `pcnotify` under HKEY_CURRENT_USER's Run key holds the start line of install.ps1 plus --quiet, so the
+The value `PendiFy` under HKEY_CURRENT_USER's Run key holds the start line of install.ps1 plus --quiet, so the
 program starts at logon with no browser. Only the page writes it, on its person's ask; a start never writes it,
 and install.ps1 only rewrites one that exists. The registry is a seam of three calls on one value under one key
 path; the real one imports winreg inside itself and takes the key path as an argument, so a test points it at a
@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-VALUE_NAME = "pcnotify"
-START_ARGS = "-m pcnotify --quiet"
+VALUE_NAME = "PendiFy"
+START_ARGS = "-m pendify --quiet"
 FAILED_LINE = "autostart: the start with Windows could not be {what} ({kind})"
 
 

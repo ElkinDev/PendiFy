@@ -60,8 +60,11 @@ WINDOWS_ONLY = "another handle that locks config.json against a read and a repla
 # as codes.display prints it. The card «Este PC» sits right after the watcher line (brief pcctl-r2, placement A); the
 # page given no start with Windows draws no switch in it.
 PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "show_code",
-              "code_label", None, "check", "typed_title", "link_id_label", "secret_label", "save", "forget",
-              "forget_sentence", "forget", "quit")
+              "code_label", None, "check", "log_title", "log_help", "typed_title", "link_id_label", "secret_label",
+              "save", "forget", "forget_sentence", "forget", "quit")
+# The language switch's two labels, the same in both languages, sit in the header between the title tag and the
+# title row (lane pclang, owner report OR-96).
+SWITCH_LABELS = ["ES", "EN"]
 
 
 class PageText(HTMLParser):
@@ -397,7 +400,8 @@ class PairingPageTest(unittest.TestCase):
         # Mutation: the scan sentence left out of the QR's column. Red: the words miss WORDS["es"]["scan"].
         # Mutation: a web font imported by the style. Red: "@import" and an http address on the page.
         secret = self.secret()
-        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None)
+        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None,
+                                     events=lambda: [])
         self.page.start()
         self.addCleanup(self.page.close)
         self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
@@ -405,8 +409,8 @@ class PairingPageTest(unittest.TestCase):
         for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
             with self.subTest(lang=lang):
                 shown, words = self.html(accept), page.WORDS[lang]
-                self.assertEqual(PageText(shown).texts,
-                                 [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER])
+                expected = [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER]
+                self.assertEqual(PageText(shown).texts, expected[:1] + SWITCH_LABELS + expected[1:])
                 self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
                 for outside in ("<link", "src=", "@import", "@font-face", "http"):
                     self.assertNotIn(outside, without_icon(shown))
@@ -418,8 +422,8 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
         refused = list(PAGE_ORDER)
         refused.insert(refused.index("save") + 1, "typed_refused")
-        self.assertEqual(PageText(self.html()).texts,
-                         [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused])
+        expected = [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused]
+        self.assertEqual(PageText(self.html()).texts, expected[:1] + SWITCH_LABELS + expected[1:])
 
     def test_each_document_carries_one_tab_icon_from_a_data_uri_in_its_head(self):
         # Mutation: the icon link left out of render_stopped. Red: the stopped page holds no rel="icon".
@@ -498,9 +502,14 @@ class PairingPageTest(unittest.TestCase):
             with self.subTest(lang=lang):
                 shown = self.html(accept)
                 self.assertEqual(shown.count('<button id="theme-toggle"'), 1)
-                self.assertIn(f'<main class="page"><header class="bar"><button id="theme-toggle" class="icon-btn" '
-                              f'type="button" aria-pressed="false" aria-label="'
-                              f'{html.escape(page.WORDS[lang]["theme_toggle"])}"><svg class="moon"', shown)
+                # The header opens with the language switch, right before the button (lane pclang, OR-96).
+                self.assertRegex(shown, re.escape('<main class="page"><header class="bar"><form class="langsw" '
+                                                  f'role="group" aria-label="{page.WORDS[lang]["language"]}" '
+                                                  'method="post" action="/lang">')
+                                 + r"(?:(?!</form>).)*</form>"
+                                 + re.escape(f'<button id="theme-toggle" class="icon-btn" type="button" '
+                                             f'aria-pressed="false" aria-label="'
+                                             f'{html.escape(page.WORDS[lang]["theme_toggle"])}"><svg class="moon"'))
                 self.assertIn('<svg class="sun"', shown)
                 head = shown.split("</head>")[0]
                 self.assertIn("<script>(function(){try{var e=document.documentElement;"
