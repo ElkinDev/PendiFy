@@ -85,6 +85,7 @@ WORDS = {
         "watch_phase": "Ahora: {phase}.",
         "watch_ping": "Aviso al teléfono: {result}, a las {time}.",
         "quit": "Salir",
+        "this_pc": "Este PC",
         "pause": "Pausar avisos",
         "resume": "Reanudar avisos",
         "autostart_label": "Iniciar con Windows",
@@ -143,6 +144,7 @@ WORDS = {
         "watch_phase": "Now: {phase}.",
         "watch_ping": "Alert to the phone: {result}, at {time}.",
         "quit": "Quit",
+        "this_pc": "This PC",
         "pause": "Pause alerts",
         "resume": "Resume alerts",
         "autostart_label": "Start with Windows",
@@ -267,7 +269,31 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "auto) 1fr;column-gap:64px}.link>*{grid-column:1}.link>.key-card{grid-column:2;grid-row:1/-1;"
           "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
           ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
-          "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n")
+          "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n"
+          # The card «Este PC» of placement A (mockup-pcnotify-controls-r2-2026-10-01.html, its separate style block
+          # without placement B's rules): the resume in the filled pair of «Comprobar ahora», the paused watcher line
+          # in the refused pair with a two-bar mark, the switch of the start with Windows under a hairline.
+          "form[action='/resume'] button{background:var(--brand);color:var(--on-brand)}\n"
+          "#watch[data-paused]{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:12px;"
+          "background:var(--danger-bg);color:var(--on-danger-bg);font-weight:500}\n"
+          '#watch[data-paused]::before{content:"";flex:none;width:10px;height:12px;margin-top:4px;'
+          "border:solid currentColor;border-width:0 3px}\n"
+          ".switch{display:flex;gap:12px;align-items:flex-start;font-weight:400;cursor:pointer}\n"
+          ".switch input{-webkit-appearance:none;appearance:none;flex:none;width:52px;height:32px;margin:0;padding:0;"
+          "border:2px solid var(--ink2);border-radius:999px;background:radial-gradient(circle at 14px 50%,var(--ink2) "
+          "8px,transparent 8.5px) var(--tint);cursor:pointer}\n"
+          ".switch input:checked{border-color:var(--brand);background:radial-gradient(circle at 34px 50%,"
+          "var(--on-brand) 8px,transparent 8.5px) var(--brand)}\n"
+          ".switch input:focus{border-color:var(--ink2);box-shadow:none}\n"
+          ".switch input:checked:focus{border-color:var(--brand)}\n"
+          ".switch input:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          ".sw-text{display:grid;gap:2px;padding-top:6px}\n"
+          ".sw-label{font-weight:500;color:var(--ink)}\n"
+          ".sw-help{color:var(--ink2)}\n"
+          ".pc{display:grid;gap:16px;max-width:40rem;margin:24px 0 0}\n"
+          ".pc h2{margin:0}\n"
+          ".pc form{justify-self:start}\n"
+          ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
 # beside a watcher), so a second tab follows a pause or a resume made in another; says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
@@ -299,7 +325,14 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();"
            "var f=document.querySelector('input[name=token]');"
            "if(f)fetch('/theme',{method:'POST',body:new URLSearchParams({token:f.value,theme:next})})"
-           ".catch(function(){});});})();")
+           ".catch(function(){});});})();"
+           # The switch of the start with Windows posts its change as the theme button posts, then the page is read
+           # again, so the switch shows what the registry holds; a post that fails changes nothing, and the poll says
+           # the program is gone.
+           "(function(){var sw=document.querySelector('input[name=autostart]');if(!sw)return;"
+           "sw.addEventListener('change',function(){var f=document.querySelector('input[name=token]');"
+           "fetch('/autostart',{method:'POST',body:new URLSearchParams({token:f.value,on:sw.checked?'1':'0'})})"
+           ".then(function(){location.reload();}).catch(function(){});});})();")
 # Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
 # index.html head script). The choice kept in config.json, served as data-theme on <html>, wins: localStorage is
 # read only when the page came with none.
@@ -409,7 +442,8 @@ class PairingPage:
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
         with Windows; without it, or where it is not available, /autostart is no route and /state says nothing of
-        it. No control of the three is drawn yet: their routes and the paused sentences are the mechanics."""
+        it. Beside a watcher the page draws the card «Este PC» after the watcher line: the pause, or the resume while
+        paused, and the switch of the start with Windows where it is available."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
@@ -495,7 +529,10 @@ class PairingPage:
         if snapshot["configFailed"]:
             link.append(f'<p class="note warn">{words["config_failed"]}</p>')
         if seen is not None:
-            link.append(f'<p id="watch" role="status">{html.escape(self._watch_text(seen, lang))}</p>')
+            # While paused the watcher line is the paused block (data-paused); the card follows it.
+            held = ' data-paused=""' if _paused(seen) else ""
+            link += [f'<p id="watch" role="status"{held}>{html.escape(self._watch_text(seen, lang))}</p>',
+                     self._card(words, token, _paused(seen))]
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
             drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
@@ -534,6 +571,21 @@ class PairingPage:
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title>{_TAB_ICON}<style>{_STYLE}'
                 f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
+
+    def _card(self, words, token, paused):
+        """The card «Este PC» (placement A, frames A1 to A6): the pause form, or the resume form while paused, then,
+        where the start with Windows is available, its switch under a hairline, checked when the Run value exists.
+        `words` are escaped already."""
+        action = "resume" if paused else "pause"
+        inner = [f'<h2 id="pc-title">{words["this_pc"]}</h2>',
+                 _form(action, token, f'<button type="submit">{words[action]}</button>')]
+        if self.autostart is not None:
+            checked = " checked" if self.autostart.enabled() else ""
+            inner.append(f'<label class="switch"><input type="checkbox" role="switch" name="autostart" '
+                         f'aria-labelledby="sw-label" aria-describedby="sw-help"{checked}><span class="sw-text">'
+                         f'<span class="sw-label" id="sw-label">{words["autostart_label"]}</span><span class="sw-help" '
+                         f'id="sw-help">{words["autostart_help"]}</span></span></label>')
+        return f'<div class="panel pc" role="group" aria-labelledby="pc-title">{"".join(inner)}</div>'
 
     def render_stopped(self, lang):
         """The one small page /quit answers: the program stopped, and how to start it again."""

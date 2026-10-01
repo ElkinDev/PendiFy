@@ -283,7 +283,7 @@ class PageControlsTest(unittest.TestCase):
         for served in (given_none, unavailable):
             shown = self.call("GET", "/", served=served)[2]
             self.assertIn(self.card("es", served=served), shown)
-            for marker in ('role="switch"', 'type="checkbox"', "sw-label", "sw-help", 'class="switch"'):
+            for marker in ('role="switch"', 'type="checkbox"', 'id="sw-label"', 'id="sw-help"', 'class="switch"'):
                 self.assertNotIn(marker, shown)
         # The switch posts its change as the theme button does, then the page is read again from the registry.
         self.assertIn("var sw=document.querySelector('input[name=autostart]');if(!sw)return;", page._SCRIPT)
@@ -331,7 +331,9 @@ class PageControlsTest(unittest.TestCase):
         self.assertIn("const paused=s.dataset.paused;", page._SCRIPT)
         self.assertIn("(paused!==undefined&&String(j.paused)!==paused)", page._SCRIPT)
         bare = self.serve()
-        self.assertNotIn("data-paused", self.call("GET", "/", served=bare)[2])
+        # No element of a page with no watcher carries the attribute; the style's #watch[data-paused] rule is no
+        # attribute (round 2, the sheet's paused block).
+        self.assertNotIn("data-paused=", self.call("GET", "/", served=bare)[2])
 
 
 if __name__ == "__main__":
