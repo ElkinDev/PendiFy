@@ -24,6 +24,13 @@ El instalador busca Python 3.10 o más nuevo; si no lo hay lo instala con winget
 
 En PowerShell: para ver qué haría sin cambiar nada: `$env:PCNOTIFY_DRYRUN = "1"` antes de pegar la línea. Para no iniciarlo al final: `$env:PCNOTIFY_NOSTART = "1"`.
 
+Otra forma, sin ejecutar ningún script: si el PC ya tiene Python 3.10 o más nuevo, o si en él no se permite ejecutar scripts, instálalo con pip e inícialo:
+
+    python -m pip install --upgrade pcnotify
+    python -m pcnotify
+
+Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y el inicio con Windows queda en el interruptor de la página. Para actualizar, usa la misma línea de pip. Para quitarlo, apaga primero el interruptor «Iniciar con Windows» en la página y después ejecuta `python -m pip uninstall pcnotify`.
+
 ### Enlazar
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
@@ -74,6 +81,13 @@ If you see "'irm' is not recognized as an internal or external command", you pas
 The installer looks for Python 3.10 or newer; when there is none it installs it with winget for your user only, or points you to https://www.python.org/downloads/ when winget is missing. Then it installs pcnotify with pip, leaves a `pcnotify` shortcut on the Desktop and in the Start menu, and starts it.
 
 In PowerShell: to see what it would do without changing anything, set `$env:PCNOTIFY_DRYRUN = "1"` before pasting the line. To leave it stopped at the end, set `$env:PCNOTIFY_NOSTART = "1"`.
+
+Another way, with no script at all: on a PC that already has Python 3.10 or newer, or where scripts are not allowed, install it with pip and start it:
+
+    python -m pip install --upgrade pcnotify
+    python -m pcnotify
+
+This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, run the same pip line. To remove it, first turn off the «Start with Windows» switch on the page, then run `python -m pip uninstall pcnotify`.
 
 ### Link
 

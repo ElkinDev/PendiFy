@@ -11,6 +11,16 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = []
+keywords = ["notifications", "alerts", "phone", "qr", "pairing", "windows"]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.urls]
+Homepage = "https://github.com/ElkinDev/pcnotify"
+Source = "https://github.com/ElkinDev/pcnotify"
 
 # pip lays the icon beside the modules; install.ps1 points the shortcuts at it.
 [tool.setuptools.package-data]
