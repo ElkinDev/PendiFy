@@ -15,7 +15,7 @@ import time
 
 from . import client, worker
 
-IN_PROGRESS, READY_CHECK = "InProgress", "ReadyCheck"
+IN_PROGRESS, READY_CHECK, RECONNECT = "InProgress", "ReadyCheck", "Reconnect"
 # The phases that end or precede a game: only a read of one of them resets the start latch.
 GAME_BOUNDARY_PHASES = frozenset({"None", "Lobby", "Matchmaking", READY_CHECK, "ChampSelect", "EndOfGame",
                                   "PreEndOfGame", "WaitingForStats"})
@@ -127,9 +127,13 @@ class Watcher:
 
     def _on_phase(self, phase, base, token):
         # An arrival is InProgress after a read of another phase. The first read is not one: an alert for a game
-        # already under way says nothing (S:755-757). Reconnect, InProgress or an unknown phase keeps the latch.
+        # already under way says nothing (S:755-757). A first read of InProgress or of Reconnect is such a game, so
+        # it sets the latch, and the InProgress that follows (after a Reconnect of that same game, or the one the
+        # Reconnect ends in) says nothing either. Reconnect, InProgress or an unknown phase keeps the latch.
         if phase in GAME_BOUNDARY_PHASES:
             self._start_alerted = False
+        elif self._last_phase is None and phase in (IN_PROGRESS, RECONNECT):
+            self._start_alerted = True
         elif self._last_phase not in (None, IN_PROGRESS) and not self._start_alerted:
             self._start_alerted = True  # before the alert: an alert that breaks is not made again for this game
             self._fire(MATCH_STARTED)

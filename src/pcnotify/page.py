@@ -15,7 +15,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, config, qr
+from . import codes, config, plate_almena, qr
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
@@ -24,7 +24,8 @@ MAX_FORM_BYTES = 4096
 DRAIN_BYTES = 64 * 1024
 # With no usable length the socket is read up to DRAIN_BYTES while bytes keep coming, each read waiting this long.
 DRAIN_WAIT = 0.1
-POLICY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
+# img-src data: is the QR scene's plate, one image inlined as a data URI; no image loads from any origin.
+POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                  ("Content-Security-Policy", POLICY), ("X-Content-Type-Options", "nosniff"))
@@ -36,7 +37,8 @@ WORDS = {
                  "con tu cuenta.",
         "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
-        "show_key": "Mostrar la clave",
+        "show_code": "Mostrar el código",
+        "theme_toggle": "Cambiar entre tema claro y oscuro",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -87,7 +89,8 @@ WORDS = {
                  "account.",
         "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
-        "show_key": "Show the key",
+        "show_code": "Show the code",
+        "theme_toggle": "Switch between light and dark theme",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -143,15 +146,22 @@ PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
 # action="/relink" or action="/quit" of a form it does not show.
-_STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
+# The theme's colours, light and dark. The system's choice sets them; the theme button's choice, kept in data-theme
+# on the html element, overrides it in either direction; with no choice stored the system's governs (pendiapp.com's
+# rule, assets/tokens.css).
+_LIGHT = ("--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFEAF8;--ink:#1E1533;--ink2:#574E70;"
           "--line:#D8D0EA;--hair:#ECE6F7;--brand:#6D28D9;--on-brand:#FFFFFF;--tonal:#E9DEFB;--on-tonal:#4C1D95;"
           "--danger:#C21F45;--danger-bg:#F6DDE3;--on-danger-bg:#671025;--ring:rgba(109,40,217,.24);--hover:rgba(30,21,"
-          "51,.06);--px-line:#1E1533;--shadow:0 1px 2px rgba(30,21,51,.05),0 12px 32px rgba(30,21,51,.07);}\n"
-          "@media (prefers-color-scheme:dark){:root{--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
-          "--ink2:#A79FC2;--line:#3A3452;--hair:#2B2740;--brand:#C3B1F7;--on-brand:#24124F;--tonal:#40277C;"
-          "--on-tonal:#E9DEFB;--danger:#FB7196;--danger-bg:#853C50;--on-danger-bg:#FEEAEF;--ring:rgba(195,177,247,.30);"
-          "--hover:rgba(255,255,255,.08);--px-line:#0D0A18;--shadow:0 1px 2px rgba(0,0,0,.30),0 16px 40px rgba(0,0,0,"
-          ".32);}}\n"
+          "51,.06);--px-line:#1E1533;--shadow:0 1px 2px rgba(30,21,51,.05),0 12px 32px rgba(30,21,51,.07);")
+_DARK = ("--bg:#131022;--card:#1E1A31;--tint:#272138;--ink:#ECE8F6;"
+         "--ink2:#A79FC2;--line:#3A3452;--hair:#2B2740;--brand:#C3B1F7;--on-brand:#24124F;--tonal:#40277C;"
+         "--on-tonal:#E9DEFB;--danger:#FB7196;--danger-bg:#853C50;--on-danger-bg:#FEEAEF;--ring:rgba(195,177,247,.30);"
+         "--hover:rgba(255,255,255,.08);--px-line:#0D0A18;--shadow:0 1px 2px rgba(0,0,0,.30),0 16px 40px rgba(0,0,0,"
+         ".32);")
+_STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
+          "@media (prefers-color-scheme:dark){:root{" + _DARK + "}}\n"
+          ':root[data-theme="light"]{color-scheme:light;' + _LIGHT + "}\n"
+          ':root[data-theme="dark"]{color-scheme:dark;' + _DARK + "}\n"
           "*{box-sizing:border-box}\n"
           "body{margin:0;padding:32px 16px 40px;background:var(--bg);color:var(--ink);font:400 16px/24px system-ui,"
           "sans-serif;-webkit-font-smoothing:antialiased}\n"
@@ -177,12 +187,27 @@ _STYLE = (":root{color-scheme:light dark;--bg:#FAF8FE;--card:#FFFFFF;--tint:#EFE
           "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
           ".qr{display:block;width:100%;max-width:288px;height:auto;border-radius:12px;"
           "box-shadow:0 0 0 1px var(--hair)}\n"
-          ".key-card figcaption{display:grid;gap:2px;text-align:center}\n"
+          ".key-card details{justify-self:stretch;text-align:center}\n"
+          ".shown{display:grid;justify-items:center;gap:16px}\n"
+          ".key{display:grid;gap:2px;margin:0}\n"
           ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
           ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
-          ".key-card details[open] summary{margin-bottom:12px}\n"
-          ".key-card details>span{display:block}\n"
+          ".key-card details[open] summary{margin-bottom:16px}\n"
+          ".bar{display:flex;justify-content:flex-end;margin:0 0 8px}\n"
+          ".icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;min-height:0;padding:0;"
+          "border-radius:999px;border:1px solid var(--hair);background:transparent;color:var(--ink);cursor:pointer;"
+          "transition:background .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1)}\n"
+          ".icon-btn:hover{background:var(--tint);box-shadow:none}\n"
+          ".icon-btn:active{transform:scale(.94)}\n"
+          ".icon-btn .sun{display:none}\n"
+          ".icon-btn .moon{display:block}\n"
+          '@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .icon-btn .sun{display:block}'
+          ':root:not([data-theme="light"]) .icon-btn .moon{display:none}}\n'
+          ':root[data-theme="dark"] .icon-btn .sun{display:block}\n'
+          ':root[data-theme="dark"] .icon-btn .moon{display:none}\n'
+          ':root[data-theme="light"] .icon-btn .sun{display:none}\n'
+          ':root[data-theme="light"] .icon-btn .moon{display:block}\n'
           '.code{font:600 22px/28px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.12em;'
           "font-variant-numeric:tabular-nums}\n"
           ".party{display:flex;justify-content:center;align-items:flex-end;gap:18px;width:100%;padding-top:4px;"
@@ -233,7 +258,42 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown)location.reload();})"
-           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);")
+           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
+           # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
+           # toggle, so a close by hand leaves none running.
+           "const d=document.querySelector('.key-card details');let hide;"
+           "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
+           "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});"
+           # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
+           # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
+           # its localStorage is a new origin each time. The server's value, served as data-theme, wins on the next
+           # page: localStorage is the fallback only while config.json holds no theme. A post whose write fails is
+           # answered as a failed save is (303 to the page, which says the file could not be written), and the
+           # choice then lasts until the next page, which keeps the config's theme.
+           "(function(){var btn=document.getElementById('theme-toggle');if(!btn)return;"
+           "function current(){var t=document.documentElement.getAttribute('data-theme');"
+           "if(t==='light'||t==='dark')return t;return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}"
+           "function reflect(){btn.setAttribute('aria-pressed',String(current()==='dark'));}reflect();"
+           "btn.addEventListener('click',function(){var next=current()==='dark'?'light':'dark';"
+           "document.documentElement.setAttribute('data-theme',next);"
+           "try{localStorage.setItem('pendi-theme',next);}catch(e){}reflect();"
+           "var f=document.querySelector('input[name=token]');"
+           "if(f)fetch('/theme',{method:'POST',body:new URLSearchParams({token:f.value,theme:next})})"
+           ".catch(function(){});});})();")
+# Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
+# index.html head script). The choice kept in config.json, served as data-theme on <html>, wins: localStorage is
+# read only when the page came with none.
+_THEME_READ = ("(function(){try{var e=document.documentElement;if(e.hasAttribute('data-theme'))return;"
+               "var t=localStorage.getItem('pendi-theme');"
+               "if(t==='light'||t==='dark')e.setAttribute('data-theme',t);}catch(x){}})();")
+# The theme button's two icons, copied from pendiapp.com's header; the style shows the one of the other theme.
+_THEME_ICONS = ('<svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>'
+                '<svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 '
+                '12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>')
 
 # Four original 16 by 16 pixel figures under the key (an archer, a knight, a mage and a small winged creature), in
 # the app's colours; 'o' is the outline, drawn in the theme's outline colour, and '.' is empty.
@@ -384,13 +444,17 @@ class PairingPage:
         if watch is not None:
             link.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
         if secret is not None:
-            drawn = qr.svg(qr.encode(qr.pairing_address(secret).encode("ascii")).modules, labelledby="scan")
+            modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
+            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
+            if drawn is None:  # the scene is drawn for version 3 only
+                drawn = qr.svg(modules, labelledby="scan")
             link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
-                     # The key is hidden until its person asks (a page shown on a stream prints none): a native
-                     # details, closed, its summary the one control; no script.
-                     f'<figure class="key-card">{drawn}<figcaption><details><summary>{words["show_key"]}</summary>'
-                     f'<span class="key-label">{words["code_label"]}</span> <span class="code">'
-                     f'{codes.display(secret)}</span></details></figcaption>{_PARTY}</figure>',
+                     # The QR and the key are hidden until their person asks (a page shown on a stream prints
+                     # neither): a native details, closed, its summary the one control; _SCRIPT closes it again
+                     # 60 s after it opens.
+                     f'<figure class="key-card"><details><summary>{words["show_code"]}</summary><div class="shown">'
+                     f'{drawn}<p class="key"><span class="key-label">{words["code_label"]}</span> <span class="code">'
+                     f'{codes.display(secret)}</span></p>{_PARTY}</div></details></figure>',
                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]
             if snapshot["buttonRefused"]:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
@@ -407,20 +471,40 @@ class PairingPage:
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
-        body = (f'<main class="page"><section class="link">{"".join(link)}</section><section class="more">'
+        bar = (f'<header class="bar"><button id="theme-toggle" class="icon-btn" type="button" aria-pressed="false" '
+               f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
+        theme = self.state.theme()
+        kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
+        body = (f'<main class="page">{bar}<section class="link">{"".join(link)}</section><section class="more">'
                 f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
                 f"{foot}</main>")
-        return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
+        return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
-                f"</style></head><body>{body}<script>{_SCRIPT}</script></body></html>")
+                f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def render_stopped(self, lang):
         """The one small page /quit answers: the program stopped, and how to start it again."""
         words = {key: html.escape(value) for key, value in WORDS[lang].items()}
-        return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" '
+        theme = self.state.theme()
+        kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
+        return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title><style>{_STYLE}'
-                f'</style></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
+                f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
+
+    def set_theme(self, choice):
+        """/theme: the theme button's choice kept in the config file; "kept", or "refused" for a value that is
+        not light, dark or system, which changes nothing, or "failed" for a config file that cannot be replaced,
+        said as act() says it and answered as a failed save is."""
+        try:
+            self.state.set_theme(choice)
+        except ValueError:
+            return "refused"
+        except config.ConfigError as failure:
+            _say_failure(failure)
+            self.state.config_failed()
+            return "failed"
+        return "kept"
 
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
@@ -519,7 +603,8 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            routes = ("/check", "/typed", "/forget", "/relink") + (("/quit",) if page.on_quit is not None else ())
+            routes = ("/check", "/typed", "/forget", "/relink", "/theme")
+            routes += ("/quit",) if page.on_quit is not None else ()
             if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
@@ -543,6 +628,13 @@ def _handler(page):
                 finally:
                     page.on_quit()
                 return
+            if path == "/theme":  # the page's script posts it and reads no page back
+                outcome = page.set_theme(form.get("theme", ""))
+                if outcome == "refused":
+                    return self._refuse(400)
+                if outcome == "kept":
+                    return self._send(204, "text/plain; charset=utf-8", "")
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
 

@@ -1,4 +1,5 @@
-"""The config file: exactly the secret and the link id, under the user's profile (design P1, P6).
+"""The config file: the secret and the link id, under the user's profile (design P1, P6), and the page's theme
+choice when there is one (light or dark; the system's choice is no key).
 
 The file is `<base>/<folder>/config.json`, where the base is %APPDATA% in a real run and is injected
 everywhere else, so no test touches the real profile. A write goes to a temp file in the same folder
@@ -23,6 +24,11 @@ FILE_NAME = "config.json"
 UNAVAILABLE = "the config file {path} cannot be used now: close any program that holds it open and start again"
 # A refused os.replace is tried again after each pause: five retries over one second.
 REPLACE_PAUSES = (0.2,) * 5
+# The theme button's choices; "system" follows the system and is kept as no key.
+THEMES = ("light", "dark")
+SYSTEM_THEME = "system"
+# _write's default: the stored theme choice is kept.
+_KEEP = object()
 
 
 class ConfigError(OSError):
@@ -73,6 +79,32 @@ class ConfigStore:
             return None
         return Pairing(secret, codes.normalize(data.get("linkId")))
 
+    def read_theme(self):
+        """The stored theme choice, light or dark, or None when there is none (the system's). A file that is
+        there and cannot be read raises ConfigError, as read() does; a missing, corrupt or foreign value is None."""
+        try:
+            raw = self.path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise self._unavailable() from None
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            return None
+        theme = data.get("theme") if isinstance(data, dict) else None
+        return theme if theme in THEMES else None
+
+    def set_theme(self, choice):
+        """The theme button's choice written beside the pair: light or dark kept, system kept as no key. Any
+        other value is refused and nothing is written. Answers the stored choice, None for the system's."""
+        if choice not in THEMES + (SYSTEM_THEME,):
+            raise ValueError("the theme is not light, dark or system")
+        theme = None if choice == SYSTEM_THEME else choice
+        with self._lock:
+            self._write(self._current(), theme=theme)
+            return theme
+
     def load(self):
         """The stored pair; when there is none, a first load: a new secret, written (P1)."""
         with self._lock:
@@ -121,9 +153,15 @@ class ConfigStore:
     def _unavailable(self):
         return ConfigError(UNAVAILABLE.format(path=self.path))
 
-    def _write(self, pairing):
+    def _write(self, pairing, theme=_KEEP):
+        """The pair, and the theme choice: the stored one kept unless set_theme passes its own."""
         folder = self.path.parent
-        data = json.dumps({"secret": pairing.secret, "linkId": pairing.link_id}).encode("utf-8")
+        if theme is _KEEP:
+            theme = self.read_theme()
+        values = {"secret": pairing.secret, "linkId": pairing.link_id}
+        if theme is not None:
+            values["theme"] = theme
+        data = json.dumps(values).encode("utf-8")
         try:
             folder.mkdir(parents=True, exist_ok=True)
             handle, temp = tempfile.mkstemp(dir=folder, prefix=".config-", suffix=".tmp")

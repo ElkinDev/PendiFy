@@ -20,6 +20,10 @@ Para ver qué haría sin cambiar nada: `$env:PCNOTIFY_DRYRUN = "1"` antes de peg
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
 
+El código QR y la clave se muestran durante un minuto al pulsar «Mostrar el código» y luego se ocultan de nuevo.
+
+El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el programa guarda la elección para la próxima vez.
+
 ### Iniciar, detener, desinstalar
 
 - Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`, que es lo que ejecuta el acceso directo; sin consola, si ya está abierto o no puede iniciarse te lo dice en una ventana. Para verlo en una consola: `python -m pcnotify`.
@@ -56,6 +60,10 @@ To see what it would do without changing anything, set `$env:PCNOTIFY_DRYRUN = "
 ### Link
 
 When it starts, the browser opens a local page with a QR code. Scan it with the phone's camera: the Pendi app opens and asks you to confirm the link. The page shows when the link is done.
+
+The QR code and the key show for a minute when «Show the code» is pressed, and then hide again.
+
+The button at the top right switches between the light and the dark theme, and the program keeps the choice for the next time.
 
 ### Start, stop, uninstall
 
