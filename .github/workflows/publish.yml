@@ -1,7 +1,8 @@
 name: Publish to PyPI
 
 # A published release builds and uploads; a run by hand only builds. There is no push trigger: every
-# commit subject here ends in [skip ci], which skips push runs, a tag's push included.
+# commit subject here ends in [skip ci], which skips runs triggered by push and pull_request; a
+# published release is neither.
 on:
   release:
     types: [published]

@@ -29,7 +29,9 @@ Otra forma, sin ejecutar ningún script: si el PC ya tiene Python 3.10 o más nu
     python -m pip install --upgrade pcnotify
     python -m pcnotify
 
-Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y el inicio con Windows queda en el interruptor de la página. Para actualizar, usa la misma línea de pip. Para quitarlo, apaga primero el interruptor «Iniciar con Windows» en la página y después ejecuta `python -m pip uninstall pcnotify`.
+Si Windows responde que no encuentra `python`, usa `py` en su lugar: `py -m pip install --upgrade pcnotify` y `py -m pcnotify`.
+
+Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y el inicio con Windows queda en el interruptor de la página. Para actualizar, pulsa «Salir» en la página, ejecuta otra vez la misma línea de pip y vuelve a iniciarlo. Para quitarlo, apaga primero el interruptor «Iniciar con Windows» en la página, pulsa «Salir» y después ejecuta `python -m pip uninstall pcnotify`. La configuración en `%APPDATA%\pcnotify`, con el enlace con el teléfono, se queda; puedes borrar esa carpeta a mano.
 
 ### Enlazar
 
@@ -87,7 +89,9 @@ Another way, with no script at all: on a PC that already has Python 3.10 or newe
     python -m pip install --upgrade pcnotify
     python -m pcnotify
 
-This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, run the same pip line. To remove it, first turn off the «Start with Windows» switch on the page, then run `python -m pip uninstall pcnotify`.
+If Windows answers that `python` was not found, use `py` in its place: `py -m pip install --upgrade pcnotify` and `py -m pcnotify`.
+
+This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, press «Quit» on the page, run the same pip line again and start it again. To remove it, first turn off the «Start with Windows» switch on the page, press «Quit», then run `python -m pip uninstall pcnotify`. The configuration in `%APPDATA%\pcnotify`, with the link to the phone, stays; you can delete that folder by hand.
 
 ### Link
 
