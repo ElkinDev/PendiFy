@@ -5,8 +5,12 @@ getter and poster, the clock, the wall clock, the sleep, the random delay, the a
 Its `alert` is an Alerter: snapshot() reads its last_ping(). One step() is one turn of the script's loop
 and answers the pause before the next; run() is the loop around it. The script's 15 s sleep after a ready
 check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
-InProgress after a read of another phase is the loading screen: it beeps and pings match_started at once,
-once per game; a reconnect is the same game. The console gets fixed lines only: no phase, no port, no token.
+InProgress after a read of another phase is the loading screen: it beeps on the PC only, once per game, and
+starts a watch that asks the game's own loopback port its clock at most once a second. The clock above zero
+is the match's true start: a beep and match_started. A game that never answers its clock is announced after
+120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client, ends the watch
+with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no port, no clock,
+no token.
 """
 import json
 import random
@@ -78,6 +82,8 @@ class Watcher:
         self._hold_until = None
         self._client_state = WAITING
         self._last_alert = None
+        self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
+        self._next_live = None  # the injected clock from which the game's clock may be asked again
 
     def stop(self):
         self._stop.set()
@@ -105,12 +111,14 @@ class Watcher:
         if self._found is None:
             found = self._credentials.read()
             if found is None:
+                self._watch(None)  # the watch outlives a lost client
                 return NO_CLIENT_PAUSE
             self._found = found
             self._set_client(CONNECTED)
             self._log(CONNECTED_LINE)
         base = self._addresses(self._found.port)
         token = self._found.token
+        phase = None
         try:
             status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
             if status == 200:
@@ -121,6 +129,8 @@ class Watcher:
         except client.ClientUnreachable:  # S:796-798
             self._log(LOST_LINE)
             self._forget()
+            phase = None
+        self._watch(phase)
         return STEP_PAUSE
 
     def snapshot(self):
@@ -137,13 +147,15 @@ class Watcher:
         # already under way says nothing (S:755-757). A first read of InProgress or of Reconnect is such a game, so
         # it sets the latch, and the InProgress that follows (after a Reconnect of that same game, or the one the
         # Reconnect ends in) says nothing either. Reconnect, InProgress or an unknown phase keeps the latch.
+        # A boundary ends a watch with no alert; a first read of InProgress or Reconnect leaves a running one on.
         if phase in GAME_BOUNDARY_PHASES:
             self._start_alerted = False
+            self._watch_since = None
         elif self._last_phase is None and phase in (IN_PROGRESS, RECONNECT):
             self._start_alerted = True
         elif self._last_phase not in (None, IN_PROGRESS) and not self._start_alerted:
             self._start_alerted = True  # before the alert: an alert that breaks is not made again for this game
-            self._fire(MATCH_STARTED)
+            self._loading()
         with self._lock:
             self._last_phase = phase
         if phase == READY_CHECK:
@@ -167,6 +179,36 @@ class Watcher:
             self._fire(QUEUE_FOUND)  # S:790
             self._hold()
 
+    def _loading(self):
+        """The loading screen, said on the PC only; the watch for the true start begins, its first read due now."""
+        self._alert.sound()
+        with self._lock:
+            self._last_alert = (LOADING, self._wall())
+        self._log(LOADING_LINE)
+        self._watch_since = self._next_live = self._clock()
+
+    def _watch(self, phase):
+        """One turn of the watch: the game's clock asked when due, its value above zero the start; then the
+        wait, which fires on a step whose phase read was InProgress and ends with no alert with no client."""
+        if self._watch_since is None:
+            return
+        now = self._clock()
+        if now >= self._next_live:
+            self._next_live = now + LIVE_POLL_SECONDS
+            seconds = self._game_clock(self._live())
+            if seconds is not None and seconds > 0:
+                self._watch_since = None
+                self._log(STARTED_LINE)
+                self._fire(MATCH_STARTED)
+                return
+        if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
+            if phase == IN_PROGRESS:
+                self._watch_since = None
+                self._log(STARTED_ON_WAIT_LINE)
+                self._fire(MATCH_STARTED)
+            elif self._found is None:
+                self._watch_since = None
+
     def _hold(self):
         self._hold_until = self._clock() + HOLD_SECONDS
 
@@ -177,6 +219,7 @@ class Watcher:
 
     def _forget(self):
         # S:755-757 is per connection: a fresh client already InProgress at its first read alerts nothing.
+        # A running watch is left on: the game's clock is proof by itself.
         self._found = None
         with self._lock:
             self._last_phase = None
