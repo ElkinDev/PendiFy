@@ -103,9 +103,9 @@ class WatcherFixture:
     @staticmethod
     def shown(phase, alert=None, ping=None, client_state="connected"):
         """The snapshot a watcher answers: the phase as the client names it, the last alert at the watcher's
-        wall clock and the last ping's result at the alerter's."""
+        wall clock and the last ping's result at the alerter's; not paused, as every watcher starts."""
         return {"client": client_state, "phase": phase, "alert": alert, "at": None if alert is None else WALL,
-                "pingResult": ping, "pingAt": None if ping is None else PING_WALL}
+                "pingResult": ping, "pingAt": None if ping is None else PING_WALL, "paused": False}
 
 
 class WatcherTest(WatcherFixture, unittest.TestCase):

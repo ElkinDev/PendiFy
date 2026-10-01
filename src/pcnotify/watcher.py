@@ -11,6 +11,12 @@ is the match's true start: a beep and match_started. A game that never answers i
 120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client, ends the watch
 with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no port, no clock,
 no token.
+
+pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
+thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
+port; the first paused turn forgets the client, the watch, the hold and the start latch, and the first turn after
+a resume is a fresh connection, so a game already under way then alerts nothing. A pause that lands inside a step
+posts no accept after the delay and starts no alert. The pause lives in memory only: every start is active.
 """
 import json
 import random
@@ -40,6 +46,8 @@ STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client aga
 LOADING_LINE = "loading screen: waiting for the match to start"
 STARTED_LINE = "match started: alerting"
 STARTED_ON_WAIT_LINE = "match started: the game gave no clock, alerting on the wait"
+PAUSED_LINE = "paused: not reading the game client"
+RESUMED_LINE = "resumed: looking for the game client again"
 
 WAITING, CONNECTED = "waiting", "connected"
 _ALERT_NAMES = {QUEUE_FOUND: "queue", MATCH_STARTED: "started"}
@@ -84,20 +92,42 @@ class Watcher:
         self._last_alert = None
         self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
         self._next_live = None  # the injected clock from which the game's clock may be asked again
+        self._paused = threading.Event()  # set and cleared by the page's thread, read by the loop
+        self._resting = False  # the loop's own record that it has acted on a pause; read and written by it only
 
     def stop(self):
         self._stop.set()
+
+    def pause(self):
+        """Stop reading the game; callable from any thread, honored by the loop at its next turn."""
+        self._paused.set()
+
+    def resume(self):
+        """Read the game again from the next turn, as a fresh connection; callable from any thread."""
+        self._paused.clear()
+
+    @property
+    def paused(self):
+        return self._paused.is_set()
 
     def run(self):
         """The loop: a step, then its pause, until stopped. A step that breaks is said by its type and the
         client is looked for again, so the watcher never ends while the page says it runs."""
         while not self._stop.is_set():
-            try:
-                pause = self.step()
-            except Exception as failure:
-                self._log(STEP_FAILED_LINE.format(type(failure).__name__))
-                self._forget()
-                pause = NO_CLIENT_PAUSE
+            if self._paused.is_set():  # no step: nothing is read while paused
+                if not self._resting:
+                    self._rest()
+                pause = STEP_PAUSE
+            else:
+                if self._resting:
+                    self._resting = False
+                    self._log(RESUMED_LINE)
+                try:
+                    pause = self.step()
+                except Exception as failure:
+                    self._log(STEP_FAILED_LINE.format(type(failure).__name__))
+                    self._forget()
+                    pause = NO_CLIENT_PAUSE
             if self._stop.is_set():
                 break
             self._sleep(pause)
@@ -140,7 +170,7 @@ class Watcher:
         with self._lock:
             name, at = self._last_alert or (None, None)
             return {"client": self._client_state, "phase": self._last_phase, "alert": name, "at": at,
-                    "pingResult": ping, "pingAt": ping_at}
+                    "pingResult": ping, "pingAt": ping_at, "paused": self._paused.is_set()}
 
     def _on_phase(self, phase, base, token):
         # An arrival is InProgress after a read of another phase. The first read is not one: an alert for a game
@@ -173,6 +203,8 @@ class Watcher:
             self._sleep(wait)
         if self._stop.is_set():  # stopped during the delay: the script's Ctrl+C posts nothing either
             return
+        if self._paused.is_set():  # paused during the delay: no accept, and the next turn rests
+            return
         status = self._post(base + client.ACCEPT_PATH, token, client.CLIENT_TIMEOUT)
         if status in (200, 204):
             self._log(ACCEPTED_LINE)
@@ -180,7 +212,10 @@ class Watcher:
             self._hold()
 
     def _loading(self):
-        """The loading screen, said on the PC only; the watch for the true start begins, its first read due now."""
+        """The loading screen, said on the PC only; the watch for the true start begins, its first read due now.
+        Nothing while paused."""
+        if self._paused.is_set():
+            return
         self._alert.sound()
         with self._lock:
             self._last_alert = (LOADING, self._wall())
@@ -216,6 +251,8 @@ class Watcher:
         self._hold_until = self._clock() + HOLD_SECONDS
 
     def _fire(self, kind):
+        if self._paused.is_set():  # an alert handed to the Alerter before the pause is delivered; none starts in it
+            return
         with self._lock:
             self._last_alert = (_ALERT_NAMES[kind], self._wall())
         self._alert(kind)
@@ -227,6 +264,16 @@ class Watcher:
         with self._lock:
             self._last_phase = None
         self._set_client(WAITING)
+
+    def _rest(self):
+        """The first paused turn: the client, the watch, the hold and the start latch are dropped, so the turn
+        after a resume is a fresh connection."""
+        self._resting = True
+        self._forget()
+        self._watch_since = self._next_live = None
+        self._hold_until = None
+        self._start_alerted = False
+        self._log(PAUSED_LINE)
 
     def _set_client(self, value):
         with self._lock:

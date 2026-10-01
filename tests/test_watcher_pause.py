@@ -156,9 +156,10 @@ class WatcherPauseTest(WatcherFixture, unittest.TestCase):
         self.turns(subject, 1, "ReadyCheck")
         self.assertEqual(self.fake.count("POST", ACCEPT), 1)
         self.assertEqual(self.pings[-1], (LINK_ID, SECRET, QUEUE_FOUND))
-        self.assertEqual(self.lines, [watcher.CONNECTED_LINE, watcher.PAUSED_LINE, watcher.RESUMED_LINE,
-                                      watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.STARTED_LINE,
-                                      watcher.ACCEPTING_LINE, watcher.ACCEPTED_LINE])
+        said = [line for line in self.lines if not line.startswith("alert: ")]  # the watcher's own, not the Alerter's
+        self.assertEqual(said, [watcher.CONNECTED_LINE, watcher.PAUSED_LINE, watcher.RESUMED_LINE,
+                                watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.STARTED_LINE,
+                                watcher.ACCEPTING_LINE, watcher.ACCEPTED_LINE])
 
     def test_a_pause_drops_the_hold_so_a_resume_reads_the_client_at_once(self):
         # Mutation: the hold kept at the pause. Red: the turn after the resume reads nothing for 15 s.
