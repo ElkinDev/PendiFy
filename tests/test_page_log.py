@@ -205,19 +205,29 @@ class PageLogTest(unittest.TestCase):
                     self.assertIsNone(GAME_WORDS.search(line["text"]), line["text"])
                 self.assertIsNone(GAME_WORDS.search(card))
 
-    def test_on_the_page_that_offers_the_relink_the_card_still_follows_the_card_this_pc(self):
-        # Mutation: the card drawn at the column's end on every page. Red: the relink form between the two cards.
+    def test_on_the_page_that_offers_the_relink_the_card_ends_the_column_and_the_relink_does_not_move(self):
+        # The refused page takes the code page's rule (ruling after round 2). Mutation: the card right after the
+        # card «Este PC» on this page too. Red: the card between that card and the relink form, which moves down.
         for _ in range(pairing.REFUSED_PINGS_FOR_RELINK):
             self.state.record_ping(worker.Refused())
+        bare = self.serve(watch=lambda: dict(self.snapshot), on_pause=lambda: None, on_resume=lambda: None)
         for language, _ in LANGUAGES:
             words = page.WORDS[page.language(language)]
             with self.subTest(language=language):
                 shown, link, card = self.card(language)
-                relink = (f'<form method="post" action="/relink"><input type="hidden" name="token" '
-                          f'value="{self.page.token}"><button type="submit">{html.escape(words["relink"])}</button>'
-                          f"</form>")
-                self.assertTrue(link[PC_CARD.search(link).end():].startswith(card + relink))
-                self.assertTrue(link.endswith(relink))
+
+                def relink(token):
+                    return (f'<form method="post" action="/relink"><input type="hidden" name="token" '
+                            f'value="{token}"><button type="submit">{html.escape(words["relink"])}</button></form>')
+
+                self.assertTrue(link.endswith(relink(self.page.token) + card))
+                self.assertLess(PC_CARD.search(link).end(), link.index(relink(self.page.token)))
+                # Without the events the column is the same up to and including the relink form: it does not move.
+                without = LINK.search(self.get("/", language, bare)).group(1)
+                self.assertNotIn('class="panel log-card"', without)
+                self.assertTrue(without.endswith(relink(bare.token)))
+                self.assertEqual(link[:link.index(relink(self.page.token))].replace(self.page.token, "TOKEN"),
+                                 without[:without.index(relink(bare.token))].replace(bare.token, "TOKEN"))
 
     def test_on_the_page_that_still_shows_the_code_the_card_ends_the_first_column_and_the_code_does_not_move(self):
         # Mutation: the card drawn right after the card «Este PC» on this page too. Red: the scan sentence and the
