@@ -84,6 +84,16 @@ class LinkWorkerClientTest(unittest.TestCase):
                 with mock.patch.object(worker.importlib.metadata, "version", replacement):
                     self.assertEqual(worker._user_agent(), "pendify/source")
 
+    def test_the_installed_version_is_read_under_the_package_name(self):
+        # Mutation: the lookup asks for another name (version("pendifyx")). Red: pendify/source, not the version.
+        def lookup(name):
+            if name == "pendify":
+                return "0.1.0"
+            raise worker.importlib.metadata.PackageNotFoundError(name)
+
+        with mock.patch.object(worker.importlib.metadata, "version", lookup):
+            self.assertEqual(worker._user_agent(), "pendify/0.1.0")
+
     def test_each_ping_answer_maps_to_its_result_as_s_reads_it(self):
         # Mutation: a 200 with sent 0 read as Sent. Red: Sent where NotDelivered(200) is expected (S:303).
         answers = [
