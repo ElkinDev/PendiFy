@@ -184,6 +184,14 @@ class PackageShapeTest(unittest.TestCase):
         for part in (RELEASE_ONLY, "pyproject.toml", '"v$version"', "exit 1"):
             self.assertIn(part, steps[check[0]])
 
+    def test_the_sdist_prunes_the_tests_folder(self):
+        # Mutation: MANIFEST.in removed. Red: setuptools adds tests/test_*.py to the sdist on its own, without
+        # their helpers, so a public download carries tests that cannot run.
+        manifest = support.ROOT / "MANIFEST.in"
+        self.assertTrue(manifest.is_file(), "no MANIFEST.in at the root")
+        lines = [line.strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
+        self.assertIn("prune tests", lines)
+
     def test_pyproject_points_its_urls_at_the_repository_and_keeps_its_version(self):
         # Mutation: Source pointed at a fork. Red: the urls are not the repository's.
         project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]

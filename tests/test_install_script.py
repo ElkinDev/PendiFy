@@ -197,15 +197,26 @@ class InstallScriptTest(unittest.TestCase):
         # Mutation: the English pip install line dropped, red. Mutation: the uninstall sentence written
         # before the switch is named, red: the Run key would point at a Python with no package.
         text, spanish, english = _readme_sections()
-        for section, switch in ((spanish, "«Iniciar con Windows»"), (english, "«Start with Windows»")):
+        for section, switch, quit_word, kept in (
+                (spanish, "«Iniciar con Windows»", "«Salir»", ("`%APPDATA%\\pcnotify`", "se queda", "a mano")),
+                (english, "«Start with Windows»", "«Quit»", ("`%APPDATA%\\pcnotify`", "stays", "by hand"))):
             code = [line.strip() for line in section.splitlines() if line.startswith("    ")]
             self.assertEqual(code.count(PIP_INSTALL), 1)
             self.assertEqual(code.count(PIP_START), 1)
             self.assertEqual(section.count(PIP_INSTALL), 1)
-            removal = [sentence for sentence in re.split(r"(?<=[.!?])\s+", section) if PIP_UNINSTALL in sentence]
+            sentences = re.split(r"(?<=[.!?])\s+", section)
+            removal = [index for index, sentence in enumerate(sentences) if PIP_UNINSTALL in sentence]
             self.assertEqual(len(removal), 1)
-            self.assertIn(switch, removal[0])
-            self.assertLess(removal[0].index(switch), removal[0].index(PIP_UNINSTALL))
+            sentence = sentences[removal[0]]
+            self.assertIn(switch, sentence)
+            # Mutation: the quit step dropped from the removal, red: pip cannot remove a package that runs.
+            self.assertIn(quit_word, sentence)
+            self.assertLess(sentence.index(switch), sentence.index(quit_word))
+            self.assertLess(sentence.index(quit_word), sentence.index(PIP_UNINSTALL))
+            # Mutation: the config folder sentence dropped, red: the next sentence does not name the folder.
+            after = sentences[removal[0] + 1] if removal[0] + 1 < len(sentences) else ""
+            for part in kept:
+                self.assertIn(part, after)
         self.assertEqual(text.count(PIP_INSTALL), 2)
         self.assertEqual(text.count(PIP_UNINSTALL), 2)
 
