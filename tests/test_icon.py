@@ -215,15 +215,15 @@ class IconFileTest(unittest.TestCase):
         self.assertEqual(data[offset + 12:offset + 16], b"IHDR")
         self.assertEqual(struct.unpack(">II", data[offset + 16:offset + 24]), (256, 256))
 
-    def test_the_page_constants_decode_to_the_32_and_16_grids(self):
-        # Mutation: PNG_16 written from the 32 grid scaled down. Red: the 16 constant is not the 16 grid.
+    def test_the_page_constant_decodes_to_the_32_grid_and_is_the_only_one(self):
+        # Mutation: PNG_32 written from the 16 grid scaled up. Red: the constant is not the 32 grid. Mutation: the
+        # 16 px constant written back. Red: icon.py holds a name the program never reads.
         grid = load_tool("icon_grid")
         icon = support.module("icon")
-        for name, size in (("PNG_32", 32), ("PNG_16", 16)):
-            with self.subTest(name=name):
-                width, height, rows = decode_png(base64.b64decode(getattr(icon, name), validate=True))
-                self.assertEqual((width, height), (size, size))
-                self.assertEqual(rows, expected_rows(grid, size))
+        width, height, rows = decode_png(base64.b64decode(icon.PNG_32, validate=True))
+        self.assertEqual((width, height), (32, 32))
+        self.assertEqual(rows, expected_rows(grid, 32))
+        self.assertEqual([name for name in vars(icon) if not name.startswith("__")], ["PNG_32"])
         self.assertIn("tools/make_icon.py", icon.__doc__)
 
     def test_the_grids_hold_only_palette_characters_and_every_edge_cell_is_the_outline(self):

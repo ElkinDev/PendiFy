@@ -1,4 +1,4 @@
-"""The program's icon for the page: the 32 and 16 px frames of pcnotify.ico as PNG in base64.
+"""The program's icon for the page: the 32 px frame of pcnotify.ico as PNG in base64.
 
 Written by tools/make_icon.py from tools/icon_grid.py: run the tool, never edit this file by hand.
 """
@@ -11,11 +11,4 @@ PNG_32 = (
     "k+IAkK9BDgHRMAwyA8VQUjkgA7A5AmYBPhqklyT7QBrogbE6CmTx4Y3f4Z4FsZHx8vmH/pOCkfWis0F2oTgCJABSBLIdRNMD"
     "g+yEOwLEoYelyHaA7Bx1wOAJAZBLQHGCHEeUsAnlFpBdIDsxMEgChJEtB/GpjTEsRhYAWQZzAIiNLEcXNshSkANANF0sRLcE"
     "ZDEIo4vTig8AgGltBNeEC2EAAAAASUVORK5CYII="
-)
-
-PNG_16 = (
-    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAvklEQVR4AWNABl0xH/7DMLI4iA0TB9EgPgYGSfwHgpf3fgPJ"
-    "/3CDQOIgDBJElkMxAKYApIhYDNIDNwTEgWmUEzWGMTFomBzIJSA9tDEAw1o0AZDtIIzhglyNm/9JwRgGoFmEwoUZDLIZhlEM"
-    "AAUGSABFFxIHZABMI4gGqQXpgWOQADkYbABI4+GN38H2gWhSMEgvA4ggRROyWpBeyg0A+QNkEsxkEJtYDNILxiANIANANFiA"
-    "VAKkEYRJ1QdSDwD4O4QI07agpQAAAABJRU5ErkJggg=="
 )

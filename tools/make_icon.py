@@ -6,8 +6,8 @@
 pcnotify.ico holds five frames: 16 (the 16 grid), 32 (the 32 grid), and 48, 64 and 256 from the 32 grid by nearest
 neighbour. At 64 and 256 each pixel takes the source cell floor((x + 0.5) * 32 / size); at 48 it takes the cell
 SOURCE_48 names, the table of the reviewed 48 px render. The frames up to 64 are 32-bit BGRA bitmaps
-with their AND mask, the 256 frame is a PNG: the layout Windows reads since Vista. icon.py holds the 32 and 16 px
-frames as PNG in base64 for the page. The PNGs are compressed by the small deflate below, not by zlib.compress, so
+with their AND mask, the 256 frame is a PNG: the layout Windows reads since Vista. icon.py holds the 32 px frame
+as PNG in base64 for the page. The PNGs are compressed by the small deflate below, not by zlib.compress, so
 their bytes do not change with the zlib build an interpreter carries.
 """
 import base64
@@ -180,13 +180,12 @@ def build_ico():
 
 
 def build_icon_module():
-    lines = ['"""The program\'s icon for the page: the 32 and 16 px frames of pcnotify.ico as PNG in base64.',
+    lines = ['"""The program\'s icon for the page: the 32 px frame of pcnotify.ico as PNG in base64.',
              "",
              "Written by tools/make_icon.py from tools/icon_grid.py: run the tool, never edit this file by hand.",
              '"""']
-    for name, size in (("PNG_32", 32), ("PNG_16", 16)):
-        text = base64.b64encode(png(frame(size))).decode("ascii")
-        lines += ["", f"{name} = ("] + [f'    "{text[i:i + 96]}"' for i in range(0, len(text), 96)] + [")"]
+    text = base64.b64encode(png(frame(32))).decode("ascii")
+    lines += ["", "PNG_32 = ("] + [f'    "{text[i:i + 96]}"' for i in range(0, len(text), 96)] + [")"]
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
