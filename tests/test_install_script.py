@@ -27,11 +27,20 @@ RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
 # PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
 # The script is saved in the home folder and run as a file: the piped form (irm ... | iex) is stopped by
 # an antivirus heuristic on the command line, and a saved file run by its path is not.
-SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm '
+# The saved copy is removed first: a failed download does not stop the ; chain under -Command, so without
+# the removal a copy an earlier download left would run instead.
+SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "'
 INSTALL_SAVED = "pcnotify-install.ps1"
 UNINSTALL_SAVED = "pcnotify-uninstall.ps1"
-INSTALL_LINE = SHELL_PREFIX + RAW + "install.ps1 -OutFile ~\\" + INSTALL_SAVED + "; ~\\" + INSTALL_SAVED + '"'
-UNINSTALL_LINE = SHELL_PREFIX + RAW + "uninstall.ps1 -OutFile ~\\" + UNINSTALL_SAVED + "; ~\\" + UNINSTALL_SAVED + '"'
+
+
+def _saved_file_line(script, saved):
+    return (SHELL_PREFIX + "ri ~\\" + saved + " -ea 0; irm " + RAW + script + " -OutFile ~\\" + saved
+            + "; ~\\" + saved + '"')
+
+
+INSTALL_LINE = _saved_file_line("install.ps1", INSTALL_SAVED)
+UNINSTALL_LINE = _saved_file_line("uninstall.ps1", UNINSTALL_SAVED)
 # Antivirus products the README never names: the antivirus sentence asks for no product by name.
 AV_PRODUCTS = ("defender", "norton", "mcafee", "avast", "avg", "kaspersky", "bitdefender", "eset",
                "malwarebytes", "sophos", "trend micro", "panda", "avira", "webroot")
@@ -455,6 +464,10 @@ class InstallLineAnyShellTest(unittest.TestCase):
                 self.assertTrue(line.startswith("powershell "), line)
                 self.assertIn('-Command "', line)
                 self.assertIn(RAW + script + " -OutFile ~\\" + saved + "; ", line)
+                # Mutation: the removal moved after the download (or dropped), red.
+                removal = line.find('-Command "ri ~\\' + saved + " -ea 0; ")
+                self.assertNotEqual(removal, -1, "the line does not remove its saved copy first")
+                self.assertLess(removal, line.find("irm "), "the removal comes after the download")
                 self.assertTrue(line.endswith("; ~\\" + saved + '"'), line)
                 self.assertNotIn("iex", line)
                 for char in ("$", "%", "&"):
@@ -476,14 +489,16 @@ class InstallLineAnyShellTest(unittest.TestCase):
         text, spanish, english = _readme_sections()
         for section, phrases in (
             (spanish, ("antivirus", "no se instaló nada", "actualiza las definiciones del antivirus",
-                       "`install.ps1`")),
+                       "`install.ps1`", "botón derecho", "«Ejecutar con PowerShell»")),
             (english, ("antivirus", "nothing was installed", "update the antivirus definitions",
-                       "`install.ps1`")),
+                       "`install.ps1`", "right button", '"Run with PowerShell"')),
         ):
             paragraph = next((p for p in section.split("\n\n") if phrases[1] in p), None)
             self.assertIsNotNone(paragraph, phrases[1])
             for phrase in phrases:
                 self.assertIn(phrase, paragraph)
+            # Mutation: the right-button step written as a second sentence, red.
+            self.assertEqual(len(re.findall(r"[.!?](\s|$)", paragraph.strip())), 1, paragraph)
             for word in ("desactiv", "apaga", "exclus", "turn off", "disable", "exclusion", "exception"):
                 self.assertNotIn(word, paragraph.lower())
         for product in AV_PRODUCTS:
