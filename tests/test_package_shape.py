@@ -16,6 +16,9 @@ LICENSE_HEAD = ["MIT License", "", "Copyright (c) 2026 ElkinDev", "",
                 "Permission is hereby granted, free of charge, to any person obtaining a copy"]
 README_SECTIONS = ((r"^## Espa\S*ol\s*$(.*?)(?=^## )", "Licencia: MIT"),
                    (r"^## English\s*$(.*?)(?=^## |\Z)", "License: MIT"))
+# The program's name before the rename of 2026-10-01, spelled on this one line only, for the tree pin to search for.
+OLD_NAME = "pcnotify"
+NEW_NAME = "pendify"
 
 
 def package_files():
@@ -107,6 +110,39 @@ class PackageShapeTest(unittest.TestCase):
 
     # The working-name pin was retired on 2026-09-30: pcnotify is the public name now, spelled by the
     # installer, the uninstaller and the README (the repository slug stays one constant in install.ps1).
+
+    def test_the_former_name_is_gone_from_every_tracked_path_and_line_but_this_search(self):
+        # Mutation: worker.py names itself by the former name again. Red: the count gains src/pendify/worker.py.
+        # Mutation: the icon file kept under its former name. Red: ls-files lists that path.
+        git = shutil.which("git")
+        self.assertIsNotNone(git, "git is needed to read the tracked tree")
+
+        def tracked(*args):
+            done = subprocess.run([git, "-C", str(support.ROOT), *args], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=60)
+            return done.returncode, done.stdout.splitlines(), done.stderr
+
+        code, paths, err = tracked("ls-files")
+        self.assertEqual(code, 0, err)
+        self.assertIn("pyproject.toml", paths)
+        self.assertEqual([path for path in paths if OLD_NAME in path.lower()], [])
+        # Counted per file, so one new stray line anywhere reds it; this file holds the one line that spells it.
+        code, lines, err = tracked("grep", "-c", "-i", "-e", OLD_NAME)
+        self.assertEqual(code, 0, err)
+        counts = {path: int(count) for path, count in (line.rsplit(":", 1) for line in lines)}
+        self.assertEqual(counts, {"tests/test_package_shape.py": 1})
+
+        # The package, its icon and its command answer under the new name.
+        self.assertEqual(support.PACKAGE, NEW_NAME)
+        self.assertTrue((support.package_dir() / (NEW_NAME + ".ico")).is_file())
+        project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual((project["project"]["name"], project["tool"]["setuptools"]["package-data"]),
+                         (NEW_NAME, {NEW_NAME: ["*.ico"]}))
+        env = {**os.environ, "PYTHONPATH": str(support.SRC)}
+        helped = subprocess.run([sys.executable, "-m", NEW_NAME, "--help"], cwd=str(support.SRC), env=env,
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        self.assertEqual(helped.returncode, 0, helped.stdout + helped.stderr)
+        self.assertTrue(helped.stdout.startswith("usage: python -m " + NEW_NAME + " "), helped.stdout)
 
     def test_the_built_wheel_holds_no_binary_and_no_launcher(self):
         # Mutation: a [project.scripts] entry. Red: the wheel carries an entry_points.txt. Mutation: LICENSE
