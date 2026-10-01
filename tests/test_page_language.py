@@ -231,7 +231,7 @@ class PageLanguageTest(unittest.TestCase):
                      ".langsw button{min-height:0;padding:.28rem .62rem;border:0;border-radius:999px;"
                      "background:transparent;color:var(--ink2);font:inherit}",
                      '.langsw button[aria-current="true"]{background:var(--brand);color:var(--on-brand)}',
-                     ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}"):
+                     ".bar{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}"):
             with self.subTest(rule=rule):
                 self.assertIn(rule, page._STYLE)
         for variable in ("--hair:", "--ink2:", "--brand:", "--on-brand:"):
