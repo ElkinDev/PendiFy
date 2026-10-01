@@ -22,22 +22,39 @@ def package_files():
     return sorted(support.package_dir().glob("*.py"))
 
 
+def imports_outside(paths, allowed):
+    """(file, module) for every absolute import of `paths` that is neither the standard library nor `allowed`."""
+    outside = []
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                names = [node.module]
+            else:
+                continue
+            outside += [(path.name, name) for name in names
+                        if name.split(".")[0] not in sys.stdlib_module_names | allowed]
+    return outside
+
+
 class PackageShapeTest(unittest.TestCase):
     def test_every_import_is_the_package_itself_or_the_standard_library(self):
         # Mutation: `import requests` in one module. Red: requests is not in sys.stdlib_module_names.
         self.assertGreaterEqual(len(package_files()), 8)
-        outside = []
-        for path in package_files():
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.Import):
-                    names = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.level == 0:
-                    names = [node.module]
-                else:
-                    continue
-                outside += [(path.name, name) for name in names
-                            if name.split(".")[0] not in sys.stdlib_module_names | {support.PACKAGE}]
-        self.assertEqual(outside, [])
+        self.assertEqual(imports_outside(package_files(), {support.PACKAGE}), [])
+
+    def test_the_icon_tools_import_only_the_standard_library_and_their_grid(self):
+        # Mutation: `from PIL import Image` in tools/make_icon.py. Red: PIL is not in sys.stdlib_module_names.
+        tools = sorted((support.ROOT / "tools").glob("*.py"))
+        self.assertEqual([path.name for path in tools], ["icon_grid.py", "make_icon.py"])
+        self.assertEqual(imports_outside(tools, {"icon_grid"}), [])
+
+    def test_the_package_lists_its_icon_and_the_pyproject_ships_it(self):
+        # Mutation: the package-data table dropped. Red: setuptools would leave pcnotify.ico out of the wheel.
+        self.assertTrue((support.package_dir() / "pcnotify.ico").is_file(), "no pcnotify.ico beside the modules")
+        pyproject = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(pyproject["tool"]["setuptools"]["package-data"], {support.PACKAGE: ["*.ico"]})
 
     def test_winsound_is_imported_only_behind_its_guard(self):
         # Mutation: `import winsound` at the top of a module, outside its try. Red: one unguarded import.
@@ -124,8 +141,9 @@ class PackageShapeTest(unittest.TestCase):
         self.assertEqual(carried, (support.ROOT / "LICENSE").read_bytes())
         self.assertEqual([name for name in names if name.lower().endswith(BINARY_SUFFIXES)], [])
         self.assertEqual([name for name in names if name.endswith("entry_points.txt")], [])
+        # Mutation: the package-data table dropped. Red: the wheel carries the modules and no pcnotify.ico.
         self.assertEqual({name.split("/")[-1] for name in names if name.startswith(support.PACKAGE + "/")},
-                         {path.name for path in package_files()})
+                         {path.name for path in package_files()} | {"pcnotify.ico"})
 
 
 if __name__ == "__main__":

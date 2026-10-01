@@ -84,8 +84,29 @@ class PageText(HTMLParser):
             self.texts.append(data.strip())
 
 
+# The policy as it was before the icon (brief pcico, change 5): the icon is a data URI, which img-src data: allows.
+TODAY_POLICY = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+# The program's icon as the page carries it: the tab icon in the head and, on the pairing page, the image left of the
+# title, both the 32 px PNG of icon.py as a data URI.
+ICON_PREFIX = "data:image/png;base64,"
+ICON_TAGS = re.compile(r'<link rel="icon" type="image/png" href="data:image/png;base64,[A-Za-z0-9+/=]+">'
+                       r'|<img alt="" width="32" height="32" src="data:image/png;base64,[A-Za-z0-9+/=]+">')
+
+
+def icon_uri():
+    return ICON_PREFIX + support.module("icon").PNG_32
+
+
+def without_icon(document):
+    """The document with the icon's own link and image taken out, for the pins that allow no other image."""
+    return ICON_TAGS.sub("", document)
+
+
 def outside_references(document):
-    """Every href and url() of a page that is neither a fragment of the page itself nor the QR plate's data URI."""
+    """Every href and url() of a page that is neither a fragment of the page itself nor the QR plate's data URI
+    nor the icon's."""
+    document = without_icon(document)
     found = re.findall(r'\bhref\s*=\s*"([^"]*)"', document) + re.findall(r"url\(([^)]*)\)", document)
     return [ref for ref in found if not ref.startswith("#") and ref != plate_almena.PLATE_DATA_URI]
 
@@ -105,7 +126,8 @@ class KeyPlace(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == "svg" and ("class", "qr") in attrs:
             self.qr_places.append(list(self.open_details))
-        self.data_places += [list(self.open_details) for _, value in attrs if (value or "").startswith("data:")]
+        self.data_places += [list(self.open_details) for _, value in attrs
+                             if (value or "").startswith("data:") and not (value or "").startswith(ICON_PREFIX)]
         if tag == "details":
             self.open_details.append(dict(attrs))
             self.details.append(dict(attrs))
@@ -316,7 +338,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(page.WORDS[expected]["forget"], shown)
                 self.assertIsNone(GAME_WORDS.search(shown))
                 self.assertNotIn("http", shown)
-                self.assertIsNone(re.search(r"\bsrc\s*=|<img|<link|@import", shown))
+                self.assertIsNone(re.search(r"\bsrc\s*=|<img|<link|@import", without_icon(shown)))
                 self.assertEqual(outside_references(shown), [])
                 state = json.loads(self.call("GET", "/state", headers={"Accept-Language": language} if language
                                              else None)[2])
@@ -338,7 +360,7 @@ class PairingPageTest(unittest.TestCase):
                                  [codes.display(secret) if key is None else words[key] for key in PAGE_ORDER])
                 self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
                 for outside in ("<link", "src=", "@import", "@font-face", "http"):
-                    self.assertNotIn(outside, shown)
+                    self.assertNotIn(outside, without_icon(shown))
                 self.assertEqual(outside_references(shown), [])
                 # The pairing address is only in the QR's own modules: the page draws the scene of the encoder's
                 # symbol over the one plate (SceneDecodeTest reads it with ZXing).
@@ -349,6 +371,47 @@ class PairingPageTest(unittest.TestCase):
         refused.insert(refused.index("save") + 1, "typed_refused")
         self.assertEqual(PageText(self.html()).texts,
                          [codes.display(secret) if key is None else page.WORDS["es"][key] for key in refused])
+
+    def test_each_document_carries_one_tab_icon_from_a_data_uri_in_its_head(self):
+        # Mutation: the icon link left out of render_stopped. Red: the stopped page holds no rel="icon".
+        uri = icon_uri()
+        documents = {"served": self.html(), "es": self.page.render("es"), "en": self.page.render("en"),
+                     "stopped es": self.page.render_stopped("es"), "stopped en": self.page.render_stopped("en")}
+        for name, document in documents.items():
+            with self.subTest(document=name):
+                links = re.findall(r"<link\b[^>]*>", document)
+                self.assertEqual(links, [f'<link rel="icon" type="image/png" href="{uri}">'])
+                self.assertIn(links[0], document.split("</head>")[0])
+                self.assertEqual(document.count('rel="icon"'), 1)
+
+    def test_the_pairing_page_title_row_shows_the_icon_left_of_the_title(self):
+        # Mutation: the img placed after the h1. Red: the row does not open with the img. Mutation: the alt text
+        # set to the title. Red: the row's img carries a non-empty alt.
+        uri = icon_uri()
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                shown = self.html(accept)
+                title = html.escape(page.WORDS[lang]["title"])
+                self.assertEqual(shown.count("<img"), 1)
+                self.assertEqual(shown.count("<h1>"), 1)
+                self.assertIn(f'<div class="title-row"><img alt="" width="32" height="32" src="{uri}"><h1>{title}'
+                              f'</h1></div>', shown)
+        self.assertIn(".title-row{display:flex;align-items:center;gap:12px;margin:0 0 8px}", page._STYLE)
+        self.assertIn(".title-row img{flex:none;image-rendering:pixelated}", page._STYLE)
+        self.assertNotIn("<img", self.page.render_stopped("es"))
+
+    def test_the_icon_adds_no_origin_to_the_policy_and_no_outside_source_to_the_page(self):
+        # Mutation: img-src widened with 'self' for the icon. Red: the policy differs from today's. Mutation: the
+        # tab icon served as href="/favicon.ico". Red: a source that is not a data URI or a fragment.
+        self.assertEqual(page.POLICY, TODAY_POLICY)
+        _, headers, shown = self.call("GET", "/")
+        self.assertEqual(headers["content-security-policy"], TODAY_POLICY)
+        for document in (shown, self.page.render("en"), self.page.render_stopped("es")):
+            sources = re.findall(r'\b(?:src|href)\s*=\s*"([^"]*)"', document)
+            self.assertIn(icon_uri(), sources)
+            self.assertEqual([source for source in sources if not source.startswith(("data:", "#"))], [])
+            self.assertEqual([source for source in sources if source.startswith(("http", "//"))], [])
+            self.assertNotIn("http", document)
 
     def test_the_qr_and_the_key_are_served_only_inside_one_closed_details_whose_summary_shows_the_code(self):
         # Mutation: the QR drawn before the details, as on main. Red: the svg and its data URI have no details
