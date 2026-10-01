@@ -267,7 +267,7 @@
                 return 1
             }
         }
-        Say 'El navegador mostrara un QR: escanealo con la camara del telefono.'
+        Say 'El navegador abrira la pagina de pcnotify. Si este PC aun no esta enlazado, mostrara un QR: escanealo con la camara del telefono.'
         return 0
     }
 
