@@ -10,13 +10,13 @@ Es gratis, no pide permisos de administrador y solo usa Python.
 
 Pulsa Windows + R, pega esta línea completa y pulsa Enter. También sirve en PowerShell o en el Símbolo del sistema.
 
-    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 -OutFile ~\pcnotify-install.ps1; ~\pcnotify-install.ps1"
+    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pcnotify-install.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 -OutFile ~\pcnotify-install.ps1; ~\pcnotify-install.ps1"
 
 La línea guarda el instalador como `pcnotify-install.ps1` en tu carpeta de usuario y lo ejecuta desde ahí; puedes borrar ese archivo cuando termine.
 
 La ventana queda abierta al terminar para que leas el resultado; ciérrala cuando acabe.
 
-Si Windows dice que no puede acceder al archivo o el antivirus detiene la línea, no se instaló nada: actualiza las definiciones del antivirus y vuelve a intentarlo, o descarga `install.ps1` desde la página del repositorio y ejecútalo.
+Si Windows dice que no puede acceder al archivo o el antivirus detiene la línea, no se instaló nada: actualiza las definiciones del antivirus y vuelve a intentarlo, o descarga `install.ps1` desde la página del repositorio, haz clic en él con el botón derecho y elige «Ejecutar con PowerShell».
 
 Si ves "'irm' no se reconoce como un comando interno o externo", pegaste solo la parte corta en el Símbolo del sistema: usa la línea completa de arriba.
 
@@ -38,7 +38,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 - Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
 - Pausar: «Pausar avisos», en la tarjeta «Este PC» de la página, deja de leer el cliente del juego: no acepta partidas ni avisa a tu teléfono, y la página sigue abierta. «Reanudar avisos» vuelve a leerlo. La pausa no se guarda: cada vez que el programa se inicia, empieza activo.
 - Iniciar con Windows: el interruptor «Iniciar con Windows», en la misma tarjeta, está apagado hasta que lo enciendas. Encendido, el programa empieza solo al iniciar sesión en Windows, solo para tu usuario y sin abrir el navegador ni la página.
-- Desinstalar: pega `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 -OutFile ~\pcnotify-uninstall.ps1; ~\pcnotify-uninstall.ps1"` igual que la línea de instalación; deja `pcnotify-uninstall.ps1` en tu carpeta de usuario, que puedes borrar. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está, quita los dos accesos directos y quita el inicio con Windows si estaba encendido; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
+- Desinstalar: pega `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pcnotify-uninstall.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 -OutFile ~\pcnotify-uninstall.ps1; ~\pcnotify-uninstall.ps1"` igual que la línea de instalación; deja `pcnotify-uninstall.ps1` en tu carpeta de usuario, que puedes borrar. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está, quita los dos accesos directos y quita el inicio con Windows si estaba encendido; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
 - Actualizar: pulsa «Salir» en la página y vuelve a pegar la línea de instalación; instala la última versión y conserva la configuración y el enlace.
 
 ### Qué envía y a quién
@@ -61,13 +61,13 @@ It is free, needs no administrator rights and only uses Python.
 
 Press Windows + R, paste this whole line and press Enter. It also works in PowerShell or the Command Prompt.
 
-    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 -OutFile ~\pcnotify-install.ps1; ~\pcnotify-install.ps1"
+    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pcnotify-install.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 -OutFile ~\pcnotify-install.ps1; ~\pcnotify-install.ps1"
 
 The line saves the installer as `pcnotify-install.ps1` in your user folder and runs it from there; you can delete that file when it is done.
 
 The window stays open at the end so you can read the result; close it when it is done.
 
-If Windows says it cannot access the file or the antivirus stops the line, nothing was installed: update the antivirus definitions and try again, or download `install.ps1` from the repository page and run it.
+If Windows says it cannot access the file or the antivirus stops the line, nothing was installed: update the antivirus definitions and try again, or download `install.ps1` from the repository page, click it with the right button and choose "Run with PowerShell".
 
 If you see "'irm' is not recognized as an internal or external command", you pasted only the short part into the Command Prompt: use the whole line above.
 
@@ -89,7 +89,7 @@ The button at the top right switches between the light and the dark theme, and t
 - Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
 - Pause: «Pause alerts», on the page's «This PC» card, stops reading the game client: it accepts no match and sends no alert to your phone, and the page stays open. «Resume alerts» reads it again. The pause is not kept: every start of the program is active again.
 - Start with Windows: the «Start with Windows» switch, on the same card, is off until you turn it on. When it is on, the program starts by itself when you sign in to Windows, for your user only, without opening the browser or the page.
-- Uninstall: paste `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 -OutFile ~\pcnotify-uninstall.ps1; ~\pcnotify-uninstall.ps1"` the same way as the install line; it leaves `pcnotify-uninstall.ps1` in your user folder, which you can delete. It removes the package from the same Python that installed it, checks that it is gone, removes both shortcuts and removes the start with Windows when it is on; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
+- Uninstall: paste `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pcnotify-uninstall.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 -OutFile ~\pcnotify-uninstall.ps1; ~\pcnotify-uninstall.ps1"` the same way as the install line; it leaves `pcnotify-uninstall.ps1` in your user folder, which you can delete. It removes the package from the same Python that installed it, checks that it is gone, removes both shortcuts and removes the start with Windows when it is on; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
 - Update: press "Quit" on the page and paste the install line again; it installs the latest version and keeps the configuration and the link.
 
 ### What it sends and to whom
