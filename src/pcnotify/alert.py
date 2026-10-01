@@ -2,8 +2,8 @@
 
 Every alert beeps and names a kind (S:336-355). The ping's result goes to the pairing state through record_ping,
 as lane lnk5a's ping command answers it, so three refusals in a row offer the relink, and its name and time stay
-for the page as the last ping. With no link id nothing is sent and nothing is queued. The console gets fixed
-lines only.
+for the page as the last ping. With no link id nothing is sent and nothing is queued. sound() is the beep
+alone, with no kind and no ping. The console gets fixed lines only.
 """
 import threading
 import time
@@ -84,6 +84,10 @@ class Alerter:
         with self._lock:
             self._pending = [event for event in self._pending if not event.is_set()] + [done]
         self._start(lambda: self._send(pair, kind, done))
+
+    def sound(self):
+        """Beeps and nothing else: no ping, nothing queued, the last ping as it was."""
+        self._beep()
 
     def _send(self, pair, kind, done):
         try:

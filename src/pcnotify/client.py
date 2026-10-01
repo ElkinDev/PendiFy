@@ -3,11 +3,13 @@
 The client writes its port and token to a lockfile while it runs. When no lockfile answers, one read of
 the client process's command line through PowerShell takes the place of the script's psutil fallback, at
 most once every 10 s. Every failure is no client, never an exception. Nothing here prints, logs or raises
-the client's token, and Credentials hides it from repr. Only the client's own port is called: its phase alone
-says a game started, and no live game data port is read.
+the client's token, and Credentials hides it from repr. The client's phase says the loading screen opened;
+the game's own loopback port is asked one number, its clock, to tell when the match itself starts. Nothing
+else of the live data is read, kept, printed or sent.
 """
 import base64
 import http.client
+import json
 import re
 import ssl
 import subprocess
@@ -110,6 +112,10 @@ PHASE_PATH = "/lol-gameflow/v1/gameflow-phase"  # S:745
 ACCEPT_PATH = "/lol-matchmaking/v1/ready-check/accept"  # S:784
 CLIENT_TIMEOUT = 2.0  # S:746, S:785
 _MAX_ANSWER_BYTES = 64 * 1024
+# The game's own loopback port while a match runs, and the one route of it that is read: its clock.
+LIVE_PORT = 2999
+LIVE_CLOCK_PATH = "/liveclientdata/gamestats"
+LIVE_TIMEOUT = 1.0
 
 
 class ClientUnreachable(Exception):
@@ -124,6 +130,11 @@ def real_addresses(port):
 def loopback_addresses(port):
     """The test override's base address: a fake on 127.0.0.1, over plain http."""
     return f"http://{CLIENT_HOST}:{port}"
+
+
+def real_live_address():
+    """The game's own loopback port in a real run."""
+    return f"https://{CLIENT_HOST}:{LIVE_PORT}"
 
 
 def loopback_tls_context(host):
@@ -185,3 +196,28 @@ def get(url, token, timeout):
 def post(url, token, timeout):
     """POST of an empty JSON object on the client, as S:784-786: the status, or ClientUnreachable."""
     return _call(url, token, timeout, data=b"{}")[0]
+
+
+def game_clock(base, get=get):
+    """The game's clock in seconds, from one GET of its clock route with no authentication; None when the
+    port gave no answer, the status is not 200, the body is not a JSON object or its gameTime is not a
+    number (a bool is not one). Never raises; no other key is read and nothing is kept."""
+    try:
+        status, raw = get(base + LIVE_CLOCK_PATH, None, LIVE_TIMEOUT)
+    except ClientUnreachable:
+        return None
+    if status != 200:
+        return None
+    try:
+        answer = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):  # not JSON, not UTF-8, or nested past the parser's depth
+        return None
+    if not isinstance(answer, dict):
+        return None
+    seconds = answer.get("gameTime")
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        return None
+    try:
+        return float(seconds)
+    except OverflowError:  # an int no float holds
+        return None

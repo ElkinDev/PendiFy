@@ -23,6 +23,8 @@ ACCEPT_DELAY = (1.0, 2.5)  # S:136
 HOLD_SECONDS = 15.0  # S:778, S:793
 STEP_PAUSE = 0.3  # S:799
 NO_CLIENT_PAUSE = 3.0  # S:739
+LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
+LIVE_FALLBACK_SECONDS = 120.0  # a game that never answers its clock is announced on this wait
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 
 CONNECTED_LINE = "connected to the game client"
@@ -31,9 +33,13 @@ ACCEPTING_LINE = "match found: accepting"
 ACCEPTED_LINE = "match found: accepted"
 DRY_LINE = "match found: not accepting (--dry)"
 STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client again"
+LOADING_LINE = "loading screen: waiting for the match to start"
+STARTED_LINE = "match started: alerting"
+STARTED_ON_WAIT_LINE = "match started: the game gave no clock, alerting on the wait"
 
 WAITING, CONNECTED = "waiting", "connected"
 _ALERT_NAMES = {QUEUE_FOUND: "queue", MATCH_STARTED: "started"}
+LOADING = "loading"  # the last alert's name at the loading screen, said on the PC only
 
 
 def accept_delay():
@@ -57,9 +63,10 @@ def _phase(raw):
 class Watcher:
     def __init__(self, credentials, alert, *, accept=True, addresses=client.real_addresses, get=client.get,
                  post=client.post, clock=time.monotonic, wall=time.time, sleep=None, delay=accept_delay,
-                 log=None, stop=None):
+                 log=None, stop=None, live=client.real_live_address, game_clock=client.game_clock):
         self._credentials, self._alert, self._accept = credentials, alert, accept
         self._addresses, self._get, self._post = addresses, get, post
+        self._live, self._game_clock = live, game_clock
         self._clock, self._wall, self._delay = clock, wall, delay
         self._stop = stop if stop is not None else threading.Event()
         self._sleep = sleep if sleep is not None else self._stop.wait
