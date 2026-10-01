@@ -1,9 +1,11 @@
 # pcnotify installer for Windows. No administrator, nothing machine-wide, no policy change.
 # It runs as a file and as text fetched from the repository and piped into PowerShell, so it takes
-# no parameters; its three options are environment variables:
+# no parameters; its options are environment variables:
 #   PCNOTIFY_SOURCE    what pip installs (default: the repository's main branch as a zip)
 #   PCNOTIFY_DRYRUN=1  print every step as a [plan] line and change nothing
 #   PCNOTIFY_NOSTART=1 leave the program stopped at the end
+#   PCNOTIFY_RUN_KEY   the key path under HKCU of the start with Windows, for test runs
+# It never creates the start with Windows; one that exists is rewritten with this install's start line.
 # The file is pure ASCII: Windows PowerShell 5.1 reads a file with no byte order mark in the
 # system code page, so the messages are Spanish written without accented letters.
 
@@ -16,6 +18,8 @@
     $WingetFolder = 'Python313'
     $ShortcutName = 'pcnotify.lnk'
     $StartArgs = '-m pcnotify'
+    $RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run'
+    $RunName = 'pcnotify'
     $ProbeSeconds = 15
     # The interpreter pip used, one line, read by uninstall.ps1 so it removes from the same Python.
     $RecordName = 'python.txt'
@@ -36,6 +40,37 @@
     function Format-Arg([string]$Text) {
         if ($Text -match '\s') { return '"' + $Text + '"' }
         return $Text
+    }
+
+    # The start with Windows is the per-user Run value, which only the program's page creates. PCNOTIFY_RUN_KEY
+    # replaces its key path under HKCU, for test runs.
+    function Get-RunKey {
+        $key = $env:PCNOTIFY_RUN_KEY
+        if ($key) { $key = $key.Trim() }
+        if (-not $key) { $key = $RunKey }
+        return 'HKCU:\' + $key
+    }
+
+    # A reinstall never creates the value. When it exists it is rewritten with this install's start line and
+    # --quiet, so a Python installed elsewhere leaves no dead path in it.
+    function Update-RunValue([string]$StartLine) {
+        $key = Get-RunKey
+        try {
+            $null = Get-ItemProperty -LiteralPath $key -Name $RunName -ErrorAction Stop
+        } catch {
+            return
+        }
+        $line = $StartLine + ' --quiet'
+        if ($DryRun) {
+            Plan ('inicio con Windows: ' + $line)
+            return
+        }
+        try {
+            Set-ItemProperty -LiteralPath $key -Name $RunName -Value $line -ErrorAction Stop
+            Say ('Inicio con Windows: ' + $line)
+        } catch {
+            Say ('No se pudo actualizar el inicio con Windows en ' + $key + '.')
+        }
     }
 
     # Runs one candidate and reads its version, whether it is a virtual environment, and its own
@@ -215,6 +250,8 @@
                 Say ('No se pudo crear el acceso directo ' + $link + '. Para iniciar: ' + $startLine)
             }
         }
+
+        Update-RunValue $startLine
 
         if (Test-Flag $env:PCNOTIFY_NOSTART) {
             Say ('Listo. Para iniciar: ' + $startLine)
