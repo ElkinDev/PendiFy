@@ -197,6 +197,60 @@ class FakeClient:
         self.server.server_close()
 
 
+# The game's clock route on its own loopback port.
+GAME_CLOCK_PATH = "/liveclientdata/gamestats"
+
+
+class FakeGamePort:
+    """The game's own loopback port on 127.0.0.1 over plain http.
+
+    `answer` is what every request gets, whatever its path: None closes the connection with no answer, as a
+    port that does not serve yet; else (status, body bytes). clock(seconds) sets the answer of a running
+    clock: status 200 and a JSON object whose gameTime is `seconds`. Every request is recorded with its
+    method, path and headers.
+    """
+
+    def __init__(self, answer=None):
+        self.answer, self.requests = answer, []
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                fake.requests.append({"method": self.command, "path": self.path,
+                                      "headers": {k.lower(): v for k, v in self.headers.items()}})
+                answer = fake.answer
+                if answer is None:
+                    self.close_connection = True
+                    return
+                status, data = answer
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.port = self.server.server_address[1]
+        self.base = f"http://127.0.0.1:{self.port}"
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+
+    def clock(self, seconds):
+        self.answer = (200, json.dumps({"gameTime": seconds}).encode())
+
+    def count(self):
+        return len(self.requests)
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
 def error(code, status):
     """A Worker error body as errors.ts shapes it."""
     return (status, {"error": {"code": code, "message": code}})
