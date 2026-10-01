@@ -340,7 +340,7 @@ class PageControlsTest(unittest.TestCase):
         # registry holds the value turned on in the first.
         poll = page._SCRIPT[:page._SCRIPT.index("location.reload();")]
         self.assertIn("const sw=document.querySelector('input[name=autostart]');", poll[:poll.index("setInterval(")])
-        self.assertTrue(poll.endswith("||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"))
+        self.assertTrue(poll.endswith("||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"))
         self.assertEqual(page._SCRIPT.count("j.autostart"), 2)  # both in the guarded compare, none elsewhere
         # A page with no switch: the compare is behind sw, the only switch. With no available Autostart neither the
         # page nor /state carries it; a page with no watcher draws no switch, though its /state answers autostart.

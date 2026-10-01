@@ -60,8 +60,8 @@ WINDOWS_ONLY = "another handle that locks config.json against a read and a repla
 # as codes.display prints it. The card «Este PC» sits right after the watcher line (brief pcctl-r2, placement A); the
 # page given no start with Windows draws no switch in it.
 PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "show_code",
-              "code_label", None, "check", "typed_title", "link_id_label", "secret_label", "save", "forget",
-              "forget_sentence", "forget", "quit")
+              "code_label", None, "check", "log_title", "log_help", "typed_title", "link_id_label", "secret_label",
+              "save", "forget", "forget_sentence", "forget", "quit")
 
 
 class PageText(HTMLParser):
@@ -397,7 +397,8 @@ class PairingPageTest(unittest.TestCase):
         # Mutation: the scan sentence left out of the QR's column. Red: the words miss WORDS["es"]["scan"].
         # Mutation: a web font imported by the style. Red: "@import" and an http address on the page.
         secret = self.secret()
-        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None)
+        self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None,
+                                     events=lambda: [])
         self.page.start()
         self.addCleanup(self.page.close)
         self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
