@@ -8,9 +8,13 @@ Es gratis, no pide permisos de administrador y solo usa Python.
 
 ### Instalar
 
-Abre PowerShell (menú Inicio, escribe PowerShell) y pega esta línea:
+Pulsa Windows + R, pega esta línea completa y pulsa Enter. También sirve en PowerShell o en el Símbolo del sistema.
 
-    irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex
+    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex"
+
+La ventana queda abierta al terminar para que leas el resultado; ciérrala cuando acabe.
+
+Si ves "irm no se reconoce como un comando interno o externo", pegaste solo la parte corta en el Símbolo del sistema: usa la línea completa de arriba.
 
 El instalador busca Python 3.10 o más nuevo; si no lo hay lo instala con winget solo para tu usuario, o te indica https://www.python.org/downloads/ cuando winget no existe. Después instala pcnotify con pip, deja un acceso directo `pcnotify` en el Escritorio y en el menú Inicio, y lo inicia.
 
@@ -28,7 +32,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 - Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`, que es lo que ejecuta el acceso directo; sin consola, si ya está abierto o no puede iniciarse te lo dice en una ventana. Para verlo en una consola: `python -m pcnotify`.
 - Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
-- Desinstalar: pega en PowerShell `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex`. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está y quita los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
+- Desinstalar: pega `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` igual que la línea de instalación. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está y quita los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
 - Actualizar: pulsa «Salir» en la página y vuelve a pegar la línea de instalación; instala la última versión y conserva la configuración y el enlace.
 
 ### Qué envía y a quién
@@ -49,9 +53,13 @@ It is free, needs no administrator rights and only uses Python.
 
 ### Install
 
-Open PowerShell (Start menu, type PowerShell) and paste this line:
+Press Windows + R, paste this whole line and press Enter. It also works in PowerShell or the Command Prompt.
 
-    irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex
+    powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex"
+
+The window stays open at the end so you can read the result; close it when it is done.
+
+If you see "'irm' is not recognized as an internal or external command", you pasted only the short part into the Command Prompt: use the whole line above.
 
 The installer looks for Python 3.10 or newer; when there is none it installs it with winget for your user only, or points you to https://www.python.org/downloads/ when winget is missing. Then it installs pcnotify with pip, leaves a `pcnotify` shortcut on the Desktop and in the Start menu, and starts it.
 
@@ -69,7 +77,7 @@ The button at the top right switches between the light and the dark theme, and t
 
 - Start: the `pcnotify` shortcut, or `pythonw -m pcnotify`, which is what the shortcut runs; with no console, it tells you in a window when it is already running or cannot start. To see it in a console: `python -m pcnotify`.
 - Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
-- Uninstall: paste `irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex` into PowerShell. It removes the package from the same Python that installed it, checks that it is gone and removes both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
+- Uninstall: paste `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` the same way as the install line. It removes the package from the same Python that installed it, checks that it is gone and removes both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
 - Update: press "Quit" on the page and paste the install line again; it installs the latest version and keeps the configuration and the link.
 
 ### What it sends and to whom

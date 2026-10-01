@@ -395,8 +395,8 @@ class InstallLineAnyShellTest(unittest.TestCase):
         # Mutation: the bare short line restored in the Spanish section, red.
         text, _, _ = _readme_sections()
         rest = text.replace(INSTALL_LINE, "").replace(UNINSTALL_LINE, "")
-        self.assertNotIn("irm https", rest)
-        self.assertNotIn("| iex", rest)
+        self.assertEqual(rest.count("irm https"), 0, "a bare irm line outside the any-shell form")
+        self.assertEqual(rest.count("| iex"), 0, "a bare iex pipe outside the any-shell form")
 
     def test_readme_explains_the_irm_message_in_both_languages(self):
         # Mutation: the English note dropped, red.
