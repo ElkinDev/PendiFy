@@ -25,9 +25,25 @@ DEFAULT_SOURCE = "https://github.com/ElkinDev/pcnotify/archive/refs/heads/main.z
 RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
 # One line that runs unchanged from Win+R, the Command Prompt and PowerShell: irm exists only inside
 # PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
-SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm '
-INSTALL_LINE = SHELL_PREFIX + RAW + 'install.ps1 | iex"'
-UNINSTALL_LINE = SHELL_PREFIX + RAW + 'uninstall.ps1 | iex"'
+# The script is saved in the home folder and run as a file: the piped form (irm ... | iex) is stopped by
+# an antivirus heuristic on the command line, and a saved file run by its path is not.
+# The saved copy is removed first: a failed download does not stop the ; chain under -Command, so without
+# the removal a copy an earlier download left would run instead.
+SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "'
+INSTALL_SAVED = "pcnotify-install.ps1"
+UNINSTALL_SAVED = "pcnotify-uninstall.ps1"
+
+
+def _saved_file_line(script, saved):
+    return (SHELL_PREFIX + "ri ~\\" + saved + " -ea 0; irm " + RAW + script + " -OutFile ~\\" + saved
+            + "; ~\\" + saved + '"')
+
+
+INSTALL_LINE = _saved_file_line("install.ps1", INSTALL_SAVED)
+UNINSTALL_LINE = _saved_file_line("uninstall.ps1", UNINSTALL_SAVED)
+# Antivirus products the README never names: the antivirus sentence asks for no product by name.
+AV_PRODUCTS = ("defender", "norton", "mcafee", "avast", "avg", "kaspersky", "bitdefender", "eset",
+               "malwarebytes", "sophos", "trend micro", "panda", "avira", "webroot")
 RUN_DIALOG_LIMIT = 259
 ALLOWED_HOSTS = {"github.com", "raw.githubusercontent.com", "www.python.org"}
 WINGET_LINE = (
@@ -441,22 +457,52 @@ class InstallLineAnyShellTest(unittest.TestCase):
     """The published lines run unchanged from Win+R, the Command Prompt and PowerShell."""
 
     def test_each_published_line_starts_powershell_and_fits_the_run_dialog(self):
-        # Mutation: INSTALL_LINE back to the bare irm form, red.
-        for line, script in ((INSTALL_LINE, "install.ps1"), (UNINSTALL_LINE, "uninstall.ps1")):
+        # Mutation: INSTALL_LINE back to the piped form ending in | iex, red.
+        lines = ((INSTALL_LINE, "install.ps1", INSTALL_SAVED), (UNINSTALL_LINE, "uninstall.ps1", UNINSTALL_SAVED))
+        for line, script, saved in lines:
             with self.subTest(script=script):
                 self.assertTrue(line.startswith("powershell "), line)
                 self.assertIn('-Command "', line)
-                self.assertTrue(line.endswith('| iex"'), line)
-                self.assertIn(RAW + script, line)
+                self.assertIn(RAW + script + " -OutFile ~\\" + saved + "; ", line)
+                # Mutation: the removal moved after the download (or dropped), red.
+                removal = line.find('-Command "ri ~\\' + saved + " -ea 0; ")
+                self.assertNotEqual(removal, -1, "the line does not remove its saved copy first")
+                self.assertLess(removal, line.find("irm "), "the removal comes after the download")
+                self.assertTrue(line.endswith("; ~\\" + saved + '"'), line)
+                self.assertNotIn("iex", line)
+                for char in ("$", "%", "&"):
+                    self.assertNotIn(char, line)
+                self.assertEqual(line.count('"'), 2, line)
                 self.assertEqual(len(line.splitlines()), 1, line)
                 self.assertLess(len(line), RUN_DIALOG_LIMIT)
 
-    def test_readme_holds_no_bare_irm_line(self):
-        # Mutation: the bare short line restored in the Spanish section, red.
+    def test_readme_holds_no_bare_irm_line_and_no_iex_pipe(self):
+        # Mutation: the piped line restored in the Spanish section, red.
         text, _, _ = _readme_sections()
         rest = text.replace(INSTALL_LINE, "").replace(UNINSTALL_LINE, "")
-        self.assertEqual(rest.count("irm https"), 0, "a bare irm line outside the any-shell form")
-        self.assertEqual(rest.count("| iex"), 0, "a bare iex pipe outside the any-shell form")
+        self.assertEqual(rest.count("irm https"), 0, "a bare irm line outside the saved-file form")
+        self.assertEqual(text.count("| iex"), 0, "the README pipes into iex")
+        self.assertIsNone(re.search(r"\|\s*(iex|Invoke-Expression)\b", text, re.IGNORECASE))
+
+    def test_readme_explains_an_antivirus_stop_in_both_languages_with_no_product(self):
+        # Mutation: the English antivirus sentence dropped, red.
+        text, spanish, english = _readme_sections()
+        for section, phrases in (
+            (spanish, ("antivirus", "no se instaló nada", "actualiza las definiciones del antivirus",
+                       "`install.ps1`", "botón derecho", "«Ejecutar con PowerShell»")),
+            (english, ("antivirus", "nothing was installed", "update the antivirus definitions",
+                       "`install.ps1`", "right button", '"Run with PowerShell"')),
+        ):
+            paragraph = next((p for p in section.split("\n\n") if phrases[1] in p), None)
+            self.assertIsNotNone(paragraph, phrases[1])
+            for phrase in phrases:
+                self.assertIn(phrase, paragraph)
+            # Mutation: the right-button step written as a second sentence, red.
+            self.assertEqual(len(re.findall(r"[.!?](\s|$)", paragraph.strip())), 1, paragraph)
+            for word in ("desactiv", "apaga", "exclus", "turn off", "disable", "exclusion", "exception"):
+                self.assertNotIn(word, paragraph.lower())
+        for product in AV_PRODUCTS:
+            self.assertIsNone(re.search(r"\b" + product + r"\b", text, re.IGNORECASE), product)
 
     def test_readme_explains_the_irm_message_in_both_languages(self):
         # Mutation: the English note dropped, red.
