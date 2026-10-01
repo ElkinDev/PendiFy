@@ -40,7 +40,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         subject.step()
 
     def test_the_names_and_values_of_the_true_start(self):
-        # Mutation: the watcher's default game port built from the client's address. Red: the default differs.
+        # Mutation: the wait made 121 s, or the clock route another one. Red: the values differ.
         self.assertEqual((client.LIVE_PORT, client.LIVE_CLOCK_PATH, client.LIVE_TIMEOUT),
                          (2999, "/liveclientdata/gamestats", 1.0))
         self.assertEqual(client.real_live_address(), "https://127.0.0.1:2999")
@@ -55,6 +55,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
 
     def test_the_arrival_of_in_progress_beeps_once_pings_nothing_and_shows_the_loading_screen(self):
         # Mutation: the arrival firing match_started at once, as before. Red: a ping and the alert "started".
+        # Mutation: the first clock read due a second after the arrival. Red: the game's port counts 0.
         subject = self.watcher()
         self.arrive(subject)
         self.assertEqual((len(self.beeps), self.pings), (1, []))
@@ -102,6 +103,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assert_not_a_start(404, body({"gameTime": 50.0}))
 
     def test_a_body_that_is_not_json_is_not_a_start(self):
+        # Mutation: ValueError not caught. Red: the decode error raises out of the step.
         self.assert_not_a_start(200, b"gameTime 50")
 
     def test_a_json_list_is_not_a_start(self):
@@ -109,10 +111,11 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assert_not_a_start(200, body([{"gameTime": 50.0}]))
 
     def test_an_object_without_game_time_is_not_a_start(self):
+        # Mutation: the number check removed. Red: float(None) raises TypeError out of the step.
         self.assert_not_a_start(200, body({"time": 50.0}))
 
     def test_game_time_as_a_string_is_not_a_start(self):
-        # Mutation: the number check removed. Red: a string compared to zero raises TypeError out of the step.
+        # Mutation: the number check removed. Red: the string "50.0" is read as 50.0 and pings.
         self.assert_not_a_start(200, body({"gameTime": "50.0"}))
 
     def test_game_time_true_is_not_a_start(self):
@@ -120,7 +123,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assert_not_a_start(200, body({"gameTime": True}))
 
     def test_the_game_clock_never_raises_and_answers_a_number_or_none(self):
-        # Mutation: the RecursionError not caught. Red: a deeply nested body raises out of game_clock.
+        # Mutation: the RecursionError, or the OverflowError, not caught. Red: it raises out of game_clock.
         seen = []
 
         def get(url, token, timeout):
@@ -157,7 +160,8 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.step_at(subject, since + 120.0)
         self.assertEqual((len(self.beeps), self.pings), (2, [STARTED_PING]))
         self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
-        self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)), (1, 0))
+        self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)),
+                         (1, 0))
         asks = self.game.count()
         self.game.clock(CLOCK)
         for second in range(121, 300, 2):
