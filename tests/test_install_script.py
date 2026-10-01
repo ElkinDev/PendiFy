@@ -23,6 +23,10 @@ README = ROOT / "README.md"
 
 DEFAULT_SOURCE = "https://github.com/ElkinDev/pcnotify/archive/refs/heads/main.zip"
 RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
+# The second road, for a PC that has Python or refuses scripts: pip alone, no shortcut, no script.
+PIP_INSTALL = "python -m pip install --upgrade pcnotify"
+PIP_START = "python -m pcnotify"
+PIP_UNINSTALL = "python -m pip uninstall pcnotify"
 # One line that runs unchanged from Win+R, the Command Prompt and PowerShell: irm exists only inside
 # PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
 # The script is saved in the home folder and run as a file: the piped form (irm ... | iex) is stopped by
@@ -188,6 +192,22 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(spanish.group(1).count(INSTALL_LINE), 1)
         self.assertEqual(english.group(1).count(INSTALL_LINE), 1)
         self.assertEqual(text.count(INSTALL_LINE), 2)
+
+    def test_readme_gives_the_pip_road_once_per_language_and_the_switch_before_the_uninstall(self):
+        # Mutation: the English pip install line dropped, red. Mutation: the uninstall sentence written
+        # before the switch is named, red: the Run key would point at a Python with no package.
+        text, spanish, english = _readme_sections()
+        for section, switch in ((spanish, "«Iniciar con Windows»"), (english, "«Start with Windows»")):
+            code = [line.strip() for line in section.splitlines() if line.startswith("    ")]
+            self.assertEqual(code.count(PIP_INSTALL), 1)
+            self.assertEqual(code.count(PIP_START), 1)
+            self.assertEqual(section.count(PIP_INSTALL), 1)
+            removal = [sentence for sentence in re.split(r"(?<=[.!?])\s+", section) if PIP_UNINSTALL in sentence]
+            self.assertEqual(len(removal), 1)
+            self.assertIn(switch, removal[0])
+            self.assertLess(removal[0].index(switch), removal[0].index(PIP_UNINSTALL))
+        self.assertEqual(text.count(PIP_INSTALL), 2)
+        self.assertEqual(text.count(PIP_UNINSTALL), 2)
 
     def test_readme_holds_the_uninstall_line_once_per_language(self):
         # Mutation: the Spanish uninstall road kept as a downloaded file run with -File, red.
