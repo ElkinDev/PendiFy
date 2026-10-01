@@ -104,6 +104,7 @@ class MainCommandTest(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         kwargs.setdefault("beep", lambda: self.beeps.append("beep"))
         kwargs.setdefault("box", self.boxes.append)
+        kwargs.setdefault("autostart", support.silent_autostart())  # never the Run key
         kwargs.setdefault("console", lambda: True)  # a console is attached unless a case says there is none
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
