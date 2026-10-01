@@ -142,9 +142,10 @@ class PageLanguageTest(unittest.TestCase):
 
     def test_the_switch_is_the_sites_markup_right_before_the_theme_button_on_each_page_state(self):
         # Mutation: EN drawn before ES. Red: the markup differs. Mutation: the switch drawn after the theme button.
-        # Red: the header does not open with the switch.
+        # Red: the header does not open with the credit and then the switch.
         def header(document):
-            return re.search(r'<header class="bar">(.*?)<button id="theme-toggle"', document).group(1)
+            return re.search(r'<header class="bar"><p class="credit">(?:(?!</p>).)*</p>(.*?)<button id="theme-toggle"',
+                             document).group(1)
 
         for state_name in ("waiting", "linked", "refused"):
             if state_name == "linked":
@@ -231,7 +232,7 @@ class PageLanguageTest(unittest.TestCase):
                      ".langsw button{min-height:0;padding:.28rem .62rem;border:0;border-radius:999px;"
                      "background:transparent;color:var(--ink2);font:inherit}",
                      '.langsw button[aria-current="true"]{background:var(--brand);color:var(--on-brand)}',
-                     ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}"):
+                     ".bar{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}"):
             with self.subTest(rule=rule):
                 self.assertIn(rule, page._STYLE)
         for variable in ("--hair:", "--ink2:", "--brand:", "--on-brand:"):

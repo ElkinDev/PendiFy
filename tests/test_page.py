@@ -58,7 +58,8 @@ WINDOWS_ONLY = "another handle that locks config.json against a read and a repla
 # The program's name (owner 2026-10-01): the title and the h1 of both documents; the sentence they read before is the
 # tagline under the title row.
 NAME = "PendiFy"
-# The foot: the creator and the repository on every pairing page, «Salir» after them only beside a quit. The link is
+# The credit: the creator and the repository first in the top bar of every pairing page, left of the language switch
+# and the theme button; the foot holds only «Salir», and the page draws it only beside a quit. The link is
 # the page's one address out; it loads nothing, and the pins that allow no outside address take out exactly its start
 # tag, so any other one still shows.
 REPO = "https://github.com/ElkinDev/PendiFy"
@@ -67,12 +68,14 @@ CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
 # The words of a waiting page with a watcher and a quit button, in the order the page shows them; an entry that is not
 # a key of WORDS is printed as it is, and None is the key as codes.display prints it. The card «Este PC» sits right
 # after the watcher line (brief pcctl-r2, placement A); the page given no start with Windows draws no switch in it.
-# The code is shown, its key under the mask and the reveal after it; the lower part is one fold; the foot names the
-# creator and the repository before «Salir».
-PAGE_ORDER = (NAME, NAME, "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "code_label",
-              None, "show_code", "check", "log_title", "log_help", "fold", "typed_title", "link_id_label",
-              "secret_label", "save", "forget", "forget_sentence", "forget", "credit", "ElkinDev", "·",
-              "github.com/ElkinDev/PendiFy", "quit")
+# The code is shown, its key under the mask and the reveal after it; the lower part is one fold; the top bar names the
+# creator and the repository before the language switch, and «Salir» closes the page.
+PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", NAME, "title", "intro", "state_waiting",
+              "watch_waiting", "this_pc", "pause", "scan", "code_label", None, "show_code", "check", "log_title",
+              "log_help", "fold", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence",
+              "forget", "quit")
+# The texts of PAGE_ORDER before the language switch: the title tag and the credit.
+BEFORE_SWITCH = 5
 # The language switch's two labels, the same in both languages, sit in the header between the title tag and the
 # title row (lane pclang, owner report OR-96).
 SWITCH_LABELS = ["ES", "EN"]
@@ -157,13 +160,13 @@ def without_icon(document):
 
 
 def without_credit(document):
-    """The document with the foot's one link out taken out, its start tag only, once."""
+    """The document with the top bar's one link out taken out, its start tag only, once."""
     return document.replace(CREDIT_LINK, "", 1)
 
 
 def outside_references(document):
     """Every href and url() of a page that is neither a fragment of the page itself nor the QR plate's data URI
-    nor the icon's nor the foot's one link to the repository."""
+    nor the icon's nor the top bar's one link to the repository."""
     document = without_credit(without_icon(document))
     found = re.findall(r'\bhref\s*=\s*"([^"]*)"', document) + re.findall(r"url\(([^)]*)\)", document)
     return [ref for ref in found if not ref.startswith("#") and ref != plate_almena.PLATE_DATA_URI]
@@ -459,7 +462,8 @@ class PairingPageTest(unittest.TestCase):
             with self.subTest(lang=lang):
                 shown, words = self.html(accept), page.WORDS[lang]
                 expected = [codes.display(secret) if key is None else words.get(key, key) for key in PAGE_ORDER]
-                self.assertEqual(PageText(shown).texts, expected[:1] + SWITCH_LABELS + expected[1:])
+                self.assertEqual(PageText(shown).texts,
+                                 expected[:BEFORE_SWITCH] + SWITCH_LABELS + expected[BEFORE_SWITCH:])
                 self.assertEqual(shown.count(f'data-closed="{html.escape(words["state_closed"])}"'), 1)
                 for outside in ("<link", "src=", "@import", "@font-face", "http"):
                     self.assertNotIn(outside, without_credit(without_icon(shown)))
@@ -472,7 +476,8 @@ class PairingPageTest(unittest.TestCase):
         refused = list(PAGE_ORDER)
         refused.insert(refused.index("save") + 1, "typed_refused")
         expected = [codes.display(secret) if key is None else page.WORDS["es"].get(key, key) for key in refused]
-        self.assertEqual(PageText(self.html()).texts, expected[:1] + SWITCH_LABELS + expected[1:])
+        self.assertEqual(PageText(self.html()).texts,
+                         expected[:BEFORE_SWITCH] + SWITCH_LABELS + expected[BEFORE_SWITCH:])
 
     def test_each_document_carries_one_tab_icon_from_a_data_uri_in_its_head(self):
         # Mutation: the icon link left out of render_stopped. Red: the stopped page holds no rel="icon".
@@ -658,31 +663,45 @@ class PairingPageTest(unittest.TestCase):
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         self.assertEqual(KeyPlace(self.html(), "\0").details, [{"class": "fold"}])
 
-    def test_the_foot_names_the_creator_and_the_repository_on_every_page(self):
-        # Mutation: the foot drawn only beside a quit, as on main. Red: the page with nothing to stop has no credit.
-        # Mutation: the link without rel noopener. Red: the credit differs.
+    def test_the_top_bar_names_the_creator_and_the_repository_on_every_page(self):
+        # Mutation: the credit left in the foot. Red: the bar does not open with it. Mutation: the name left as
+        # ElkinDev. Red: the credit differs. Mutation: the footer drawn with no quit. Red: the page with nothing to
+        # stop holds a footer. Mutation: the link without rel noopener. Red: the credit differs.
         def credit(lang):
-            return (f'<footer class="foot"><p class="credit">{CREDIT[lang]} <b>ElkinDev</b> · {CREDIT_LINK}'
-                    "github.com/ElkinDev/PendiFy</a></p>")
+            return (f'<header class="bar"><p class="credit">{CREDIT[lang]} <b>Niklerk</b> · {CREDIT_LINK}'
+                    'github.com/ElkinDev/PendiFy</a></p><form class="langsw" role="group"')
 
         quits = page.PairingPage(self.state, on_quit=lambda: None)
         documents = {}
         for lang in ("es", "en"):
-            documents[("waiting", lang)] = (self.page.render(lang), "</footer>")
-            documents[("waiting with quit", lang)] = (quits.render(lang), '<form method="post" action="/quit">')
+            documents[("waiting", lang)] = (self.page.render(lang), False)
+            documents[("waiting with quit", lang)] = (quits.render(lang), True)
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         for lang in ("es", "en"):
-            documents[("linked", lang)] = (self.page.render(lang), "</footer>")
+            documents[("linked", lang)] = (self.page.render(lang), False)
         for _ in range(3):
             self.state.record_ping(worker.Refused())
         for lang in ("es", "en"):
-            documents[("relink", lang)] = (self.page.render(lang), "</footer>")
-        for (name, lang), (shown, after) in documents.items():
+            documents[("relink", lang)] = (self.page.render(lang), False)
+        for (name, lang), (shown, has_quit) in documents.items():
             with self.subTest(page=name, lang=lang):
-                self.assertEqual(shown.count("<footer"), 1)
-                self.assertIn(credit(lang) + after, shown)
+                self.assertEqual(shown.count(credit(lang)), 1)
                 self.assertEqual(shown.count("http"), 1)
+                self.assertNotIn("ElkinDev", shown.replace(CREDIT_LINK, "", 1).replace(
+                    "github.com/ElkinDev/PendiFy</a>", "", 1))
+                feet = re.findall(r"<footer[^>]*>(.*?)</footer>", shown, re.S)
+                if not has_quit:
+                    self.assertNotIn("<footer", shown)
+                    continue
+                self.assertEqual(shown.count("<footer"), 1)
+                self.assertIn('<footer class="foot"><form method="post" action="/quit">', shown)
+                self.assertEqual(len(feet), 1)
+                self.assertRegex(feet[0], r'\A<form method="post" action="/quit">[^<]*<input [^>]*>[^<]*'
+                                          r'<button type="submit">[^<]*</button></form>\Z')
         self.assertEqual((page.WORDS["es"].get("credit"), page.WORDS["en"].get("credit")), (CREDIT["es"], CREDIT["en"]))
+        self.assertIn(".bar{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.45rem;"
+                      "margin:0 0 8px}", page._STYLE)
+        self.assertIn(".bar .credit{margin-right:auto}", page._STYLE)
 
     def test_the_linked_and_the_relink_pages_show_the_sponsored_qr_and_the_waiting_page_never(self):
         # Mutation: the aside drawn whatever the state. Red: the waiting page holds it. Mutation: the note kept on
@@ -758,10 +777,13 @@ class PairingPageTest(unittest.TestCase):
             with self.subTest(lang=lang):
                 shown = self.html(accept)
                 self.assertEqual(shown.count('<button id="theme-toggle"'), 1)
-                # The header opens with the language switch, right before the button (lane pclang, OR-96).
-                self.assertRegex(shown, re.escape('<main class="page"><header class="bar"><form class="langsw" '
-                                                  f'role="group" aria-label="{page.WORDS[lang]["language"]}" '
-                                                  'method="post" action="/lang">')
+                # The header opens with the credit, then the language switch right before the button (lane
+                # pclang, OR-96; lane pccr, OR-98).
+                self.assertRegex(shown, re.escape('<main class="page"><header class="bar"><p class="credit">')
+                                 + r"(?:(?!</p>).)*</p>"
+                                 + re.escape('<form class="langsw" '
+                                             f'role="group" aria-label="{page.WORDS[lang]["language"]}" '
+                                             'method="post" action="/lang">')
                                  + r"(?:(?!</form>).)*</form>"
                                  + re.escape(f'<button id="theme-toggle" class="icon-btn" type="button" '
                                              f'aria-pressed="false" aria-label="'

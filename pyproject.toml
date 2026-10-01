@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pendify"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pairs this PC with a phone account by a QR on a loopback page and sends it two kinds of alerts."
 readme = "README.md"
 license = "MIT"
