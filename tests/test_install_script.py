@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,6 +101,8 @@ class InstallScriptTest(unittest.TestCase):
         self.fakes.mkdir()
         self.local.mkdir()
         self.appdata.mkdir()
+        # Every run names a scratch Run key that no case here creates, never the real one.
+        self.run_key = r"Software\pcnotify-test-" + uuid.uuid4().hex
 
     def env(self, with_real_python=True, **extra):
         self.assertTrue(INSTALL.is_file(), "install.ps1 is missing at the repository root")
@@ -111,6 +114,7 @@ class InstallScriptTest(unittest.TestCase):
         env["LOCALAPPDATA"] = str(self.local)
         env["APPDATA"] = str(self.appdata)
         env["PCNOTIFY_DRYRUN"] = "1"
+        env["PCNOTIFY_RUN_KEY"] = self.run_key
         env.update(extra)
         return env
 

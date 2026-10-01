@@ -1,9 +1,13 @@
 # pcnotify uninstaller for Windows. No administrator, nothing machine-wide, no policy change.
 # Same rules as install.ps1: no parameters, pure ASCII, PCNOTIFY_DRYRUN=1 prints the plan and
-# changes nothing. It removes the package and the two shortcuts and keeps the config folder.
+# changes nothing. It removes the package, the two shortcuts and the start with Windows when it
+# exists, and keeps the config folder. PCNOTIFY_RUN_KEY replaces the key path under HKCU of the
+# start with Windows, for test runs.
 
 & {
     $ShortcutName = 'pcnotify.lnk'
+    $RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run'
+    $RunName = 'pcnotify'
     $ProbeSeconds = 15
     $PipSeconds = 120
     # Written by install.ps1: the interpreter pip installed into, one line.
@@ -22,6 +26,38 @@
     function Say([string]$Text) { Write-Host $Text }
     function Plan([string]$Text) { Write-Host ('[plan] ' + $Text) }
     function Note([string]$Text) { if ($DryRun) { Plan $Text } else { Say $Text } }
+
+    # The start with Windows is the per-user Run value, which only the program's page creates. PCNOTIFY_RUN_KEY
+    # replaces its key path under HKCU, for test runs.
+    function Get-RunKey {
+        $key = $env:PCNOTIFY_RUN_KEY
+        if ($key) { $key = $key.Trim() }
+        if (-not $key) { $key = $RunKey }
+        return 'HKCU:\' + $key
+    }
+
+    # The value removed when it exists: 0, or 1 when it cannot be removed.
+    function Remove-RunValue {
+        $key = Get-RunKey
+        try {
+            $null = Get-ItemProperty -LiteralPath $key -Name $RunName -ErrorAction Stop
+        } catch {
+            return 0
+        }
+        $target = $key + '\' + $RunName
+        if ($DryRun) {
+            Plan ('quitar inicio con Windows: ' + $target)
+            return 0
+        }
+        try {
+            Remove-ItemProperty -LiteralPath $key -Name $RunName -ErrorAction Stop
+            Say ('Inicio con Windows quitado: ' + $target)
+            return 0
+        } catch {
+            Say ('No se pudo quitar el inicio con Windows ' + $target + '. Quitalo a mano.')
+            return 1
+        }
+    }
 
     # The same probe as install.ps1: a candidate counts only when it prints a version of 3.10 or
     # newer followed by its own sys.executable, and is not inside a virtual environment.
@@ -167,6 +203,8 @@
                 $code = 1
             }
         }
+
+        if ((Remove-RunValue) -ne 0) { $code = 1 }
 
         if ($AppData) {
             Say ('La configuracion queda en ' + (Join-Path $AppData 'pcnotify') + ' y no se borra; borrala a mano si ya no la quieres.')

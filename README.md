@@ -32,7 +32,9 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 - Iniciar: el acceso directo `pcnotify`, o `pythonw -m pcnotify`, que es lo que ejecuta el acceso directo; sin consola, si ya está abierto o no puede iniciarse te lo dice en una ventana. Para verlo en una consola: `python -m pcnotify`.
 - Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
-- Desinstalar: pega `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` igual que la línea de instalación. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está y quita los dos accesos directos; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
+- Pausar: «Pausar avisos», en la tarjeta «Este PC» de la página, deja de leer el cliente del juego: no acepta partidas ni avisa a tu teléfono, y la página sigue abierta. «Reanudar avisos» vuelve a leerlo. La pausa no se guarda: cada vez que el programa se inicia, empieza activo.
+- Iniciar con Windows: el interruptor «Iniciar con Windows», en la misma tarjeta, está apagado hasta que lo enciendas. Encendido, el programa empieza solo al iniciar sesión en Windows, solo para tu usuario y sin abrir el navegador ni la página.
+- Desinstalar: pega `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` igual que la línea de instalación. Quita el paquete del mismo Python que lo instaló, comprueba que ya no está, quita los dos accesos directos y quita el inicio con Windows si estaba encendido; la configuración en `%APPDATA%\pcnotify` se queda y te dice dónde está.
 - Actualizar: pulsa «Salir» en la página y vuelve a pegar la línea de instalación; instala la última versión y conserva la configuración y el enlace.
 
 ### Qué envía y a quién
@@ -77,7 +79,9 @@ The button at the top right switches between the light and the dark theme, and t
 
 - Start: the `pcnotify` shortcut, or `pythonw -m pcnotify`, which is what the shortcut runs; with no console, it tells you in a window when it is already running or cannot start. To see it in a console: `python -m pcnotify`.
 - Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
-- Uninstall: paste `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` the same way as the install line. It removes the package from the same Python that installed it, checks that it is gone and removes both shortcuts; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
+- Pause: «Pause alerts», on the page's «This PC» card, stops reading the game client: it accepts no match and sends no alert to your phone, and the page stays open. «Resume alerts» reads it again. The pause is not kept: every start of the program is active again.
+- Start with Windows: the «Start with Windows» switch, on the same card, is off until you turn it on. When it is on, the program starts by itself when you sign in to Windows, for your user only, without opening the browser or the page.
+- Uninstall: paste `powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"` the same way as the install line. It removes the package from the same Python that installed it, checks that it is gone, removes both shortcuts and removes the start with Windows when it is on; the configuration in `%APPDATA%\pcnotify` stays, and it tells you where it is.
 - Update: press "Quit" on the page and paste the install line again; it installs the latest version and keeps the configuration and the link.
 
 ### What it sends and to whom
@@ -97,7 +101,7 @@ License: MIT
 
 The first loads the config, starts the page and opens it in the default browser while the PC is not paired.
 It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps, and when the match itself starts it beeps and sends the started alert.
-Add `--dry` to watch and alert without accepting. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
+Add `--dry` to watch and alert without accepting. Add `--quiet` for the start by the system at logon, the line the start with Windows switch writes (`pythonw -m pcnotify --quiet`): it never opens the browser, a start that ends well shows no window, and a second quiet start prints `already running` and exits. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
 The second sends one alert with the stored pair and prints one line with the answer.
 
 Both commands take `--data-dir <dir>`, used instead of `%APPDATA%` (the config file lives in a folder under it), and `--worker <address>`, used instead of the pairing service's address and accepted only as `http://127.0.0.1:<port>` or `http://localhost:<port>`, so a test run never reaches the real service. `--client-lockfile <file>` replaces the game client's lockfile, with no read of the running processes, and the client it names is reached over plain http on 127.0.0.1, so a test run never reaches a real client.

@@ -2,6 +2,8 @@
 
     python -m <package>              the pairing page and the watcher of the game client, together
     python -m <package> --dry        the same, but the watcher never accepts: it alerts at the queue pop
+    python -m <package> --quiet      the same, started by the system at logon: no browser, and no message box
+                                     unless the start fails
     python -m <package> ping <kind>  one alert with the stored pair, one fixed line per answer
 
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break and on the page's quit button, which
@@ -20,12 +22,15 @@ import webbrowser
 from pathlib import Path
 
 from . import alert, client, config, page, pairing, runfile, watcher, worker
+from .autostart import Autostart
 
 TICK_SECONDS = 1.0
 STOP_SECONDS = 5.0
 REFUSED_LINE = "refused: the pairing of this PC was not accepted; link it again from the page"
 NOT_LINKED_LINE = "not linked: start the program without arguments and link this PC first"
 ALREADY_RUNNING_LINE = "already running: opening the page of the program that runs"
+# A quiet second start opens nothing, so its line promises nothing.
+QUIET_RUNNING_LINE = "already running"
 PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is not known yet; start it again in a "
                        "moment to open it")
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
@@ -67,6 +72,8 @@ def _arguments(argv):
                                      description="Pairs this PC by a QR on a loopback page, watches the game "
                                                  "client and sends alerts.")
     parser.add_argument("--dry", action="store_true", help="watch and alert, but never accept")
+    parser.add_argument("--quiet", action="store_true",
+                        help="a start by the system: no browser, and no message box for a start that ends well")
     commands = parser.add_subparsers(dest="command")
     ping = commands.add_parser("ping", parents=[common], help="send one alert with the stored pair")
     ping.add_argument("kind", choices=worker.KINDS)
@@ -139,7 +146,9 @@ def _ends(line, code, show):
     return code
 
 
-def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep):
+def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart):
+    # A quiet start is the system's, at logon: it never opens the browser, and a start that ends well shows no box.
+    calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
     try:
         holder = run.claim()
@@ -149,8 +158,11 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         return _ends(CLAIM_FAILED_LINE.format(path=run.path), 1, show)
     if holder is not None:
         port = holder["port"] if holder["port"] is not None else run.holder_port(holder)
-        if port is None:  # a winner with no page yet: nothing is opened, and the line says so
-            return _ends(PAGE_NOT_KNOWN_LINE, 0, show)
+        if port is None:  # a winner with no page yet: nothing is opened; a quiet start promises no page either
+            return _ends(QUIET_RUNNING_LINE if args.quiet else PAGE_NOT_KNOWN_LINE, 0, calm)
+        if args.quiet:  # the system's start at logon: nothing opened, nothing shown, a line of its own
+            print(QUIET_RUNNING_LINE, flush=True)
+            return 0
         print(ALREADY_RUNNING_LINE, flush=True)
         opener(f"http://{page.ADDRESS}:{port}/")
         show(ALREADY_RUNNING_LINE)
@@ -159,13 +171,14 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
         watch, alerter = _watcher(args, store, state, base, timeout, stop, delay, beep)
         # The page's quit sets the same stop event as Ctrl+C: the watcher, the page and the run file end below.
-        pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=stop.set)
+        pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=stop.set, on_pause=watch.pause,
+                                        on_resume=watch.resume, autostart=autostart)
         url = pairing_page.start()
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
             run.publish(pairing_page.port)
             print(f"page: {url}", flush=True)
-            if state.snapshot()["showCode"] and not opener(url):
+            if not args.quiet and state.snapshot()["showCode"] and not opener(url):
                 print("open the address above in a browser", flush=True)
             watching.start()
             while True:
@@ -193,9 +206,11 @@ def _break_as_interrupt():
 
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
-         beep=alert.beep, box=_message_box, console=_console_attached, clock=time.monotonic, sleep=time.sleep):
-    """`beep` and `box` are the seams of the sound and of the message box: a test run passes silent ones.
-    `console` says whether a printed line reaches anybody; `clock` and `sleep` time the run file's re-reads."""
+         beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
+         sleep=time.sleep):
+    """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
+    (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
+    line reaches anybody; `clock` and `sleep` time the run file's re-reads."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -210,7 +225,8 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
         previous = _break_as_interrupt()
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
-                          delay or watcher.accept_delay, beep, show, clock, sleep)
+                          delay or watcher.accept_delay, beep, show, clock, sleep,
+                          autostart if autostart is not None else Autostart())
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)
