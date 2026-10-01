@@ -49,6 +49,8 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
         return client.Credentials(4242, TOKEN) if found else None
 
     def get(self, url, token, timeout):
+        if self.world.pop("pause_at_read", False):  # a pause made by the page while this turn reads the phase
+            self.subject.pause()
         phase = self.world["phase"]
         if isinstance(phase, Exception):
             raise phase
@@ -80,7 +82,7 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
         return watcher.Watcher(types.SimpleNamespace(read=self.read_client), alerter or self.alerter(),
                                addresses=lambda port: "http://client", get=self.get,
                                post=lambda url, token, timeout: 204, clock=self.clock, wall=self.wall,
-                               sleep=self.turn_sleep, delay=lambda: 0, log=self.lines.append,
+                               sleep=self.turn_sleep, delay=lambda: self.world.get("delay", 0), log=self.lines.append,
                                live=lambda: "http://game", game_clock=lambda address: self.world["clock"])
 
     def logged(self, *turns):
@@ -165,8 +167,10 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
         self.assertEqual(held, [(1, PING_WALL, "ping", "sent")])
         self.assertEqual(len(subject.events()), 2)
 
-    def test_a_note_from_another_thread_waits_for_the_lock_and_none_is_lost_while_events_is_read(self):
-        # Mutation: the lock removed around the note. Red: the ping's thread does not wait for the held lock.
+    def test_a_note_from_another_thread_waits_for_the_held_lock_and_its_seq_stays_whole(self):
+        # It proves the note takes the lock, and that 2000 notes from a thread leave every read whole and in order;
+        # that events() reads under the lock is the next pin's. Mutation: the lock removed around the note. Red:
+        # the ping's thread does not wait for the held lock.
         listening = Listening()
         subject = self.make(listening)
         with subject._lock:  # the lock events() reads under: a note made meanwhile has to wait for it
@@ -186,6 +190,61 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
             self.assertEqual(seqs, list(range(seqs[0], seqs[0] + len(seqs))))
         many.join(5)
         self.assertEqual(subject.events()[-1][0], count + 1)
+
+    def test_events_reads_the_ring_under_the_lock_a_note_takes(self):
+        # Mutation: events() reads with no lock. Red: the read returns while the lock is held.
+        subject = self.make(Listening())
+        reads = []
+        with subject._lock:
+            reading = threading.Thread(target=lambda: reads.append(subject.events()), daemon=True)
+            reading.start()
+            reading.join(0.3)
+            self.assertTrue(reading.is_alive())
+            self.assertEqual(reads, [])
+        reading.join(2)
+        self.assertFalse(reading.is_alive())
+        self.assertEqual(reads, [[]])
+
+    def test_a_pause_inside_the_accept_delay_notes_no_accepted(self):
+        # Mutation: no pause guard after the accept delay (watcher.py, _ready_check). Red: accepted noted, and the
+        # accepted line said, though the pause came before the accept.
+        kept = self.logged({"client": True, "phase": "ReadyCheck", "delay": 2.0}, {"pause": True}, {})
+        self.assertEqual(kept, self.numbered(
+            (at(0), "started", None), (at(0), "connected", None), (at(0), "phase", "ReadyCheck"),
+            (at(2), "paused", None)))
+        self.assertEqual(self.lines, [watcher.CONNECTED_LINE, watcher.ACCEPTING_LINE, watcher.PAUSED_LINE])
+
+    def test_an_alert_that_finds_the_watcher_paused_notes_no_match_started(self):
+        # Mutation: the match's start noted before _fire's pause guard. Red: match_started at turn 2, while paused.
+        kept = self.logged({"client": True, "phase": "ChampSelect"}, {"phase": "InProgress"},
+                           {"clock": 2.5, "advance": watcher.LIVE_POLL_SECONDS, "pause_at_read": True}, {})
+        self.assertEqual(kept, self.numbered(
+            (at(0), "started", None), (at(0), "connected", None), (at(0), "phase", "ChampSelect"),
+            (at(1), "phase", "InProgress"), (at(1), "loading", None), (at(3), "paused", None)))
+        self.assertEqual(self.lines, [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.PAUSED_LINE])
+
+    def test_a_pause_and_a_resume_inside_one_sleep_note_paused_and_resumed_once_each(self):
+        # Mutation: the rest keyed on the pause event alone, not on the pause count. Red: neither is noted.
+        # Mutation: the count honored never recorded. Red: paused noted again at turn 2.
+        kept = self.logged({"client": True, "phase": "Lobby"}, {"pause": True, "resume": True}, {})
+        self.assertEqual(kept, self.numbered(
+            (at(0), "started", None), (at(0), "connected", None), (at(0), "phase", "Lobby"), (at(1), "paused", None),
+            (at(1), "resumed", None), (at(1), "connected", None), (at(1), "phase", "Lobby")))
+        self.assertEqual(self.lines, [watcher.CONNECTED_LINE, watcher.PAUSED_LINE, watcher.RESUMED_LINE,
+                                      watcher.CONNECTED_LINE])
+
+    def test_the_match_start_is_noted_on_its_kind_not_on_the_line_given_with_it(self):
+        # Mutation: match_started noted when a line is given (round 1). Red: a start fired with no line notes
+        # nothing.
+        def plain(kind):
+            self.pings.append(kind)
+        plain.sound = lambda: None
+        plain.last_ping = lambda: (None, None)
+        subject = self.make(plain)
+        subject._fire(watcher.MATCH_STARTED)
+        subject._fire(QUEUE_FOUND)
+        self.assertEqual(subject.events(), [(1, at(0), "match_started", None)])
+        self.assertEqual((self.pings, self.lines), ([watcher.MATCH_STARTED, QUEUE_FOUND], []))
 
     def test_a_watcher_whose_alert_cannot_listen_keeps_its_events_with_no_ping(self):
         # The tests' fakes have no listen: the watcher is built and runs as before, its pings not kept.
