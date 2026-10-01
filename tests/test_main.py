@@ -569,5 +569,46 @@ class MainCommandTest(unittest.TestCase):
             self.assertIn(html.escape(page.WORDS["en"][key]), body)
 
 
+    def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):
+        # Mutation: the page's quit only sets the stop. Red: the record still reads not closing while the tick
+        # is held in a slow check on a PC not linked and the page already serves the stopped page.
+        held, release = threading.Event(), threading.Event()
+        fake = self.fake(lambda path, body: (held.set(), release.wait(10), (200, {"linkId": LINK_ID}))[2])
+        self.addCleanup(release.set)  # runs before the fake closes: a red never leaves its handler held
+        seen, stop = {}, threading.Event()
+
+        def request(port, method, path, body=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                headers = {"Host": f"127.0.0.1:{port}", "Accept-Language": "en"}
+                if body is not None:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                return response.status, response.read().decode("utf-8")
+            finally:
+                connection.close()
+
+        def opener(url):  # the browser: its first fetch makes the page open, so the first tick checks
+            seen["port"] = int(url.split(":")[2].strip("/"))
+            request(seen["port"], "GET", "/state")
+            seen["token"] = QUIT_TOKEN.search(request(seen["port"], "GET", "/")[1]).group(1)
+            return True
+
+        thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", fake.base, opener=opener,
+                                            stop=stop)
+        self.assertTrue(held.wait(5))  # the tick is inside its check
+        status = request(seen["port"], "POST", "/quit", urllib.parse.urlencode({"token": seen["token"]}))[0]
+        stopped = stop.wait(5)  # the quit's callable sets the stop last, so its mark is written by now
+        record = self.read_run()
+        release.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual((status, stopped, record), (200, True, {"pid": os.getpid(), "port": seen["port"],
+                                                                 "closing": True}))
+        self.assertEqual(result["run"][0], 0)
+        self.assertFalse(self.run_file.exists())  # released at the end, as before
+
+
 if __name__ == "__main__":
     unittest.main()
