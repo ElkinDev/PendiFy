@@ -23,6 +23,10 @@ README = ROOT / "README.md"
 
 DEFAULT_SOURCE = "https://github.com/ElkinDev/PendiFy/archive/refs/heads/main.zip"
 RAW = "https://raw.githubusercontent.com/ElkinDev/PendiFy/main/"
+# The second road, for a PC that has Python or refuses scripts: pip alone, no shortcut, no script.
+PIP_INSTALL = "python -m pip install --upgrade pendify"
+PIP_START = "python -m pendify"
+PIP_UNINSTALL = "python -m pip uninstall pendify"
 # One line that runs unchanged from Win+R, the Command Prompt and PowerShell: irm exists only inside
 # PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
 # The script is saved in the home folder and run as a file: the piped form (irm ... | iex) is stopped by
@@ -201,6 +205,33 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(spanish.group(1).count(INSTALL_LINE), 1)
         self.assertEqual(english.group(1).count(INSTALL_LINE), 1)
         self.assertEqual(text.count(INSTALL_LINE), 2)
+
+    def test_readme_gives_the_pip_road_once_per_language_and_the_switch_before_the_uninstall(self):
+        # Mutation: the English pip install line dropped, red. Mutation: the uninstall sentence written
+        # before the switch is named, red: the Run key would point at a Python with no package.
+        text, spanish, english = _readme_sections()
+        for section, switch, quit_word, kept in (
+                (spanish, "«Iniciar con Windows»", "«Salir»", ("`%APPDATA%\\pendify`", "se queda", "a mano")),
+                (english, "«Start with Windows»", "«Quit»", ("`%APPDATA%\\pendify`", "stays", "by hand"))):
+            code = [line.strip() for line in section.splitlines() if line.startswith("    ")]
+            self.assertEqual(code.count(PIP_INSTALL), 1)
+            self.assertEqual(code.count(PIP_START), 1)
+            self.assertEqual(section.count(PIP_INSTALL), 1)
+            sentences = re.split(r"(?<=[.!?])\s+", section)
+            removal = [index for index, sentence in enumerate(sentences) if PIP_UNINSTALL in sentence]
+            self.assertEqual(len(removal), 1)
+            sentence = sentences[removal[0]]
+            self.assertIn(switch, sentence)
+            # Mutation: the quit step dropped from the removal, red: pip cannot remove a package that runs.
+            self.assertIn(quit_word, sentence)
+            self.assertLess(sentence.index(switch), sentence.index(quit_word))
+            self.assertLess(sentence.index(quit_word), sentence.index(PIP_UNINSTALL))
+            # Mutation: the config folder sentence dropped, red: the next sentence does not name the folder.
+            after = sentences[removal[0] + 1] if removal[0] + 1 < len(sentences) else ""
+            for part in kept:
+                self.assertIn(part, after)
+        self.assertEqual(text.count(PIP_INSTALL), 2)
+        self.assertEqual(text.count(PIP_UNINSTALL), 2)
 
     def test_readme_holds_the_uninstall_line_once_per_language(self):
         # Mutation: the Spanish uninstall road kept as a downloaded file run with -File, red.

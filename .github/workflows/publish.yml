@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+# A published release builds and uploads; a run by hand only builds. There is no push trigger: every
+# commit subject here ends in [skip ci], which skips runs triggered by push and pull_request; a
+# published release is neither.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build
+        run: python -m pip install build
+      - name: Check the release tag against the pyproject version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$TAG" != "v$version" ]; then
+            echo "The release tag $TAG is not v$version, the version in pyproject.toml." >&2
+            exit 1
+          fi
+      - name: Build the sdist and the wheel
+        run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # PyPI trusts this repository, this file and this environment (a trusted publisher): the upload
+  # proves itself with a short-lived OIDC token, so no stored credential exists anywhere.
+  publish:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -19,6 +19,44 @@ README_SECTIONS = ((r"^## Espa\S*ol\s*$(.*?)(?=^## )", "Licencia: MIT"),
 # The program's name before the rename of 2026-10-01, spelled on this one line only, for the tree pin to search for.
 OLD_NAME = "pcnotify"
 NEW_NAME = "pendify"
+REPOSITORY = "https://github.com/ElkinDev/PendiFy"
+WORKFLOWS = support.ROOT / ".github" / "workflows"
+# The pending publisher on PyPI names this file and this environment; a rename breaks the trust.
+PUBLISH = WORKFLOWS / "publish.yml"
+RELEASE_ONLY = "if: github.event_name == 'release'"
+
+
+def top_level_block(lines, key):
+    """The lines under the top-level `key:` of a workflow, up to the next top-level key."""
+    start = lines.index(key + ":")
+    block = []
+    for line in lines[start + 1:]:
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break
+        block.append(line)
+    return block
+
+
+def nested_block(lines, header, indent):
+    """The lines under `header` (spelled with its indent) that are indented deeper than `indent` spaces."""
+    start = lines.index(header)
+    block = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.strip().startswith("#") and len(line) - len(line.lstrip()) <= indent:
+            break
+        block.append(line)
+    return block
+
+
+def job_steps(lines, job):
+    """The steps of `job` as text blocks, in order, each starting at its `- ` line."""
+    steps = []
+    for line in nested_block(nested_block(lines, "  " + job + ":", 2), "    steps:", 4):
+        if line.startswith("      - "):
+            steps.append(line)
+        elif steps:
+            steps[-1] += "\n" + line
+    return steps
 
 
 def package_files():
@@ -107,6 +145,64 @@ class PackageShapeTest(unittest.TestCase):
             section = re.search(pattern, readme, re.M | re.S)
             self.assertIsNotNone(section, pattern)
             self.assertEqual(section.group(1).strip().splitlines()[-1], last)
+
+    def test_the_only_workflow_runs_on_a_published_release_and_by_hand_and_never_on_push(self):
+        # Mutation: a `push:` trigger beside the release. Red: the trigger list is not release and
+        # workflow_dispatch alone. Every commit subject here ends in [skip ci], which skips push runs.
+        self.assertTrue(WORKFLOWS.is_dir(), "no .github/workflows")
+        self.assertEqual(sorted(path.name for path in WORKFLOWS.iterdir()), ["publish.yml"])
+        lines = PUBLISH.read_text(encoding="utf-8").splitlines()
+        triggers = top_level_block(lines, "on")
+        self.assertEqual([line.strip() for line in triggers if re.match(r"^  \S", line)],
+                         ["release:", "workflow_dispatch:"])
+        self.assertIn("    types: [published]", triggers)
+        self.assertEqual([line for line in lines if re.match(r"^\s*push\s*:", line) or "[push" in line], [])
+        self.assertEqual([line.strip() for line in top_level_block(lines, "permissions") if line.strip()],
+                         ["contents: read"])
+
+    def test_the_publish_job_runs_only_on_the_release_in_the_pypi_environment_with_an_id_token(self):
+        # Mutation: `contents: write` added to the publish job. Red: its permissions are not id-token alone.
+        lines = PUBLISH.read_text(encoding="utf-8").splitlines()
+        publish = nested_block(lines, "  publish:", 2)
+        for line in ("    needs: build", "    " + RELEASE_ONLY, "    environment: pypi"):
+            self.assertIn(line, publish)
+        self.assertEqual([line.strip() for line in nested_block(publish, "    permissions:", 4) if line.strip()],
+                         ["id-token: write"])
+        upload = [step for step in job_steps(lines, "publish") if "pypa/gh-action-pypi-publish@release/v1" in step]
+        self.assertEqual(len(upload), 1)
+        self.assertNotIn("with:", upload[0])
+
+    def test_the_workflow_names_no_secret_and_checks_the_tag_before_the_build(self):
+        # Mutation: `password: ${{ secrets.PYPI_API_TOKEN }}` under the publish step. Red: three words found.
+        lines = PUBLISH.read_text(encoding="utf-8").splitlines()
+        for word in ("password", "secrets.", "pypi_api_token"):
+            self.assertEqual([line for line in lines if word in line.lower()], [], word)
+        # Mutation: the tag check step dropped. Red: no step reads the release tag.
+        steps = job_steps(lines, "build")
+        check = [index for index, step in enumerate(steps) if "github.event.release.tag_name" in step]
+        build = [index for index, step in enumerate(steps) if "run: python -m build" in step]
+        self.assertEqual(len(check), 1)
+        self.assertEqual(len(build), 1)
+        self.assertLess(check[0], build[0])
+        for part in (RELEASE_ONLY, "pyproject.toml", '"v$version"', "exit 1"):
+            self.assertIn(part, steps[check[0]])
+
+    def test_the_sdist_prunes_the_tests_folder(self):
+        # Mutation: MANIFEST.in removed. Red: setuptools adds tests/test_*.py to the sdist on its own, without
+        # their helpers, so a public download carries tests that cannot run.
+        manifest = support.ROOT / "MANIFEST.in"
+        self.assertTrue(manifest.is_file(), "no MANIFEST.in at the root")
+        lines = [line.strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
+        self.assertIn("prune tests", lines)
+
+    def test_pyproject_points_its_urls_at_the_repository_and_keeps_its_version(self):
+        # Mutation: Source pointed at a fork. Red: the urls are not the repository's.
+        project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        self.assertEqual((project["name"], project["version"]), (support.PACKAGE, "0.1.0"))
+        self.assertEqual(project.get("urls"), {"Homepage": REPOSITORY, "Source": REPOSITORY})
+        self.assertIn("Operating System :: Microsoft :: Windows", project.get("classifiers", []))
+        # The license is the SPDX expression; a License classifier beside it is refused by setuptools.
+        self.assertEqual([item for item in project.get("classifiers", []) if item.startswith("License")], [])
 
     # The working-name pin was retired on 2026-09-30: the public name is spelled by the installer, the
     # uninstaller and the README (the repository slug stays one constant in install.ps1).

@@ -24,6 +24,15 @@ El instalador busca Python 3.10 o más nuevo; si no lo hay lo instala con winget
 
 En PowerShell: para ver qué haría sin cambiar nada: `$env:PENDIFY_DRYRUN = "1"` antes de pegar la línea. Para no iniciarlo al final: `$env:PENDIFY_NOSTART = "1"`.
 
+Otra forma, sin ejecutar ningún script: si el PC ya tiene Python 3.10 o más nuevo, o si en él no se permite ejecutar scripts, instálalo con pip e inícialo:
+
+    python -m pip install --upgrade pendify
+    python -m pendify
+
+Si Windows responde que no encuentra `python`, usa `py` en su lugar: `py -m pip install --upgrade pendify` y `py -m pendify`.
+
+Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y el inicio con Windows queda en el interruptor de la página. Para actualizar, pulsa «Salir» en la página, ejecuta otra vez la misma línea de pip y vuelve a iniciarlo. Para quitarlo, apaga primero el interruptor «Iniciar con Windows» en la página, pulsa «Salir» y después ejecuta `python -m pip uninstall pendify`. La configuración en `%APPDATA%\pendify`, con el enlace con el teléfono, se queda; puedes borrar esa carpeta a mano.
+
 ### Enlazar
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
@@ -76,6 +85,15 @@ If you see "'irm' is not recognized as an internal or external command", you pas
 The installer looks for Python 3.10 or newer; when there is none it installs it with winget for your user only, or points you to https://www.python.org/downloads/ when winget is missing. Then it installs PendiFy with pip, leaves a `PendiFy` shortcut on the Desktop and in the Start menu, and starts it.
 
 In PowerShell: to see what it would do without changing anything, set `$env:PENDIFY_DRYRUN = "1"` before pasting the line. To leave it stopped at the end, set `$env:PENDIFY_NOSTART = "1"`.
+
+Another way, with no script at all: on a PC that already has Python 3.10 or newer, or where scripts are not allowed, install it with pip and start it:
+
+    python -m pip install --upgrade pendify
+    python -m pendify
+
+If Windows answers that `python` was not found, use `py` in its place: `py -m pip install --upgrade pendify` and `py -m pendify`.
+
+This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, press «Quit» on the page, run the same pip line again and start it again. To remove it, first turn off the «Start with Windows» switch on the page, press «Quit», then run `python -m pip uninstall pendify`. The configuration in `%APPDATA%\pendify`, with the link to the phone, stays; you can delete that folder by hand.
 
 ### Link
 
