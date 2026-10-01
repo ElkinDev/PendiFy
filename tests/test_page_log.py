@@ -221,7 +221,7 @@ class PageLogTest(unittest.TestCase):
                             f'value="{token}"><button type="submit">{html.escape(words["relink"])}</button></form>')
 
                 self.assertTrue(link.endswith(relink(self.page.token) + card))
-                self.assertLess(PC_CARD.search(link).end(), link.index(relink(self.page.token)))
+                self.assertLessEqual(PC_CARD.search(link).end(), link.index(relink(self.page.token)))
                 # Without the events the column is the same up to and including the relink form: it does not move.
                 without = LINK.search(self.get("/", language, bare)).group(1)
                 self.assertNotIn('class="panel log-card"', without)

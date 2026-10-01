@@ -646,10 +646,12 @@ class PairingPage:
             held = ' data-paused=""' if _paused(seen) else ""
             link += [f'<p id="watch" role="status"{held}>{html.escape(self._watch_text(seen, lang))}</p>',
                      self._card(words, token, _paused(seen))]
-        # The card «Actividad» follows the card «Este PC»; on the page that still shows the code it ends the first
-        # column instead, after the check form, so the code never moves (frame A6). No card without the events.
+        # The card «Actividad» follows the card «Este PC»; on the page that still shows the code (frame A6) and on the
+        # page that offers the relink it ends the first column instead, so neither the code nor the relink control
+        # moves. No card without the events.
         log_card = None if self.events is None else self._log_card(words, lang)
-        if log_card is not None and secret is None:
+        last = secret is not None or snapshot["relinkOffered"]
+        if log_card is not None and not last:
             link.append(log_card)
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
@@ -668,7 +670,7 @@ class PairingPage:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
         if snapshot["relinkOffered"]:
             link.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
-        if log_card is not None and secret is not None:
+        if log_card is not None and last:
             link.append(log_card)
         typed = [f"<h2>{words['typed_title']}</h2>",
                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
