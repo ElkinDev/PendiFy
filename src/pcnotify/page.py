@@ -295,14 +295,18 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".pc form{justify-self:start}\n"
           ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
-# beside a watcher), so a second tab follows a pause or a resume made in another; says so when the program is gone.
+# beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
+# a page that draws the switch only (rendered from enabled(), the read /state answers, so a reload cannot loop);
+# says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
 # showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
            "const shown=s.dataset.shown;const paused=s.dataset.paused;"
+           "const sw=document.querySelector('input[name=autostart]');"
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
-           "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused))"
+           "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
+           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"
            "location.reload();})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
            # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
@@ -327,12 +331,12 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "if(f)fetch('/theme',{method:'POST',body:new URLSearchParams({token:f.value,theme:next})})"
            ".catch(function(){});});})();"
            # The switch of the start with Windows posts its change as the theme button posts, then the page is read
-           # again, so the switch shows what the registry holds; a post that fails changes nothing, and the poll says
-           # the program is gone.
+           # again, so the switch shows what the registry holds; a post that fails writes nothing, so the switch is put
+           # back as it was, nothing is reloaded, and the poll says the program is gone.
            "(function(){var sw=document.querySelector('input[name=autostart]');if(!sw)return;"
            "sw.addEventListener('change',function(){var f=document.querySelector('input[name=token]');"
            "fetch('/autostart',{method:'POST',body:new URLSearchParams({token:f.value,on:sw.checked?'1':'0'})})"
-           ".then(function(){location.reload();}).catch(function(){});});})();")
+           ".then(function(){location.reload();}).catch(function(){sw.checked=!sw.checked;});});})();")
 # Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
 # index.html head script). The choice kept in config.json, served as data-theme on <html>, wins: localStorage is
 # read only when the page came with none.

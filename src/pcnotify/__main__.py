@@ -158,8 +158,8 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         return _ends(CLAIM_FAILED_LINE.format(path=run.path), 1, show)
     if holder is not None:
         port = holder["port"] if holder["port"] is not None else run.holder_port(holder)
-        if port is None:  # a winner with no page yet: nothing is opened, and the line says so
-            return _ends(PAGE_NOT_KNOWN_LINE, 0, calm)
+        if port is None:  # a winner with no page yet: nothing is opened; a quiet start promises no page either
+            return _ends(QUIET_RUNNING_LINE if args.quiet else PAGE_NOT_KNOWN_LINE, 0, calm)
         if args.quiet:  # the system's start at logon: nothing opened, nothing shown, a line of its own
             print(QUIET_RUNNING_LINE, flush=True)
             return 0
