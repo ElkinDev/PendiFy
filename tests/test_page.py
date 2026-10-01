@@ -133,7 +133,7 @@ class KeyPlace(HTMLParser):
         if tag == "svg" and ("class", "qr") in attrs:
             self.qr_places.append(list(self.open_details))
         self.data_places += [list(self.open_details) for _, value in attrs
-                             if (value or "").startswith("data:") and value != self.icon]
+                             if (value or "").strip().lower().startswith("data:") and value != self.icon]
         if tag == "details":
             self.open_details.append(dict(attrs))
             self.details.append(dict(attrs))
@@ -280,10 +280,11 @@ class PairingPageTest(unittest.TestCase):
         self.assertIn(codes.display(secret), shown)
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": secret})
         linked = self.html()
-        for value in ('<svg class="qr"', "data:", secret, codes.display(secret), LINK_ID, codes.display(LINK_ID),
+        for value in ('<svg class="qr"', secret, codes.display(secret), LINK_ID, codes.display(LINK_ID),
                       'action="/relink"'):
-            # The icon's own data URI stays on every page (brief pcico); no other data: may.
             self.assertNotIn(value, without_icon(linked))
+        # The icon's own data URI stays on every page (brief pcico); no other data: may, in any case of the scheme.
+        self.assertNotIn("data:", without_icon(linked).lower())
         self.call("POST", "/relink")  # nothing offered: a no-op
         self.assertEqual(self.store.read().link_id, LINK_ID)
         for _ in range(3):
