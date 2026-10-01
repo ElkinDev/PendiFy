@@ -84,6 +84,16 @@ WORDS = {
         "ping_failed": "falló el envío",
         "watch_phase": "Ahora: {phase}.",
         "watch_ping": "Aviso al teléfono: {result}, a las {time}.",
+        "log_started": "El programa empezó.",
+        "log_waiting": "Esperando el cliente del juego.",
+        "log_connected": "Conectado al cliente del juego.",
+        "log_lost": "Se perdió el cliente del juego. Buscándolo de nuevo.",
+        "log_accepted": "Partida aceptada.",
+        "log_loading": "Pantalla de carga: esperando que empiece la partida.",
+        "log_match_started": "La partida empezó.",
+        "log_ping": "Aviso al teléfono: {result}.",
+        "log_paused": "Avisos en pausa.",
+        "log_resumed": "Avisos reanudados.",
         "quit": "Salir",
         "this_pc": "Este PC",
         "pause": "Pausar avisos",
@@ -143,6 +153,16 @@ WORDS = {
         "ping_failed": "sending failed",
         "watch_phase": "Now: {phase}.",
         "watch_ping": "Alert to the phone: {result}, at {time}.",
+        "log_started": "The program started.",
+        "log_waiting": "Waiting for the game client.",
+        "log_connected": "Connected to the game client.",
+        "log_lost": "Lost the game client. Looking for it again.",
+        "log_accepted": "Match accepted.",
+        "log_loading": "Loading screen: waiting for the match to start.",
+        "log_match_started": "The match started.",
+        "log_ping": "Alert to the phone: {result}.",
+        "log_paused": "Alerts paused.",
+        "log_resumed": "Alerts resumed.",
         "quit": "Quit",
         "this_pc": "This PC",
         "pause": "Pause alerts",
@@ -160,6 +180,13 @@ PHASE_WORDS = {"None": "phase_none", "Lobby": "phase_lobby", "Matchmaking": "pha
                "ReadyCheck": "phase_readycheck", "ChampSelect": "phase_champselect", "InProgress": "phase_inprogress",
                "EndOfGame": "phase_endofgame", "PreEndOfGame": "phase_endofgame", "WaitingForStats": "phase_endofgame"}
 PING_RESULTS = ("sent", "refused", "not_delivered", "failed")
+# The log's lines (lane pclog round 1, the words of briefs/pclog-design-2026-10-01.md): each kind the watcher notes to
+# its word; a phase reads its phase word and a period, a ping its result's word. Lost, the pause and a ping that was
+# not sent are flagged, so a drawing can mark a failure.
+LOG_WORDS = {"started": "log_started", "waiting": "log_waiting", "connected": "log_connected", "lost": "log_lost",
+             "accepted": "log_accepted", "loading": "log_loading", "match_started": "log_match_started",
+             "paused": "log_paused", "resumed": "log_resumed"}
+LOG_WARNS = frozenset({"lost", "paused"})
 
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
@@ -296,8 +323,9 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
 # beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
-# a page that draws the switch only (rendered from enabled(), the read /state answers, so a reload cannot loop);
-# says so when the program is gone.
+# a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
+# /state answers, so a reload cannot loop, and a poll landing between a change and its post's answer cannot reload
+# the page under the post); says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
 # showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
@@ -306,7 +334,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
-           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"
+           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
            "location.reload();})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
            # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
@@ -435,24 +463,31 @@ def _clock_time(at):
     return time.strftime("%H:%M", time.localtime(at))
 
 
+def _log_time(at):
+    """A wall time as the log says it, hours, minutes and seconds in this PC's zone."""
+    return time.strftime("%H:%M:%S", time.localtime(at))
+
+
 def _form(action, token, inner):
     return (f'<form method="post" action="/{action}"><input type="hidden" name="token" value="{token}">'
             f"{inner}</form>")
 
 
 class PairingPage:
-    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None):
+    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
         with Windows; without it, or where it is not available, /autostart is no route and /state says nothing of
         it. Beside a watcher the page draws the card «Este PC» after the watcher line: the pause, or the resume while
-        paused, and the switch of the start with Windows where it is available."""
+        paused, and the switch of the start with Windows where it is available. `events` answers the watcher's
+        events, oldest first; with it /state carries the log's lines, without it no log key."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
         self.on_pause, self.on_resume = on_pause, on_resume
         self.autostart = autostart if autostart is not None and autostart.available else None
+        self.events = events
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -502,6 +537,28 @@ class PairingPage:
                                                     time=_clock_time(snapshot["pingAt"])))
         return " ".join(parts)
 
+    @staticmethod
+    def _log_lines(events, lang):
+        """The log's lines in `lang`, oldest first, each {seq, time, text, warn}. A phase whose word is the word of
+        the last phase line kept is dropped, so the three phases that end a match give one line; a kind or a ping
+        result the page does not know is dropped."""
+        words, lines, last_phase = WORDS[lang], [], None
+        for seq, at, kind, detail in events:
+            if kind == "phase":
+                text = words[PHASE_WORDS.get(detail, "phase_other")] + "."
+                if text == last_phase:
+                    continue
+                last_phase = text
+            elif kind == "ping" and detail in PING_RESULTS:
+                text = words["log_ping"].format(result=words["ping_" + detail])
+            elif kind in LOG_WORDS:
+                text = words[LOG_WORDS[kind]]
+            else:
+                continue
+            lines.append({"seq": seq, "time": _log_time(at), "text": text,
+                          "warn": kind in LOG_WARNS or (kind == "ping" and detail != "sent")})
+        return lines
+
     def state_json(self, lang):
         """The state for the page's poll: the state line's sentence, and beside a watcher its line and whether it
         is paused, and where the start with Windows is available whether it is on."""
@@ -513,6 +570,8 @@ class PairingPage:
             answer["paused"] = _paused(seen)
         if self.autostart is not None:
             answer["autostart"] = self.autostart.enabled()
+        if self.events is not None:
+            answer["log"] = self._log_lines(self.events(), lang)
         return answer
 
     def render(self, lang):

@@ -172,7 +172,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         watch, alerter = _watcher(args, store, state, base, timeout, stop, delay, beep)
         # The page's quit sets the same stop event as Ctrl+C: the watcher, the page and the run file end below.
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=stop.set, on_pause=watch.pause,
-                                        on_resume=watch.resume, autostart=autostart)
+                                        on_resume=watch.resume, autostart=autostart, events=watch.events)
         url = pairing_page.start()
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
