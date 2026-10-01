@@ -2,8 +2,8 @@
 sitting on a notification bubble.
 
 One character per colour, "." transparent. GRIDS[32] is the drawing at 32 by 32 and GRIDS[16] the same figure
-drawn again by hand at 16 by 16, not scaled down. tools/make_icon.py writes src/pcnotify/pcnotify.ico and
-src/pcnotify/icon.py from these grids; change a cell here, then run the tool.
+drawn again by hand at 16 by 16, not scaled down. tools/make_icon.py writes src/pendify/pendify.ico and
+src/pendify/icon.py from these grids; change a cell here, then run the tool.
 """
 
 # The outline colour: every cell of the figure that touches a transparent cell or the grid's border is this one.

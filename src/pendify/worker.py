@@ -26,11 +26,11 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 
 def _user_agent():
     try:
-        version = importlib.metadata.version("pcnotify")
+        version = importlib.metadata.version("pendify")
     except Exception:  # never stop the import: not installed (the tests, a checkout) or a half-written dist-info
         version = None
     # The fallback when the lookup failed or read no version (None or blank from a broken dist-info).
-    return f"pcnotify/{version.strip()}" if isinstance(version, str) and version.strip() else "pcnotify/source"
+    return f"pendify/{version.strip()}" if isinstance(version, str) and version.strip() else "pendify/source"
 
 
 # The program names itself in every request: the edge in front of the Worker refuses urllib's default

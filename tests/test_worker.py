@@ -71,7 +71,7 @@ class LinkWorkerClientTest(unittest.TestCase):
         for request in fake.requests:
             with self.subTest(path=request["path"]):
                 agent = request["headers"].get("user-agent", "")
-                self.assertTrue(agent.startswith("pcnotify/"), agent)
+                self.assertTrue(agent.startswith("pendify/"), agent)
                 self.assertFalse(agent.startswith("Python-urllib"), agent)
 
     def test_a_broken_or_empty_version_lookup_falls_back_to_source(self):
@@ -82,7 +82,17 @@ class LinkWorkerClientTest(unittest.TestCase):
         for label, replacement in (("None", lambda name: None), ("KeyError", raise_key_error)):
             with self.subTest(lookup=label):
                 with mock.patch.object(worker.importlib.metadata, "version", replacement):
-                    self.assertEqual(worker._user_agent(), "pcnotify/source")
+                    self.assertEqual(worker._user_agent(), "pendify/source")
+
+    def test_the_installed_version_is_read_under_the_package_name(self):
+        # Mutation: the lookup asks for another name (version("pendifyx")). Red: pendify/source, not the version.
+        def lookup(name):
+            if name == "pendify":
+                return "0.1.0"
+            raise worker.importlib.metadata.PackageNotFoundError(name)
+
+        with mock.patch.object(worker.importlib.metadata, "version", lookup):
+            self.assertEqual(worker._user_agent(), "pendify/0.1.0")
 
     def test_each_ping_answer_maps_to_its_result_as_s_reads_it(self):
         # Mutation: a 200 with sent 0 read as Sent. Red: Sent where NotDelivered(200) is expected (S:303).

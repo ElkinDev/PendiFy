@@ -1,9 +1,9 @@
 """Pins for install.ps1, uninstall.ps1 and the README install line.
 
-Every PowerShell run here is a dry run (PCNOTIFY_DRYRUN=1) with a PATH, a LOCALAPPDATA and an APPDATA
+Every PowerShell run here is a dry run (PENDIFY_DRYRUN=1) with a PATH, a LOCALAPPDATA and an APPDATA
 the test builds, so nothing is installed, started or written outside a temp directory. The one run
 that is not dry is the uninstaller against a fake interpreter that answers the package is still
-there, which stops before the shortcut step, and it is skipped when a real pcnotify shortcut exists.
+there, which stops before the shortcut step, and it is skipped when a real PendiFy shortcut exists.
 """
 
 import os
@@ -21,8 +21,8 @@ INSTALL = ROOT / "install.ps1"
 UNINSTALL = ROOT / "uninstall.ps1"
 README = ROOT / "README.md"
 
-DEFAULT_SOURCE = "https://github.com/ElkinDev/pcnotify/archive/refs/heads/main.zip"
-RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
+DEFAULT_SOURCE = "https://github.com/ElkinDev/PendiFy/archive/refs/heads/main.zip"
+RAW = "https://raw.githubusercontent.com/ElkinDev/PendiFy/main/"
 # One line that runs unchanged from Win+R, the Command Prompt and PowerShell: irm exists only inside
 # PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
 # The script is saved in the home folder and run as a file: the piped form (irm ... | iex) is stopped by
@@ -30,8 +30,8 @@ RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
 # The saved copy is removed first: a failed download does not stop the ; chain under -Command, so without
 # the removal a copy an earlier download left would run instead.
 SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "'
-INSTALL_SAVED = "pcnotify-install.ps1"
-UNINSTALL_SAVED = "pcnotify-uninstall.ps1"
+INSTALL_SAVED = "pendify-install.ps1"
+UNINSTALL_SAVED = "pendify-uninstall.ps1"
 
 
 def _saved_file_line(script, saved):
@@ -53,9 +53,9 @@ WINGET_LINE = (
 PLAN = "[plan] "
 FOUND = "Python: "
 STUB = "rem the Microsoft Store alias stub prints nothing"
-# What the installer asks the interpreter it installed with: where pip laid pcnotify.ico beside the modules.
+# What the installer asks the interpreter it installed with: where pip laid pendify.ico beside the modules.
 ICON_READ = ("import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];"
-             "print(os.path.join(os.path.dirname(u.find_spec('pcnotify').origin),'pcnotify.ico'))")
+             "print(os.path.join(os.path.dirname(u.find_spec('pendify').origin),'pendify.ico'))")
 ICON_GUARD = re.compile(r"^if \(\$iconPath -and \(Test-Path -LiteralPath \$iconPath -PathType Leaf\)\) \{ "
                         r"try \{ \$shortcut\.IconLocation = \$iconPath \+ ',0' \} catch \{ \} \}$")
 
@@ -94,6 +94,19 @@ def _known_folder(name):
     return Path(done.stdout.strip())
 
 
+def _checked_folder(folder):
+    """The folder _known_folder read, refused unless it is one absolute path to an existing directory.
+
+    A failed or noisy PowerShell read turns into an empty, relative or multi-line path, and Path("") is
+    the current folder: a test that then runs a script for real could reach a real file. It raises, so
+    the test errors instead of skipping or running.
+    """
+    text = str(folder)
+    if "\n" in text or "\r" in text or not folder.is_absolute() or not folder.is_dir():
+        raise RuntimeError("the known folder read is not one absolute existing directory: " + repr(text))
+    return folder
+
+
 def _lines(done):
     return [line.rstrip() for line in done.stdout.splitlines() if line.strip()]
 
@@ -108,29 +121,29 @@ def _found(lines):
 
 class InstallScriptTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="pcnotify-install-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="pendify-install-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.fakes = self.tmp / "fakes"
         self.local = self.tmp / "localappdata"
         self.appdata = self.tmp / "appdata"
-        self.record = self.appdata / "pcnotify" / "python.txt"
+        self.record = self.appdata / "pendify" / "python.txt"
         self.fakes.mkdir()
         self.local.mkdir()
         self.appdata.mkdir()
         # Every run names a scratch Run key that no case here creates, never the real one.
-        self.run_key = r"Software\pcnotify-test-" + uuid.uuid4().hex
+        self.run_key = r"Software\pendify-test-" + uuid.uuid4().hex
 
     def env(self, with_real_python=True, **extra):
         self.assertTrue(INSTALL.is_file(), "install.ps1 is missing at the repository root")
-        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PCNOTIFY_")}
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PENDIFY_")}
         entries = [str(self.fakes)]
         if with_real_python:
             entries.append(str(Path(sys.executable).parent))
         env["PATH"] = os.pathsep.join(entries)
         env["LOCALAPPDATA"] = str(self.local)
         env["APPDATA"] = str(self.appdata)
-        env["PCNOTIFY_DRYRUN"] = "1"
-        env["PCNOTIFY_RUN_KEY"] = self.run_key
+        env["PENDIFY_DRYRUN"] = "1"
+        env["PENDIFY_RUN_KEY"] = self.run_key
         env.update(extra)
         return env
 
@@ -198,9 +211,26 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(english.group(1).count(UNINSTALL_LINE), 1)
         self.assertEqual(text.count(UNINSTALL_LINE), 2)
 
+    def test_a_folder_read_that_is_not_one_absolute_directory_is_refused(self):
+        # Mutation: the is_absolute check dropped. Red: Path("") (an empty answer, the current folder) and the
+        # relative path to an existing directory pass.
+        a_file = self.tmp / "a-file"
+        a_file.write_text("x", encoding="ascii")
+        refused = {
+            "empty": Path(""),
+            "relative": Path(os.path.relpath(self.fakes)),
+            "not a directory": a_file,
+            "two lines": Path(str(self.tmp) + "\n" + str(self.tmp)),
+        }
+        for label, folder in refused.items():
+            with self.subTest(answer=label):
+                with self.assertRaises(RuntimeError):
+                    _checked_folder(folder)
+        self.assertEqual(_checked_folder(self.fakes), self.fakes)
+
     @NEEDS_POWERSHELL
     def test_dry_run_as_a_file_prints_the_plan_in_order(self):
-        # Mutation: PCNOTIFY_SOURCE ignored (the default source always used), red; the python.txt
+        # Mutation: PENDIFY_SOURCE ignored (the default source always used), red; the python.txt
         # plan line dropped, red; the icon plan line dropped, red.
         desktop, programs = _known_folder("Desktop"), _known_folder("Programs")
         done = _file_form(self.env())
@@ -217,19 +247,19 @@ class InstallScriptTest(unittest.TestCase):
             + DEFAULT_SOURCE), plan[0])
         self.assertEqual(plan[1], "anotar Python en " + str(self.record))
         self.assertEqual(plan[2], "icono: " + plan[0].split(" -m pip ")[0] + ' -c "' + ICON_READ + '"')
-        self.assertEqual(plan[3], "acceso directo: " + str(desktop / "pcnotify.lnk"))
-        self.assertEqual(plan[4], "acceso directo: " + str(programs / "pcnotify.lnk"))
-        self.assertTrue(plan[5].startswith("iniciar: ") and plan[5].endswith(" -m pcnotify"), plan[5])
+        self.assertEqual(plan[3], "acceso directo: " + str(desktop / "PendiFy.lnk"))
+        self.assertEqual(plan[4], "acceso directo: " + str(programs / "PendiFy.lnk"))
+        self.assertTrue(plan[5].startswith("iniciar: ") and plan[5].endswith(" -m pendify"), plan[5])
         self.assertLess(lines.index(FOUND + found[0]), lines.index(PLAN + plan[0]))
 
-        source = r"C:\some folder\pcnotify-main.zip"
-        done = _file_form(self.env(PCNOTIFY_SOURCE=source))
+        source = r"C:\some folder\PendiFy-main.zip"
+        done = _file_form(self.env(PENDIFY_SOURCE=source))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         pip = _plan(_lines(done))[0]
         self.assertIn(source, pip)
         self.assertNotIn(DEFAULT_SOURCE, pip)
 
-        done = _file_form(self.env(PCNOTIFY_NOSTART="1"))
+        done = _file_form(self.env(PENDIFY_NOSTART="1"))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         plan = _plan(_lines(done))
         self.assertEqual(len(plan), 5, plan)
@@ -238,7 +268,7 @@ class InstallScriptTest(unittest.TestCase):
     @NEEDS_POWERSHELL
     def test_dry_run_piped_to_invoke_expression_gives_the_same_plan(self):
         # Mutation: a param() block or a top-level return in install.ps1, red.
-        for extra in ({}, {"PCNOTIFY_NOSTART": "1"}):
+        for extra in ({}, {"PENDIFY_NOSTART": "1"}):
             with self.subTest(extra=extra):
                 as_file = _file_form(self.env(**extra))
                 piped = _piped_form(self.env(**extra))
@@ -292,7 +322,7 @@ class InstallScriptTest(unittest.TestCase):
     def test_dry_run_writes_no_shortcut_and_no_file(self):
         # Mutation: the python.txt write not guarded by the dry run, red. (The shortcut step unguarded
         # reds the snapshot too, but would write a real shortcut, so it is not the named mutation.)
-        folders = [_known_folder("Desktop"), _known_folder("Programs")]
+        folders = [_checked_folder(_known_folder("Desktop")), _checked_folder(_known_folder("Programs"))]
         before = [{p.name for p in folder.iterdir()} for folder in folders]
         done = _file_form(self.env())
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -312,11 +342,11 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(len(lines), 1, lines)
         self.assertRegex(lines[0], ICON_GUARD)
         self.assertEqual(text.count("ICON_READ"), 0)
-        self.assertEqual(text.count("pcnotify.ico"), 1)
+        self.assertEqual(text.count("pendify.ico"), 1)
 
     def test_the_icon_read_drops_the_current_folder_before_the_lookup(self):
         # Mutation: the removal dropped from the line (the folder the line runs in searched first), red on the text
-        # and on the run from a folder that holds a decoy pcnotify package.
+        # and on the run from a folder that holds a decoy pendify package.
         text = INSTALL.read_text(encoding="ascii")
         lines = [line.strip() for line in text.splitlines() if line.strip().startswith("$iconArgs = @('-c', '")]
         self.assertEqual(len(lines), 1, lines)
@@ -328,7 +358,7 @@ class InstallScriptTest(unittest.TestCase):
         base = ROOT / "build" / "tmp"
         base.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as work:
-            decoy = Path(work) / "pcnotify"
+            decoy = Path(work) / "pendify"
             decoy.mkdir()
             (decoy / "__init__.py").write_text("", encoding="ascii")
             env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
@@ -336,7 +366,7 @@ class InstallScriptTest(unittest.TestCase):
                                   timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(os.path.normcase(done.stdout.strip()),
-                         os.path.normcase(str(ROOT / "src" / "pcnotify" / "pcnotify.ico")))
+                         os.path.normcase(str(ROOT / "src" / "pendify" / "pendify.ico")))
 
     def test_a_failed_icon_read_still_reaches_the_shortcut_save(self):
         # Mutation: a return in the icon read's catch (a failed read stops the install), red. Mutation: the read
@@ -392,7 +422,7 @@ class InstallScriptTest(unittest.TestCase):
     @NEEDS_POWERSHELL
     def test_uninstall_dry_run_plans_the_recorded_python_and_probes_without_it(self):
         # Mutation: python.txt ignored (the uninstaller always probes), red.
-        uninstall = "-m pip uninstall -y pcnotify"
+        uninstall = "-m pip uninstall -y pendify"
         done = _file_form(self.env(), UNINSTALL)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         lines = _lines(done)
@@ -406,7 +436,7 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(_found(lines), [str(recorded) + " (anotado en " + str(self.record) + ")"])
         plan = _plan(lines)
         self.assertEqual(plan[0], str(recorded) + " " + uninstall)
-        self.assertEqual(plan[1], "comprobar: " + str(recorded) + " -m pip show pcnotify")
+        self.assertEqual(plan[1], "comprobar: " + str(recorded) + " -m pip show pendify")
 
     @NEEDS_POWERSHELL
     def test_uninstall_dry_run_piped_to_invoke_expression_gives_the_same_plan(self):
@@ -425,23 +455,23 @@ class InstallScriptTest(unittest.TestCase):
     @NEEDS_POWERSHELL
     def test_uninstall_reports_a_package_pip_left_in_place_and_exits_1(self):
         # Mutation: the pip show check after pip uninstall removed (the removal assumed), red.
-        folders = [_known_folder("Desktop"), _known_folder("Programs")]
-        if any((folder / "pcnotify.lnk").exists() for folder in folders):
-            self.skipTest("a real pcnotify shortcut exists; this run is not dry and must not reach it")
+        folders = [_checked_folder(_known_folder("Desktop")), _checked_folder(_known_folder("Programs"))]
+        if any((folder / "PendiFy.lnk").exists() for folder in folders):
+            self.skipTest("a real PendiFy shortcut exists; this run is not dry and must not reach it")
         fake = self.tmp / "recorded" / "python.cmd"
         fake.parent.mkdir()
-        fake.write_text("@echo off\r\nif \"%3\"==\"show\" (echo Name: pcnotify& exit /b 0)\r\n"
-                        "echo WARNING: Skipping pcnotify as it is not installed.\r\nexit /b 0\r\n",
+        fake.write_text("@echo off\r\nif \"%3\"==\"show\" (echo Name: pendify& exit /b 0)\r\n"
+                        "echo WARNING: Skipping pendify as it is not installed.\r\nexit /b 0\r\n",
                         encoding="ascii")
         self.record.parent.mkdir()
         self.record.write_text(str(fake), encoding="utf-8")
         env = self.env()
-        del env["PCNOTIFY_DRYRUN"]
+        del env["PENDIFY_DRYRUN"]
         done = _file_form(env, UNINSTALL)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         lines = _lines(done)
-        self.assertTrue(lines[-1].startswith("pcnotify sigue instalado en " + str(fake)), lines)
-        self.assertNotIn("Paquete pcnotify quitado.", lines)
+        self.assertTrue(lines[-1].startswith("PendiFy sigue instalado en " + str(fake)), lines)
+        self.assertNotIn("Paquete PendiFy quitado.", lines)
 
 
 def _readme_sections():
