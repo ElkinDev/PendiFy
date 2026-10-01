@@ -25,16 +25,20 @@ class WatcherPauseTest(WatcherFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.stop = threading.Event()
-        self.turn_sleeps, self.left, self.at_delay = [], 0, None
+        self.turn_sleeps, self.left, self.at_delay, self.in_sleep = [], 0, None, None
 
     def turn_sleep(self, seconds):
         """The loop's sleep: the clock moves; the accept delay is no turn and runs `at_delay` when a case sets it;
-        after the last turn a case asked for, the stop is set."""
+        a turn's sleep runs `in_sleep` once when a case sets it; after the last turn a case asked for, the stop is
+        set."""
         self.clock.advance(seconds)
         if seconds == DELAY:
             if self.at_delay is not None:
                 self.at_delay()
             return
+        if self.in_sleep is not None:
+            landing, self.in_sleep = self.in_sleep, None
+            landing()
         self.turn_sleeps.append(seconds)
         self.left -= 1
         if self.left <= 0:
@@ -185,6 +189,63 @@ class WatcherPauseTest(WatcherFixture, unittest.TestCase):
         page_thread.join(5)
         self.assertEqual(subject.snapshot()["paused"], True)
         self.assertEqual(self.looped().snapshot()["paused"], False)
+
+    def said(self):
+        """The watcher's own lines, not the Alerter's."""
+        return [line for line in self.lines if not line.startswith("alert: ")]
+
+    def arrived(self, subject):
+        """A game seen from the lobby to its loading screen: the watch for its true start is on."""
+        for phase in ("Lobby", "ChampSelect", "InProgress"):
+            self.turns(subject, 1, phase)
+        self.assertEqual((len(self.beeps), self.pings), (1, []))
+
+    def test_a_pause_and_a_resume_inside_one_sleep_still_rest_the_watcher(self):
+        # Mutation: the loop's pause counter compare removed. Red: the running game's clock read pings the start.
+        subject = self.looped()
+        self.arrived(subject)
+        asked = self.game.count()
+        self.game.clock(2.5)  # the match's clock runs: a read of it by the watch kept on would be the true start
+        self.in_sleep = lambda: (subject.pause(), subject.resume())  # both land before the next turn's head
+        self.turns(subject, TURNS, "InProgress")
+        self.assertEqual((len(self.beeps), self.pings, self.game.count()), (1, [], asked))
+        self.assertEqual(self.said(), [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.PAUSED_LINE,
+                                       watcher.RESUMED_LINE, watcher.CONNECTED_LINE])
+        self.assertEqual(subject.snapshot(), {**self.shown("InProgress", "loading"), "paused": False})
+
+    def test_a_pause_inside_the_clock_read_logs_no_match_started_line(self):
+        # Mutation: the started line logged before _fire's guard. Red: "match started: alerting" with no alert.
+        landing = []
+
+        def live():
+            if landing:
+                subject.pause()  # the page's pause lands while the step asks the game its clock
+            return self.game.base
+
+        subject = self.looped(live=live)
+        self.arrived(subject)
+        self.game.clock(2.5)
+        landing.append(True)
+        self.turns(subject, TURNS, "InProgress")
+        self.assertEqual(self.said(), [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.PAUSED_LINE])
+        self.assertEqual((len(self.beeps), self.pings), (1, []))
+
+    def test_a_pause_inside_the_last_clock_read_of_the_wait_logs_no_match_started_line(self):
+        # Mutation: the wait's started line logged before _fire's guard. Red: "the game gave no clock" with no alert.
+        landing = []
+
+        def live():
+            if landing:
+                subject.pause()  # the read that ends the wait: the game gives no clock, the pause lands inside it
+            return self.game.base
+
+        subject = self.looped(live=live)
+        self.arrived(subject)
+        landing.append(True)
+        self.clock.advance(watcher.LIVE_FALLBACK_SECONDS)
+        self.turns(subject, TURNS, "InProgress")
+        self.assertEqual(self.said(), [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.PAUSED_LINE])
+        self.assertEqual((len(self.beeps), self.pings), (1, []))
 
     def test_each_console_line_is_said_once_per_transition(self):
         # Mutation: the paused line said on every paused turn. Red: ten paused lines.

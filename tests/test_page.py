@@ -57,10 +57,11 @@ PING_TEXTS = {"sent": ("enviado", "sent"),
 WINDOWS_ONLY = "another handle that locks config.json against a read and a replace is a Windows behavior"
 # The words of a waiting page with a watcher and a quit button, in the order the page before the design showed
 # them (page.py at 8f6b90661), with the key's summary before its label (brief pcpg-hide, change 1; the summary shows the code since brief pcpg-port); None is the key
-# as codes.display prints it.
-PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "scan", "show_code", "code_label", None,
-              "check", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence", "forget",
-              "quit")
+# as codes.display prints it. The card «Este PC» sits right after the watcher line (brief pcctl-r2, placement A); the
+# page given no start with Windows draws no switch in it.
+PAGE_ORDER = ("title", "title", "intro", "state_waiting", "watch_waiting", "this_pc", "pause", "scan", "show_code",
+              "code_label", None, "check", "typed_title", "link_id_label", "secret_label", "save", "forget",
+              "forget_sentence", "forget", "quit")
 
 
 class PageText(HTMLParser):

@@ -46,10 +46,10 @@ class QuietStartTest(unittest.TestCase):
     def test_a_quiet_start_against_a_running_instance_opens_nothing_shows_no_box_and_exits_0(self):
         # Mutation: the opener's place at a second start left as it was. Red: the running page is opened.
         # Mutation: the box shown for a quiet start that ends well. Red: a message box at logon.
+        # Mutation: the quiet start says the opening line. Red: "opening the page" printed while nothing opens.
         self.holder(54321)
         opened = []
-        self.assertEqual(self.started("--quiet", opened=opened),
-                         (0, entry.ALREADY_RUNNING_LINE + "\n", ""))
+        self.assertEqual(self.started("--quiet", opened=opened), (0, "already running\n", ""))
         self.assertEqual((opened, self.boxes), ([], []))
         self.assertEqual(self.started(opened=opened), (0, entry.ALREADY_RUNNING_LINE + "\n", ""))
         self.assertEqual((opened, self.boxes), (["http://127.0.0.1:54321/"], [entry.ALREADY_RUNNING_LINE]))

@@ -1,8 +1,11 @@
-"""PageControlsTest: the mechanics under the page's two controls, with no control drawn in this round.
+"""PageControlsTest: the page's two controls and the mechanics under them.
 
 The pause and the resume of the watcher and the start with Windows are three POST routes fenced as every other
 (host, length, token; 303 to the page); the state line says a linked PC's alerts are paused; /state carries
 paused and autostart so the page's poll follows a second tab. The start with Windows runs on a MemoryRegistry.
+The controls are drawn as placement A of mockups/mockup-pcnotify-controls-r2-2026-10-01.html (frames A1 to A6): one
+card «Este PC» right after the watcher line, holding the pause or, while paused, the resume, then the switch of the
+start with Windows when one is available; while paused the watcher line is the sheet's paused block.
 """
 import html
 import http.client
@@ -39,7 +42,12 @@ NEW_WORDS = {
 }
 LINKED_ES = "Los avisos llegarán a tu cuenta."
 STATE_LINE = re.compile(r'<p id="state"([^>]*)>(.*?)</p>', re.S)
-WATCH_LINE = re.compile(r'<p id="watch" role="status">(.*?)</p>', re.S)
+# The watcher line, running or paused (the sheet's paused block carries data-paused, frames A2 and A6).
+WATCH_LINE = re.compile(r'<p id="watch" role="status"(?: data-paused="")?>(.*?)</p>', re.S)
+# The card's title, the one new word of round 2, as the sheet gives it.
+THIS_PC = {"es": "Este PC", "en": "This PC"}
+CARD_OPEN = '<div class="panel pc" role="group" aria-labelledby="pc-title">'
+FORM_ACTIONS = re.compile(r'<form method="post" action="([^"]+)"')
 FOREIGN_HOSTS = ("evil.example", "127.0.0.1", "localhost.evil.example:{port}", "127.0.0.2:{port}", "")
 WRONG_TOKENS = (False, "wrong")
 
@@ -200,25 +208,123 @@ class PageControlsTest(unittest.TestCase):
                     self.assertIsNone(GAME_WORDS.search(text), text)
         self.assertEqual(set(page.WORDS["es"]), set(page.WORDS["en"]))
 
-    def test_the_page_draws_no_new_control_in_this_round(self):
-        # Mutation: a pause button drawn. Red: a form action and a word more than today's page.
-        today = self.serve(watch=lambda: dict(self.snapshot), on_quit=lambda: None)
-        for paused in (False, True):
-            self.snapshot["paused"] = paused
-            for language in ("es", "en"):
-                with self.subTest(paused=paused, language=language):
-                    shown = self.call("GET", "/", language=language)[2]
-                    before = self.call("GET", "/", language=language, served=today)[2]
-                    actions = re.findall(r'<form method="post" action="([^"]+)"', shown)
-                    self.assertEqual(actions, re.findall(r'<form method="post" action="([^"]+)"', before))
-                    self.assertEqual(sorted(actions), ["/forget", "/quit", "/typed"])
-                    self.assertEqual(shown.count("<button"), before.count("<button"))
-                    self.assertEqual(shown.count("<input"), before.count("<input"))
-                    self.assertNotIn("checkbox", shown)
-                    self.assertNotIn('role="switch"', shown)
-                    texts = PageText(shown).texts
-                    for key in ("pause", "resume", "autostart_label", "autostart_help"):
-                        self.assertNotIn(page.WORDS[language][key], texts)
+    def card(self, language, paused=False, switch=None, served=None):
+        """The card as frames A1 to A6 draw it, the sheet's scope outline left out: the pause form, or the resume
+        form while paused, then the switch when `switch` is not None, checked when it is True."""
+        words = page.WORDS[language]
+        action = "resume" if paused else "pause"
+        inner = (f'<h2 id="pc-title">{THIS_PC[language]}</h2><form method="post" action="/{action}"><input '
+                 f'type="hidden" name="token" value="{(served or self.page).token}"><button type="submit">'
+                 f"{html.escape(words[action])}</button></form>")
+        if switch is not None:
+            inner += ('<label class="switch"><input type="checkbox" role="switch" name="autostart" '
+                      'aria-labelledby="sw-label" aria-describedby="sw-help"' + (" checked" if switch else "") +
+                      f'><span class="sw-text"><span class="sw-label" id="sw-label">{html.escape(words["autostart_label"])}'
+                      f'</span><span class="sw-help" id="sw-help">{html.escape(words["autostart_help"])}</span></span>'
+                      "</label>")
+        return f"{CARD_OPEN}{inner}</div>"
+
+    def test_active_the_card_holds_the_pause_form_and_no_resume(self):
+        # Mutation: the card left out. Red: no card after the watcher line.
+        # Mutation: the resume drawn whatever the pause. Red: action="/resume" on a running page.
+        for language in ("es", "en"):
+            with self.subTest(language=language):
+                shown = self.call("GET", "/", language=language)[2]
+                self.assertEqual(shown.count(CARD_OPEN), 1)
+                self.assertIn(self.card(language, switch=False), shown)
+                self.assertEqual(FORM_ACTIONS.findall(shown), ["/pause", "/typed", "/forget", "/quit"])
+                self.assertNotIn('action="/resume"', shown)
+                self.assertIn(THIS_PC[language], PageText(shown).texts)
+                self.assertNotIn(page.WORDS[language]["resume"], PageText(shown).texts)
+                self.assertNotIn("data-paused=\"\"", shown)
+
+    def test_paused_the_card_holds_the_resume_form_and_the_watcher_line_is_the_paused_block(self):
+        # Mutation: the pause form kept while paused. Red: action="/pause" and no resume.
+        # Mutation: the watcher line drawn as a running one. Red: no data-paused on #watch.
+        self.snapshot["paused"] = True
+        linked = [words["state_linked"] for words in page.WORDS.values()]
+        for language in ("es", "en"):
+            with self.subTest(language=language):
+                words = page.WORDS[language]
+                shown = self.call("GET", "/", language=language)[2]
+                self.assertIn(self.card(language, paused=True, switch=False), shown)
+                self.assertEqual(FORM_ACTIONS.findall(shown), ["/resume", "/typed", "/forget", "/quit"])
+                self.assertNotIn('action="/pause"', shown)
+                self.assertIn(f'<p id="watch" role="status" data-paused="">{html.escape(words["watch_paused"])}</p>'
+                              f"{CARD_OPEN}", shown)
+                answer = json.dumps(self.state_json(language), ensure_ascii=False)
+                for sentence in linked:  # neither the page nor its poll says the alerts will arrive
+                    self.assertNotIn(html.escape(sentence), shown)
+                    self.assertNotIn(sentence, answer)
+
+    def test_the_switch_is_drawn_only_with_an_available_autostart_checked_as_enabled_says(self):
+        # Mutation: the switch drawn unchecked whatever the registry holds. Red: no checked on an enabled start.
+        # Mutation: the switch drawn with no Autostart. Red: role="switch" on a page given none.
+        for language in ("es", "en"):
+            with self.subTest(language=language):
+                self.assertIn(self.card(language, switch=False), self.call("GET", "/", language=language)[2])
+        self.autostart.enable()
+        shown = self.call("GET", "/", language="en")[2]
+        self.assertIn(self.card("en", switch=True), shown)
+        for ident in ("pc-title", "sw-label", "sw-help"):
+            self.assertEqual(shown.count(f'id="{ident}"'), 1, ident)
+        named = re.findall(r'aria-(?:labelledby|describedby)="([^"]+)"', shown)
+        self.assertEqual(sorted(named), ["pc-title", "sw-help", "sw-label"])
+        self.assertTrue(all(f'id="{ident}"' in shown for ident in named))
+        self.autostart.disable()
+        self.assertIn(self.card("en", switch=False), self.call("GET", "/", language="en")[2])
+        controls = {"watch": lambda: dict(self.snapshot), "on_pause": lambda: None, "on_resume": lambda: None}
+        given_none = self.serve(**controls)
+        saved = sys.modules.get("winreg")
+        sys.modules["winreg"] = None  # a system with no Run value: the start with Windows is not available
+        self.addCleanup(lambda: sys.modules.pop("winreg", None) if saved is None else
+                        sys.modules.__setitem__("winreg", saved))
+        unavailable = self.serve(autostart=autostart.Autostart(executable=sys.executable), **controls)
+        for served in (given_none, unavailable):
+            shown = self.call("GET", "/", served=served)[2]
+            self.assertIn(self.card("es", served=served), shown)
+            for marker in ('role="switch"', 'type="checkbox"', "sw-label", "sw-help", 'class="switch"'):
+                self.assertNotIn(marker, shown)
+        # The switch posts its change as the theme button does, then the page is read again from the registry.
+        self.assertIn("var sw=document.querySelector('input[name=autostart]');if(!sw)return;", page._SCRIPT)
+        self.assertIn("fetch('/autostart',{method:'POST',body:new URLSearchParams({token:f.value,"
+                      "on:sw.checked?'1':'0'})}).then(function(){location.reload();})", page._SCRIPT)
+
+    def test_a_page_built_with_no_watcher_draws_no_card(self):
+        # Mutation: the card drawn on every page. Red: «Este PC» on a page with no watcher.
+        bare = self.serve(on_quit=lambda: None, on_pause=lambda: None, on_resume=lambda: None,
+                          autostart=self.autostart)
+        for language in ("es", "en"):
+            with self.subTest(language=language):
+                shown = self.call("GET", "/", language=language, served=bare)[2]
+                for marker in ('class="panel pc"', 'id="pc-title"', 'action="/pause"', 'action="/resume"',
+                               'role="switch"', 'id="watch"'):
+                    self.assertNotIn(marker, shown)
+                texts = PageText(shown).texts
+                for text in (THIS_PC[language], page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"]):
+                    self.assertNotIn(text, texts)
+
+    def test_the_card_sits_after_the_watcher_line_and_before_the_key_block_in_both_languages(self):
+        # Mutation: the card after the key block. Red: the scan sentence and the key card before it.
+        after_watch = re.compile(r'<p id="watch" role="status">[^<]*</p>' + re.escape(CARD_OPEN))
+        for language in ("es", "en"):
+            with self.subTest(language=language, linked=True):
+                shown = self.call("GET", "/", language=language)[2]
+                self.assertIsNotNone(after_watch.search(shown))
+                self.assertLess(shown.index(CARD_OPEN), shown.index('</section><section class="more">'))
+        self.call("POST", "/forget")  # the pairing page: the key card in its own column
+        for language in ("es", "en"):
+            with self.subTest(language=language, linked=False):
+                shown = self.call("GET", "/", language=language)[2]
+                self.assertIsNotNone(after_watch.search(shown))
+                places = [shown.index(marker) for marker in ('<section class="link">', '<p id="watch"', CARD_OPEN,
+                                                             '<p class="scan"', '<figure class="key-card"',
+                                                             'action="/check"', '</section><section class="more">')]
+                self.assertEqual(places, sorted(places))
+                texts = PageText(shown).texts
+                self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:texts.index(page.WORDS[language]["scan"])],
+                                 [page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"],
+                                  page.WORDS[language]["autostart_help"]])
 
     def test_the_poll_reloads_the_page_when_the_pause_differs_from_what_it_rendered(self):
         # Mutation: the poll ignores the pause. Red: a second tab keeps the old line under its old controls.
