@@ -48,6 +48,7 @@ WORDS = {
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
         "state_paused": "Se dejó de preguntar. Pulsa «Comprobar ahora» para seguir.",
         "state_linked": "Este PC está enlazado. Los avisos llegarán a tu cuenta.",
+        "state_linked_paused": "Este PC está enlazado. Los avisos están en pausa.",
         "state_refused": "Tu cuenta ya no acepta los avisos de este PC. Puedes volver a enlazarlo.",
         "state_closed": "El programa no está abierto. Vuelve a iniciarlo para seguir.",
         "check": "Comprobar ahora",
@@ -64,6 +65,7 @@ WORDS = {
                            "sigue activo en tu cuenta hasta que lo desenlaces en Pendi o caduque.",
         "watch_waiting": "Esperando el cliente del juego en este PC.",
         "watch_connected": "Conectado al cliente del juego.",
+        "watch_paused": "En pausa: este PC no lee el juego ni avisa a tu teléfono.",
         "watch_last": "Último aviso: {what}, a las {time}.",
         "alert_loading": "empezó la pantalla de carga",
         "alert_queue": "partida encontrada",
@@ -83,6 +85,10 @@ WORDS = {
         "watch_phase": "Ahora: {phase}.",
         "watch_ping": "Aviso al teléfono: {result}, a las {time}.",
         "quit": "Salir",
+        "pause": "Pausar avisos",
+        "resume": "Reanudar avisos",
+        "autostart_label": "Iniciar con Windows",
+        "autostart_help": "Al encender el PC el programa empieza solo, sin abrir esta página.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
                        "pythonw -m pcnotify (o python -m pcnotify para verlo en una consola).",
@@ -100,6 +106,7 @@ WORDS = {
         "state_offline": "Could not connect. It will try again.",
         "state_paused": "Stopped asking. Press «Check now» to go on.",
         "state_linked": "This PC is linked. Alerts will reach your account.",
+        "state_linked_paused": "This PC is linked. Alerts are paused.",
         "state_refused": "Your account no longer accepts this PC's alerts. You can link it again.",
         "state_closed": "The program is not running. Start it again to go on.",
         "check": "Check now",
@@ -116,6 +123,7 @@ WORDS = {
                            "active in your account until you unlink it in Pendi or it expires.",
         "watch_waiting": "Waiting for the game client on this PC.",
         "watch_connected": "Connected to the game client.",
+        "watch_paused": "Paused: this PC is not reading the game or alerting your phone.",
         "watch_last": "Last alert: {what}, at {time}.",
         "alert_loading": "the loading screen started",
         "alert_queue": "match found",
@@ -135,6 +143,10 @@ WORDS = {
         "watch_phase": "Now: {phase}.",
         "watch_ping": "Alert to the phone: {result}, at {time}.",
         "quit": "Quit",
+        "pause": "Pause alerts",
+        "resume": "Resume alerts",
+        "autostart_label": "Start with Windows",
+        "autostart_help": "When the PC turns on, the program starts by itself, without opening this page.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pcnotify "
                        "(or python -m pcnotify to see it in a console).",
@@ -256,14 +268,16 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
           ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
           "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n")
-# Polls the state; reloads when what the page shows changes; says so when the program is gone. While the program
-# is gone the state line's data-shown is a value no style rule names, so the look of what the page showed (the
-# linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
+# Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
+# beside a watcher), so a second tab follows a pause or a resume made in another; says so when the program is gone.
+# While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
+# showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
-           "const shown=s.dataset.shown;"
+           "const shown=s.dataset.shown;const paused=s.dataset.paused;"
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
-           "if(String(j.showCode)+String(j.relinkOffered)!==shown)location.reload();})"
+           "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused))"
+           "location.reload();})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
            # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
            # toggle, so a close by hand leaves none running.
@@ -366,6 +380,19 @@ def _say_failure(failure):
     print(f" [page] a request failed: {type(failure).__name__}", file=sys.stderr)
 
 
+def _paused(snapshot):
+    """True when the watcher's snapshot says it is paused."""
+    return snapshot.get("paused") is True
+
+
+def _state_word(snapshot, seen):
+    """The state line's word, the same for the page and for its poll: linked with the watcher paused reads
+    state_linked_paused, every other state its own."""
+    if snapshot["state"] == "linked" and seen is not None and _paused(seen):
+        return "state_linked_paused"
+    return "state_" + snapshot["state"]
+
+
 def _clock_time(at):
     """A wall time as the page says it, hours and minutes in this PC's zone."""
     return time.strftime("%H:%M", time.localtime(at))
@@ -377,12 +404,17 @@ def _form(action, token, inner):
 
 
 class PairingPage:
-    def __init__(self, state, watch=None, on_quit=None):
+    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
-        the program; without it the page shows no quit button and /quit is no route."""
+        the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
+        pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
+        with Windows; without it, or where it is not available, /autostart is no route and /state says nothing of
+        it. No control of the three is drawn yet: their routes and the paused sentences are the mechanics."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
+        self.on_pause, self.on_resume = on_pause, on_resume
+        self.autostart = autostart if autostart is not None and autostart.available else None
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -410,7 +442,14 @@ class PairingPage:
         no watcher runs beside the page. It names no game, no maker and no product."""
         if self.watch is None:
             return None
-        snapshot, words = self.watch(), WORDS[lang]
+        return self._watch_text(self.watch(), lang)
+
+    @staticmethod
+    def _watch_text(snapshot, lang):
+        """watch_text on one snapshot: paused, the paused sentence alone."""
+        words = WORDS[lang]
+        if _paused(snapshot):
+            return words["watch_paused"]
         connected = snapshot.get("client") == "connected"
         parts = [words["watch_connected" if connected else "watch_waiting"]]
         # Connected with nothing read yet (None) prints no phase clause; the client's own "None" reads phase_none.
@@ -426,30 +465,37 @@ class PairingPage:
         return " ".join(parts)
 
     def state_json(self, lang):
+        """The state for the page's poll: the state line's sentence, and beside a watcher its line and whether it
+        is paused, and where the start with Windows is available whether it is on."""
         snapshot = self.state.snapshot()
-        answer = {**snapshot, "text": WORDS[lang]["state_" + snapshot["state"]]}
-        watch = self.watch_text(lang)
-        if watch is not None:
-            answer["watchText"] = watch
+        seen = self.watch() if self.watch is not None else None
+        answer = {**snapshot, "text": WORDS[lang][_state_word(snapshot, seen)]}
+        if seen is not None:
+            answer["watchText"] = self._watch_text(seen, lang)
+            answer["paused"] = _paused(seen)
+        if self.autostart is not None:
+            answer["autostart"] = self.autostart.enabled()
         return answer
 
     def render(self, lang):
         words = {key: html.escape(value) for key, value in WORDS[lang].items()}
         snapshot = self.state.snapshot()
+        seen = self.watch() if self.watch is not None else None
         secret = self.state.secret_for_display() if snapshot["showCode"] else None
         token = html.escape(self.token)
+        # Beside a watcher the state line carries the pause it was rendered with, which the poll compares.
+        paused = "" if seen is None else f' data-paused="{str(_paused(seen)).lower()}"'
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in their
         # own cards under it; quit at the foot. The words and their order are the page's before the design.
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{words["title"]}</h1>'
                 f"</div>", f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                f'{str(snapshot["relinkOffered"]).lower()}" data-closed="{words["state_closed"]}">'
-                f'{words["state_" + snapshot["state"]]}</p>']
+                f'{str(snapshot["relinkOffered"]).lower()}"{paused} data-closed="{words["state_closed"]}">'
+                f'{words[_state_word(snapshot, seen)]}</p>']
         if snapshot["configFailed"]:
             link.append(f'<p class="note warn">{words["config_failed"]}</p>')
-        watch = self.watch_text(lang)
-        if watch is not None:
-            link.append(f'<p id="watch" role="status">{html.escape(watch)}</p>')
+        if seen is not None:
+            link.append(f'<p id="watch" role="status">{html.escape(self._watch_text(seen, lang))}</p>')
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
             drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
@@ -513,6 +559,14 @@ class PairingPage:
             return "failed"
         return "kept"
 
+    def set_autostart(self, on):
+        """/autostart: the start with Windows turned on or off; a registry failure is said on stderr by the
+        Autostart and changes nothing, and the page's next state says what holds."""
+        if on:
+            self.autostart.enable()
+        else:
+            self.autostart.disable()
+
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
         stderr, and the request is still answered."""
@@ -525,6 +579,10 @@ class PairingPage:
                 self.state.forget()
             elif path == "/relink":
                 self.state.accept_relink()
+            elif path == "/pause":
+                self.on_pause()
+            elif path == "/resume":
+                self.on_resume()
         except config.ConfigError as failure:
             _say_failure(failure)
             self.state.config_failed()
@@ -612,6 +670,9 @@ def _handler(page):
             path = urllib.parse.urlsplit(self.path).path
             routes = ("/check", "/typed", "/forget", "/relink", "/theme")
             routes += ("/quit",) if page.on_quit is not None else ()
+            routes += ("/pause",) if page.on_pause is not None else ()
+            routes += ("/resume",) if page.on_resume is not None else ()
+            routes += ("/autostart",) if page.autostart is not None else ()
             if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
@@ -641,6 +702,11 @@ def _handler(page):
                     return self._refuse(400)
                 if outcome == "kept":
                     return self._send(204, "text/plain; charset=utf-8", "")
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
+            if path == "/autostart":  # on is 1 or 0; anything else changes nothing
+                if form.get("on") not in ("1", "0"):
+                    return self._refuse(400)
+                page.set_autostart(form["on"] == "1")
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             page.act(path, form)
             self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
