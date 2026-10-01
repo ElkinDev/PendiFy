@@ -615,6 +615,11 @@ _MASK_GROUP = ('<span class="grp">' + "".join('<svg class="mx" viewBox="0 0 8 8"
                                               for rows in _HEADS) + "</span>")
 
 
+# With scripts blocked the reveal does nothing, so the key reads as it did before the mask: the code shown, the mask
+# and the reveal gone. The code's rule repeats the mask's own selector and comes later, so it wins.
+_NOSCRIPT_STYLE = '.key[data-shown="false"] .code{visibility:visible}.mask,.reveal{display:none}'
+
+
 def _mask(words):
     """The mask over the key, three groups of the four heads, named for a screen reader. `words` are escaped."""
     return f'<span class="mask" role="img" aria-label="{words["mask"]}">{_MASK_GROUP * 3}</span>'
@@ -917,7 +922,8 @@ class PairingPage:
                 f'<div class="panel">{"".join(forget)}</div></section></details>{foot}</main>')
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
                 f'content="width=device-width, initial-scale=1"><title>{NAME}</title>{_TAB_ICON}<style>{_STYLE}'
-                f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
+                f"</style><noscript><style>{_NOSCRIPT_STYLE}</style></noscript><script>{_THEME_READ}</script></head>"
+                f"<body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def _card(self, words, token, paused):
         """The card «Este PC» (placement A, frames A1 to A6): the pause form, or the resume form while paused, then,
