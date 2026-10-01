@@ -470,6 +470,8 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
            ".arcade i:nth-of-type(3){bottom:6px;left:6px}.arcade i:nth-of-type(4){bottom:6px;right:6px}\n"
            ".qr2{display:block;width:264px;height:264px;outline:4px solid var(--px-line)}\n"
            "@media (max-width:399px){.qr2{width:231px;height:231px}}\n"
+           # Under 360 px the code is 198 px, 6 px a module, so the frame stays inside a 320 px window's gutters.
+           "@media (max-width:359px){.qr2{width:198px;height:198px}}\n"
            "@media (min-width:880px){.qr2{width:min(330px,calc(clamp(340px,34vw,522px) - 82px));"
            "height:min(330px,calc(clamp(340px,34vw,522px) - 82px))}}\n"
            ".sponsor-cap{margin:0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
@@ -847,7 +849,8 @@ class PairingPage:
         # Beside a watcher the state line carries the pause it was rendered with, which the poll compares.
         paused = "" if seen is None else f' data-paused="{str(_paused(seen)).lower()}"'
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in one fold
-        # under it; the credit and quit at the foot. The title row reads the program's name, its sentence under it.
+        # under it; the credit opens the top bar, and the quit sits at the foot, only beside a quit. The title row reads
+        # the program's name, its sentence under it.
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
                 f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
