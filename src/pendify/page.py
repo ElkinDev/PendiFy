@@ -33,7 +33,16 @@ ICON_URI = "data:image/png;base64," + icon.PNG_32
 _TAB_ICON = f'<link rel="icon" type="image/png" href="{ICON_URI}">'
 FENCE_HEADERS = (("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
                  ("Content-Security-Policy", POLICY), ("X-Content-Type-Options", "nosniff"))
+# The program's name (owner 2026-10-01): the title and the h1 of the pairing page and of the stopped page.
+NAME = "PendiFy"
+# The foot's credit: the creator's handle and the repository, a link out that opens in a new tab with no opener and
+# no referrer. A link loads nothing, so the policy above is unchanged.
+CREATOR = "ElkinDev"
+REPOSITORY = "https://github.com/ElkinDev/PendiFy"
+# The address the linked page's sponsored QR encodes.
+SPONSOR_ADDRESS = "https://pendiapp.com"
 
+# "title" is the sentence under the program's name, the tagline; NAME is the title and the h1 of both documents.
 WORDS = {
     "es": {
         "title": "Avisos de este PC",
@@ -42,6 +51,15 @@ WORDS = {
         "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
         "show_code": "Mostrar el código",
+        "hide_code": "Ocultar el código",
+        "mask": "Clave oculta",
+        "fold": "Más opciones: escribir los valores del enlace u olvidar este PC",
+        "credit": "Creado por",
+        "sponsor_by": "Patrocinado por Pendiapp.com",
+        "sponsor_cap": "Escanéalo para abrir pendiapp.com",
+        "sponsor_qr": "Código QR de pendiapp.com",
+        "sponsor_note": "Este PC ya está enlazado, por eso ya no se muestra su código. «Olvidar este PC», en «Más "
+                        "opciones», crea un código nuevo para enlazar.",
         "theme_toggle": "Cambiar entre tema claro y oscuro",
         "language": "Idioma",
         "state_waiting": "Esperando la confirmación en el teléfono.",
@@ -114,6 +132,15 @@ WORDS = {
         "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
         "show_code": "Show the code",
+        "hide_code": "Hide the code",
+        "mask": "Key hidden",
+        "fold": "More options: type the link values, or forget this PC",
+        "credit": "Created by",
+        "sponsor_by": "Sponsored by Pendiapp.com",
+        "sponsor_cap": "Scan it to open pendiapp.com",
+        "sponsor_qr": "QR code of pendiapp.com",
+        "sponsor_note": "This PC is already linked, so its code is no longer shown. «Forget this PC», under «More "
+                        "options», makes a new code to link.",
         "theme_toggle": "Switch between light and dark theme",
         "language": "Language",
         "state_waiting": "Waiting for the confirmation on the phone.",
@@ -242,13 +269,8 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
           ".qr{display:block;width:100%;max-width:288px;height:auto;border-radius:12px;"
           "box-shadow:0 0 0 1px var(--hair)}\n"
-          ".key-card details{justify-self:stretch;text-align:center}\n"
-          ".shown{display:grid;justify-items:center;gap:16px}\n"
           ".key{display:grid;gap:2px;margin:0}\n"
           ".key-label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink2)}\n"
-          ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
-          ".key-card summary::-webkit-details-marker{display:none}\n"
-          ".key-card details[open] summary{margin-bottom:16px}\n"
           # The header's actions as pendiapp.com's .nav-actions holds them: the language switch, then the theme button.
           ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}\n"
           # pendiapp.com's language switch (assets/styles.css, .langsw), its variables mapped to the page's own:
@@ -281,12 +303,12 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".px{display:block;width:48px;height:48px}\n"
           ".pl{fill:var(--px-line)}\n"
           "form{margin:0}\n"
-          "button,.key-card summary{min-height:44px;padding:10px 24px;border:1px solid transparent;"
+          "button{min-height:44px;padding:10px 24px;border:1px solid transparent;"
           "border-radius:999px;background:var(--tonal);color:var(--on-tonal);font:500 14px/20px system-ui,"
           "sans-serif;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1),box-shadow 160ms ease}\n"
-          "button:hover,.key-card summary:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
-          "button:active,.key-card summary:active{transform:scale(.97)}\n"
-          "button:focus-visible,.key-card summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          "button:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
+          "button:active{transform:scale(.97)}\n"
+          "button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
           "form[action='/check'] button,form[action='/relink'] button{width:100%;background:var(--brand);"
           "color:var(--on-brand)}\n"
           "form[action='/forget'] button{background:transparent;border-color:var(--line);color:var(--danger)}\n"
@@ -306,14 +328,10 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".foot{display:flex;justify-content:flex-end;margin-top:24px;padding-top:12px;"
           "border-top:1px solid var(--hair)}\n"
           '@media (prefers-reduced-motion:no-preference){#state[data-shown^="true"]::before{animation:breathe 2.4s '
-          "ease-in-out infinite}.px{animation:hop .5s steps(1,end) 4}.px:nth-child(2){animation-delay:.12s}"
-          ".px:nth-child(3){animation-delay:.24s}.px:nth-child(4){animation-delay:.36s}}\n"
+          "ease-in-out infinite}}\n"
           "@keyframes breathe{50%{opacity:.3}}\n"
-          "@keyframes hop{50%{transform:translateY(-3px)}}\n"
           "@media (min-width:880px){body{padding:56px 32px 48px}h1{font-size:36px;line-height:44px}"
-          ".link:has(.key-card){display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:repeat(9,"
-          "auto) 1fr;column-gap:64px}.link>*{grid-column:1}.link>.key-card{grid-column:2;grid-row:1/-1;"
-          "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
+          "form[action='/check'] button,form[action='/relink'] button{width:auto}"
           ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
           "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n"
           # The card «Este PC» of placement A (controls design, round 2 of 2026-10-01, its separate style block
@@ -352,6 +370,110 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "font-size:14px;line-height:20px}\n"
           ".log time{color:var(--ink2);font-variant-numeric:tabular-nums}\n"
           ".log .warn{color:var(--danger)}\n")
+# The design sheet of 2026-10-01, round 2: its rules as drawn, after every rule above as its own block was, with the
+# seat's corrections after its review: the sponsored QR's side follows its column, the watcher line keeps its 40rem
+# unless paused, ten explicit rows before the last, the fold's paragraphs capped at 71ch, and the four moves'
+# keyframes inside the reduced-motion guard with the rules that run them.
+# Width: 85 % of the window at every desktop width, never narrower than 1040 px, no upper cap; the code's column grows
+# with the window and the code with it, up to 480 px. Column 1 is one measure: two tracks and a 24 px gutter, every
+# block spans both and the boxes lose their 40rem cap, while the two paragraphs keep theirs (.intro 46ch, .scan 40ch).
+# From a 1600 px window «Este PC» and «Actividad» share one row, a track each, as the two panels of the fold do; dense
+# placement draws the log card beside «Este PC» while the markup keeps its order, so the narrow page is unchanged.
+_STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
+           ".link:has(.key-card),.link:has(.side){display:grid;grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr) "
+           "64px clamp(340px,34vw,522px);grid-template-rows:repeat(10,auto) 1fr;grid-auto-flow:row dense;"
+           "column-gap:0}\n"
+           ".link>*{grid-column:1/4}\n"
+           ".link>.key-card,.link>.side{grid-column:5;grid-row:1/-1;align-self:start;margin:0}\n"
+           ".link:has(.key-card)>:is(#state,#watch[data-paused],.pc,.log-card),"
+           ".link:has(.side)>:is(#state,#watch[data-paused],.pc,.log-card){max-width:none}\n"
+           ".key-card .qr{max-width:480px}}\n"
+           "@media (min-width:1600px){.link:has(>.pc):has(>.log-card)>.pc{grid-column:1;align-content:start}\n"
+           ".link:has(>.pc):has(>.log-card)>.log-card{grid-column:3;margin-top:24px}}\n"
+           # The code is shown; the key sits under the mask until «Mostrar el código» (the script sets data-shown).
+           ".key{justify-items:center;text-align:center}\n"
+           ".key-val{display:grid;place-items:center;min-height:32px}\n"
+           ".key-val>*{grid-area:1/1}\n"
+           '.key[data-shown="false"] .code{visibility:hidden}\n'
+           '.key[data-shown="true"] .mask{visibility:hidden}\n'
+           ".mask{display:flex;align-items:flex-end;gap:10px}\n"
+           ".mask .grp{display:flex;align-items:flex-end;gap:2px}\n"
+           ".mask svg{display:block;flex:none}\n"
+           # Each figure its own move, once every 30 s, for as long as the page is open; still when the system asks
+           # for less motion.
+           "@media (prefers-reduced-motion:no-preference){\n"
+           ".px{transform-origin:50% 100%}\n"
+           ".px:nth-child(1){animation:px-archer 30s steps(1,end) infinite}\n"
+           ".px:nth-child(2){animation:px-knight 30s steps(1,end) infinite}\n"
+           ".px:nth-child(3){animation:px-mage 30s steps(1,end) infinite}\n"
+           ".px:nth-child(4){animation:px-creature 30s steps(1,end) infinite}\n"
+           "@keyframes px-archer{0%{transform:none}2%{transform:scaleX(-1)}5%,100%{transform:none}}\n"
+           "@keyframes px-knight{0%{transform:none}5%{transform:translateX(3px)}6.5%{transform:translateX(6px)}"
+           "8%{transform:translateX(3px)}9.5%,100%{transform:none}}\n"
+           "@keyframes px-mage{0%{transform:none}10%{transform:translateY(-3px)}11.5%{transform:translateY(-6px)}"
+           "16%{transform:translateY(-3px)}17.5%,100%{transform:none}}\n"
+           "@keyframes px-creature{0%{transform:none}18%{transform:translate(3px,-6px)}"
+           "19%{transform:translate(3px,-3px)}20%{transform:translate(0,-6px)}21%{transform:translate(0,-3px)}"
+           "22%{transform:translate(-3px,-6px)}23%{transform:translate(-3px,-3px)}24%,100%{transform:none}}}\n"
+           # The typed link and «Olvidar este PC» in one panel, folded.
+           ".fold{margin-top:32px;border-radius:16px;background:var(--card);border:1px solid var(--hair)}\n"
+           ".fold>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;"
+           "padding:16px 20px;border-radius:15px;list-style:none;cursor:pointer;font-weight:500;"
+           "transition:box-shadow 160ms ease}\n"
+           ".fold>summary::-webkit-details-marker{display:none}\n"
+           '.fold>summary::after{content:"";flex:none;width:8px;height:8px;margin:-4px 4px 0 0;border:solid '
+           "var(--ink2);border-width:0 2px 2px 0;transform:rotate(45deg)}\n"
+           ".fold[open]>summary::after{margin-top:4px;transform:rotate(-135deg)}\n"
+           "@media (prefers-reduced-motion:no-preference){.fold>summary::after{transition:transform 200ms "
+           "cubic-bezier(.23,1,.32,1),margin 200ms cubic-bezier(.23,1,.32,1)}}\n"
+           ".fold>summary:hover{box-shadow:inset 0 0 0 999px var(--hover)}\n"
+           ".fold>summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+           ".fold[open]>summary{border-radius:15px 15px 0 0}\n"
+           ".fold .more{margin:0;padding:0 20px 20px;gap:0;border-top:1px solid var(--hair)}\n"
+           ".fold .panel{padding:20px 0 0;border:0;border-radius:0;background:none}\n"
+           ".fold .panel+.panel{margin-top:20px;border-top:1px solid var(--hair)}\n"
+           ".fold .panel p{max-width:71ch}\n"
+           "@media (min-width:880px){.fold{margin-top:48px}.fold>summary{padding:16px 24px}.fold .more{padding:0 24px "
+           "24px;gap:0 48px}.fold .panel{padding:24px 0 0}.fold .panel+.panel{margin:0;padding-left:48px;border-top:0;"
+           "border-left:1px solid var(--hair)}}\n"
+           # The program's name in the title row, and the sentence it took the place of under it.
+           ".tagline{margin:0 0 16px;font-size:16px;line-height:24px;font-weight:500;color:var(--ink)}\n"
+           "@media (min-width:880px){.tagline{font-size:18px;line-height:28px}}\n"
+           # The creator and the repository at the foot, «Salir» stays right.
+           ".foot{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px 24px}\n"
+           ".credit{margin:0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+           ".credit b{font-weight:600;color:var(--ink)}\n"
+           ".credit a{color:var(--brand);text-decoration:underline;text-decoration-thickness:1px;"
+           "text-underline-offset:3px;border-radius:4px}\n"
+           ".credit a:hover{text-decoration-thickness:2px}\n"
+           ".credit a:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+           # The linked page keeps its right column: a QR to pendiapp.com in a pixel arcade frame of its own, the four
+           # figures under it, and why the pairing code is gone. The QR is dark on light in both themes; from 880 px
+           # its side follows the column, so the frame never runs past the page.
+           ".side{display:grid;gap:16px;margin:32px 0 0}\n"
+           ".sponsor{display:grid;justify-items:center;gap:16px;margin:0;padding:20px;border-radius:16px;"
+           "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
+           ".sponsor-by{position:relative;z-index:1;margin:0 0 -32px;padding:6px 18px 9px;background:#8E3D96;"
+           'color:#FFFFFF;font:600 12px/16px ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.02em;'
+           "clip-path:polygon(0 0,100% 0,100% 4px,calc(100% - 4px) 4px,calc(100% - 4px) calc(100% - 4px),"
+           "100% calc(100% - 4px),100% 100%,0 100%,0 calc(100% - 4px),4px calc(100% - 4px),4px 4px,0 4px);"
+           "box-shadow:inset 0 -3px 0 #40277C}\n"
+           ".arcade{position:relative;padding:28px 20px 20px;background:#6D28D9;box-shadow:inset 4px 4px 0 #C3B1F7,"
+           "inset -4px -4px 0 #40277C;clip-path:polygon(8px 0,calc(100% - 8px) 0,calc(100% - 8px) 4px,"
+           "calc(100% - 4px) 4px,calc(100% - 4px) 8px,100% 8px,100% calc(100% - 8px),calc(100% - 4px) "
+           "calc(100% - 8px),calc(100% - 4px) calc(100% - 4px),calc(100% - 8px) calc(100% - 4px),calc(100% - 8px) "
+           "100%,8px 100%,8px calc(100% - 4px),4px calc(100% - 4px),4px calc(100% - 8px),0 calc(100% - 8px),0 8px,"
+           "4px 8px,4px 4px,8px 4px)}\n"
+           ".arcade i{position:absolute;width:8px;height:8px;background:#FBBE3C;"
+           "box-shadow:inset -2px -2px 0 #A5510B}\n"
+           ".arcade i:nth-of-type(1){top:6px;left:6px}.arcade i:nth-of-type(2){top:6px;right:6px}"
+           ".arcade i:nth-of-type(3){bottom:6px;left:6px}.arcade i:nth-of-type(4){bottom:6px;right:6px}\n"
+           ".qr2{display:block;width:264px;height:264px;outline:4px solid var(--px-line)}\n"
+           "@media (max-width:399px){.qr2{width:231px;height:231px}}\n"
+           "@media (min-width:880px){.qr2{width:min(330px,calc(clamp(340px,34vw,522px) - 82px));"
+           "height:min(330px,calc(clamp(340px,34vw,522px) - 82px))}}\n"
+           ".sponsor-cap{margin:0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
+           ".side .note{margin:0}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
 # beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
 # a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
@@ -382,11 +504,14 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "li.append(t,x);o.insertBefore(li,o.firstChild);last=l.seq;}g.dataset.seq=String(last);"
            "while(o.children.length>50)o.lastElementChild.remove();tabStop();}})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
-           # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
-           # toggle, so a close by hand leaves none running.
-           "const d=document.querySelector('.key-card details');let hide;"
-           "if(d)d.addEventListener('toggle',()=>{clearTimeout(hide);"
-           "if(d.open)hide=setTimeout(()=>{d.open=false;},60000);});"
+           # The key shows for a minute: the reveal sets data-shown on the key, which swaps the mask for the code, and
+           # flips its own label; 60 s after a show the key is masked again; one timer, cleared on every press, so a
+           # hide by hand leaves none running. The sheet's function is named showKey here, since the script's first
+           # line already declares a const named shown.
+           "const k=document.querySelector('.key'),r=document.querySelector('.reveal');let hide;"
+           "function showKey(on){k.dataset.shown=String(on);r.textContent=on?r.dataset.hide:r.dataset.show;"
+           "clearTimeout(hide);if(on)hide=setTimeout(()=>showKey(false),60000);}"
+           "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
            # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
            # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
            # its localStorage is a new origin each time. The server's value, served as data-theme, wins on the next
@@ -449,8 +574,8 @@ _FIGURES = (
 )
 
 
-def _figure(rows):
-    """One figure as an inline svg of 48 px: a path per colour, each a run of same-colour pixels per row."""
+def _paths(rows):
+    """A pixel drawing's paths: one per colour, each a run of same-colour pixels per row."""
     runs = {}
     for y, row in enumerate(rows):
         x = 0
@@ -462,13 +587,70 @@ def _figure(rows):
             while x < len(row) and row[x] == row[start]:
                 x += 1
             runs.setdefault(row[start], []).append(f"M{start} {y}h{x - start}v1h-{x - start}z")
-    paths = "".join(f'<path class="pl" d="{"".join(d)}"/>' if key == "o" else
-                    f'<path fill="{_FIGURE_COLOURS[key]}" d="{"".join(d)}"/>' for key, d in runs.items())
+    return "".join(f'<path class="pl" d="{"".join(d)}"/>' if key == "o" else
+                   f'<path fill="{_FIGURE_COLOURS[key]}" d="{"".join(d)}"/>' for key, d in runs.items())
+
+
+def _figure(rows):
+    """One figure as an inline svg of 48 px."""
     return (f'<svg class="px" viewBox="0 0 {len(rows[0])} 16" width="48" height="48" shape-rendering="crispEdges">'
-            f"{paths}</svg>")
+            f"{_paths(rows)}</svg>")
 
 
+# The party holds the four figures and nothing else, so .px:nth-child(1) to (4) are the archer, the knight, the mage
+# and the creature, each with its own move.
 _PARTY = '<div class="party" aria-hidden="true">' + "".join(_figure(rows) for rows in _FIGURES) + "</div>"
+
+# The mask over the key: one 8 by 8 head per character, the party's four in small (hood, helm, hat, creature), twelve
+# in three groups of four. The heads are the same whatever the key, so the mask tells nothing of it; a screen reader
+# reads the mask's name, never its drawings.
+_HEADS = (
+    ("..oooo..", ".oppppo.", "oppppppo", "opdddddo", "opdwdwdo", "opdddddo", ".oppppo.", "..oooo.."),
+    ("...pp...", ".oooooo.", "ohhsssso", "ohssssso", "osooooso", "ohssssso", ".osssso.", "..oooo.."),
+    ("...oo...", "..ovvo..", ".ovvvvo.", "ollllllo", ".owwwwo.", ".odwwdo.", ".owwwwo.", "..oooo.."),
+    ("..y..y..", ".oooooo.", "obbbbbbo", "obwwbbbo", "obwobbco", "obbbbcco", ".obbbbo.", "..oooo.."),
+)
+_MASK_GROUP = ('<span class="grp">' + "".join('<svg class="mx" viewBox="0 0 8 8" width="16" height="16" '
+                                              f'shape-rendering="crispEdges" aria-hidden="true">{_paths(rows)}</svg>'
+                                              for rows in _HEADS) + "</span>")
+
+
+# With scripts blocked the reveal does nothing, so the key reads as it did before the mask: the code shown, the mask
+# and the reveal gone. The code's rule repeats the mask's own selector and comes later, so it wins.
+_NOSCRIPT_STYLE = '.key[data-shown="false"] .code{visibility:visible}.mask,.reveal{display:none}'
+
+
+def _mask(words):
+    """The mask over the key, three groups of the four heads, named for a screen reader. `words` are escaped."""
+    return f'<span class="mask" role="img" aria-label="{words["mask"]}">{_MASK_GROUP * 3}</span>'
+
+
+def _sponsor_runs():
+    """The sponsored QR's dark modules as one path's runs, one module tall, inside the quiet zone; and the side of
+    the whole square, quiet zone included."""
+    modules = qr.encode(SPONSOR_ADDRESS.encode("ascii")).modules
+    runs = []
+    for y, row in enumerate(modules):
+        x = 0
+        while x < len(row):
+            if not row[x]:
+                x += 1
+                continue
+            start = x
+            while x < len(row) and row[x]:
+                x += 1
+            runs.append(f"M{start + qr.QUIET_ZONE} {y + qr.QUIET_ZONE}h{x - start}v1h-{x - start}z")
+    return "".join(runs), len(modules) + 2 * qr.QUIET_ZONE
+
+
+_SPONSOR_RUNS, _SPONSOR_SIDE = _sponsor_runs()
+
+
+def _sponsor_qr(words):
+    """The sponsored QR: square dark modules on a light field, the same in both themes. `words` are escaped."""
+    return (f'<svg class="qr2" viewBox="0 0 {_SPONSOR_SIDE} {_SPONSOR_SIDE}" role="img" '
+            f'aria-label="{words["sponsor_qr"]}" shape-rendering="crispEdges"><rect width="{_SPONSOR_SIDE}" '
+            f'height="{_SPONSOR_SIDE}" fill="#FFFFFF"/><path fill="#1E1533" d="{_SPONSOR_RUNS}"/></svg>')
 
 
 def language(accept_language):
@@ -664,10 +846,10 @@ class PairingPage:
         token = html.escape(self.token)
         # Beside a watcher the state line carries the pause it was rendered with, which the poll compares.
         paused = "" if seen is None else f' data-paused="{str(_paused(seen)).lower()}"'
-        # What this is and what to do, with the QR card beside it on a wide window; the two other roads in their
-        # own cards under it; quit at the foot. The words and their order are the page's before the design.
-        link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{words["title"]}</h1>'
-                f"</div>", f'<p class="intro">{words["intro"]}</p>',
+        # What this is and what to do, with the QR card beside it on a wide window; the two other roads in one fold
+        # under it; the credit and quit at the foot. The title row reads the program's name, its sentence under it.
+        link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
+                f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
                 f'{str(snapshot["relinkOffered"]).lower()}"{paused} data-closed="{words["state_closed"]}">'
                 f'{words[_state_word(snapshot, seen)]}</p>']
@@ -691,12 +873,14 @@ class PairingPage:
             if drawn is None:  # the scene is drawn for version 3 only
                 drawn = qr.svg(modules, labelledby="scan")
             link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
-                     # The QR and the key are hidden until their person asks (a page shown on a stream prints
-                     # neither): a native details, closed, its summary the one control; _SCRIPT closes it again
-                     # 60 s after it opens.
-                     f'<figure class="key-card"><details><summary>{words["show_code"]}</summary><div class="shown">'
-                     f'{drawn}<p class="key"><span class="key-label">{words["code_label"]}</span> <span class="code">'
-                     f'{codes.display(secret)}</span></p>{_PARTY}</div></details></figure>',
+                     # The code is shown (owner 2026-10-01); the key's text sits under the mask until its person
+                     # presses the reveal, a real button whose label says what a press does; _SCRIPT masks the key
+                     # again 60 s after a show.
+                     f'<figure class="key-card">{drawn}<p class="key" data-shown="false"><span class="key-label">'
+                     f'{words["code_label"]}</span> <span class="key-val">{_mask(words)}<span class="code" id="code">'
+                     f'{codes.display(secret)}</span></span></p><button type="button" class="reveal" '
+                     f'aria-controls="code" data-show="{words["show_code"]}" data-hide="{words["hide_code"]}">'
+                     f'{words["show_code"]}</button>{_PARTY}</figure>',
                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]
             if snapshot["buttonRefused"]:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
@@ -704,6 +888,14 @@ class PairingPage:
             link.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
         if log_card is not None and last:
             link.append(log_card)
+        if snapshot["linked"]:
+            # The linked page keeps its right column: the sponsored QR with the party under it and, unless the relink
+            # is offered (its state line says the account refuses this PC), why the pairing code is gone.
+            note = "" if snapshot["relinkOffered"] else f'<p class="note">{words["sponsor_note"]}</p>'
+            link.append(f'<aside class="side"><figure class="sponsor"><figcaption class="sponsor-by">'
+                        f'{words["sponsor_by"]}</figcaption><div class="arcade"><i></i><i></i><i></i><i></i>'
+                        f'{_sponsor_qr(words)}</div><p class="sponsor-cap">{words["sponsor_cap"]}</p>{_PARTY}'
+                        f"</figure>{note}</aside>")
         typed = [f"<h2>{words['typed_title']}</h2>",
                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
                                        f'autocomplete="off"></label><label>{words["secret_label"]} <input '
@@ -714,18 +906,24 @@ class PairingPage:
         forget = [f"<h2>{words['forget']}</h2>", f"<p>{words['forget_sentence']}</p>",
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
-        foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
+        quit_form = "" if self.on_quit is None else _form("quit", token, quit_button)
+        foot = (f'<footer class="foot"><p class="credit">{words["credit"]} <b>{CREATOR}</b> · <a href="{REPOSITORY}" '
+                f'target="_blank" rel="noopener noreferrer">{REPOSITORY.removeprefix("https://")}</a></p>{quit_form}'
+                "</footer>")
+        # The typed link and the forget in one fold, open when the typed values were refused so the note shows.
+        fold = " open" if snapshot["typedRefused"] else ""
         bar = (f'<header class="bar">{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
                f'type="button" aria-pressed="false" '
                f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
         theme = self.state.theme()
         kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
-        body = (f'<main class="page">{bar}<section class="link">{"".join(link)}</section><section class="more">'
-                f'<div class="panel">{"".join(typed)}</div><div class="panel">{"".join(forget)}</div></section>'
-                f"{foot}</main>")
+        body = (f'<main class="page">{bar}<section class="link">{"".join(link)}</section><details class="fold"{fold}>'
+                f'<summary>{words["fold"]}</summary><section class="more"><div class="panel">{"".join(typed)}</div>'
+                f'<div class="panel">{"".join(forget)}</div></section></details>{foot}</main>')
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
-                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title>{_TAB_ICON}<style>{_STYLE}'
-                f"</style><script>{_THEME_READ}</script></head><body>{body}<script>{_SCRIPT}</script></body></html>")
+                f'content="width=device-width, initial-scale=1"><title>{NAME}</title>{_TAB_ICON}<style>{_STYLE}'
+                f"</style><noscript><style>{_NOSCRIPT_STYLE}</style></noscript><script>{_THEME_READ}</script></head>"
+                f"<body>{body}<script>{_SCRIPT}</script></body></html>")
 
     def _card(self, words, token, paused):
         """The card «Este PC» (placement A, frames A1 to A6): the pause form, or the resume form while paused, then,
@@ -748,8 +946,8 @@ class PairingPage:
         theme = self.state.theme()
         kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
         return (f'<!doctype html><html lang="{lang}"{kept}><head><meta charset="utf-8"><meta name="viewport" '
-                f'content="width=device-width, initial-scale=1"><title>{words["title"]}</title>{_TAB_ICON}<style>{_STYLE}'
-                f'</style><script>{_THEME_READ}</script></head><body><h1>{words["title"]}</h1><p>{words["stopped"]}</p>'
+                f'content="width=device-width, initial-scale=1"><title>{NAME}</title>{_TAB_ICON}<style>{_STYLE}'
+                f'</style><script>{_THEME_READ}</script></head><body><h1>{NAME}</h1><p>{words["stopped"]}</p>'
                 f'<p>{words["start_again"]}</p></body></html>')
 
     def set_theme(self, choice):

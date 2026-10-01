@@ -93,7 +93,7 @@ class PageLanguageTest(unittest.TestCase):
         words = page.WORDS[lang]
         if document is not None:
             self.assertIn(f'<html lang="{lang}"><head>', document)
-            self.assertIn(f"<title>{html.escape(words['title'])}</title>", document)
+            self.assertIn(f'<p class="tagline">{html.escape(words["title"])}</p>', document)
             self.assertIn(html.escape(words["log_title"]), document)
             # One entry marked in the body; the style's own rule names the attribute too.
             self.assertEqual(document.split("</head>")[1].count('aria-current="true"'), 1)
