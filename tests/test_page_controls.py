@@ -335,6 +335,33 @@ class PageControlsTest(unittest.TestCase):
         # attribute (round 2, the sheet's paused block).
         self.assertNotIn("data-paused=", self.call("GET", "/", served=bare)[2])
 
+    def test_the_poll_reloads_the_page_when_the_start_with_windows_differs_from_the_switch(self):
+        # Mutation: the poll ignores the start with Windows. Red: a second tab keeps the switch off while the
+        # registry holds the value turned on in the first.
+        poll = page._SCRIPT[:page._SCRIPT.index("location.reload();")]
+        self.assertIn("const sw=document.querySelector('input[name=autostart]');", poll[:poll.index("setInterval(")])
+        self.assertTrue(poll.endswith("||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.checked)))"))
+        self.assertEqual(page._SCRIPT.count("j.autostart"), 2)  # both in the guarded compare, none elsewhere
+        # A page with no switch: the compare is behind sw, the only switch. With no available Autostart neither the
+        # page nor /state carries it; a page with no watcher draws no switch, though its /state answers autostart.
+        controls = {"watch": lambda: dict(self.snapshot), "on_pause": lambda: None, "on_resume": lambda: None}
+        saved = sys.modules.get("winreg")
+        sys.modules["winreg"] = None
+        self.addCleanup(lambda: sys.modules.pop("winreg", None) if saved is None else
+                        sys.modules.__setitem__("winreg", saved))
+        unavailable = self.serve(autostart=autostart.Autostart(executable=sys.executable), **controls)
+        self.assertNotIn('name="autostart"', self.call("GET", "/", served=unavailable)[2])
+        self.assertNotIn("autostart", self.state_json(served=unavailable))
+        bare = self.serve(on_pause=lambda: None, on_resume=lambda: None, autostart=self.autostart)
+        self.assertNotIn('name="autostart"', self.call("GET", "/", served=bare)[2])
+        self.assertIs(self.state_json(served=bare)["autostart"], False)
+
+    def test_a_switch_post_that_fails_puts_the_switch_back_and_reloads_nothing(self):
+        # Mutation: the catch left empty. Red: the switch stays flipped with nothing written.
+        self.assertIn("fetch('/autostart',{method:'POST',body:new URLSearchParams({token:f.value,"
+                      "on:sw.checked?'1':'0'})}).then(function(){location.reload();})"
+                      ".catch(function(){sw.checked=!sw.checked;});});})();", page._SCRIPT)
+
 
 if __name__ == "__main__":
     unittest.main()

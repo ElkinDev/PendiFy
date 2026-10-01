@@ -56,8 +56,10 @@ class QuietStartTest(unittest.TestCase):
 
     def test_a_quiet_start_whose_running_page_is_not_known_shows_no_box_and_exits_0(self):
         # Mutation: the box shown for the page not known yet. Red: a message box at logon.
+        # Mutation: the quiet start says the page-not-known line. Red: a page promised that it will never open.
         self.run_file.parent.mkdir(parents=True)
-        for flags, shown in ((("--quiet",), []), ((), [entry.PAGE_NOT_KNOWN_LINE])):
+        for flags, line, shown in ((("--quiet",), "already running", []),
+                                   ((), entry.PAGE_NOT_KNOWN_LINE, [entry.PAGE_NOT_KNOWN_LINE])):
             with self.subTest(flags=flags):
                 del self.boxes[:]
                 with open(self.run_file, "w", encoding="utf-8") as held:  # the winner's handle, no port ever
@@ -70,7 +72,7 @@ class QuietStartTest(unittest.TestCase):
 
                     clock, opened = main_test.FakeClock(write), []
                     result = self.started(*flags, opened=opened, clock=clock.clock, sleep=clock.sleep)
-                self.assertEqual((result, opened, self.boxes), ((0, entry.PAGE_NOT_KNOWN_LINE + "\n", ""), [], shown))
+                self.assertEqual((result, opened, self.boxes), ((0, line + "\n", ""), [], shown))
 
     def test_a_quiet_start_that_fails_still_shows_its_line(self):
         # Mutation: every box silenced under --quiet. Red: a failed start at logon says nothing.
