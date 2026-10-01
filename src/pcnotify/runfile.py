@@ -6,6 +6,10 @@ asked of the system through ctypes on Windows (os.kill there would end the proce
 A refused remove or create is told apart before it is read as another start that won the race: a config
 folder that takes no new file, or a run file still there with no live holder when the re-read window ends,
 stops this start; only a live holder's record read within the window is that other start.
+
+At its stop the holder marks its record closing, beside its pid and port, until it removes the file: a start that
+meets a closing holder waits for the file to go instead of opening a page that is closing. A record with no mark,
+as an older copy writes it, reads as not closing.
 """
 import errno
 import json
@@ -73,10 +77,11 @@ class RunFile:
         self._clock = clock
         self._sleep = sleep
         self._held = False
+        self._port = None
 
     def claim(self):
-        """None when this process now holds the file; the live holder's record, {pid, port}, when another
-        does. A refused remove or create (PermissionError on Windows: the file held open, or pending its
+        """None when this process now holds the file; the live holder's record, {pid, port, closing}, when
+        another does. A refused remove or create (PermissionError on Windows: the file held open, or pending its
         removal, by another start) is that other start only when its live record shows within
         REREAD_SECONDS. FolderNotWritable when the config folder takes no new file; OSError when the file
         can neither be created nor taken over."""
@@ -155,12 +160,35 @@ class RunFile:
                 return None
             self._sleep(REREAD_STEP)
 
+    def wait_released(self, holder, seconds):
+        """True once the run file no longer names `holder`, a live holder claim() returned closing, as a live
+        process: the file gone, its process gone, or another start's record in its place; re-read every
+        REREAD_STEP. False when it still does after `seconds`."""
+        deadline = self._clock() + seconds
+        while True:
+            record = self._live_holder()
+            if record is None or record["pid"] != holder["pid"]:
+                return True
+            if self._clock() >= deadline:
+                return False
+            self._sleep(REREAD_STEP)
+
     def publish(self, port):
         """This process's pid and its page's port, written over the claim in one move."""
+        self._write({"pid": self._pid, "port": port})
+        self._port = port
+
+    def mark_closing(self):
+        """This process's record marked closing, in the same one move: a start that meets it waits for the
+        file to go. Nothing when this process does not hold the file."""
+        if self._held:
+            self._write({"pid": self._pid, "port": self._port, "closing": True})
+
+    def _write(self, record):
         handle, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".run-", suffix=".tmp")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as out:
-                json.dump({"pid": self._pid, "port": port}, out)
+                json.dump(record, out)
             os.replace(temp, self.path)
         except BaseException:
             if os.path.exists(temp):
@@ -196,4 +224,4 @@ class RunFile:
             return None
         port = data.get("port")
         valid = isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536
-        return {"pid": pid, "port": port if valid else None}
+        return {"pid": pid, "port": port if valid else None, "closing": data.get("closing") is True}

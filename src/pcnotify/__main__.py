@@ -8,7 +8,8 @@
 
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break and on the page's quit button, which
 removes the run file and exits 0. One instance per config folder: a second start opens the running page
-and exits 0. Where no console is attached (a pythonw start), the line a start ends on is also shown in a
+and exits 0, and one made while that program is still closing after its quit waits for it to end and starts.
+Where no console is attached (a pythonw start), the line a start ends on is also shown in a
 message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
 """
@@ -26,6 +27,9 @@ from .autostart import Autostart
 
 TICK_SECONDS = 1.0
 STOP_SECONDS = 5.0
+# How long a start waits for a copy that is closing to let its run file go: one tick and the two STOP_SECONDS waits
+# of its stop, with room.
+CLOSING_WAIT_SECONDS = 15.0
 REFUSED_LINE = "refused: the pairing of this PC was not accepted; link it again from the page"
 NOT_LINKED_LINE = "not linked: start the program without arguments and link this PC first"
 ALREADY_RUNNING_LINE = "already running: opening the page of the program that runs"
@@ -152,11 +156,15 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
     try:
         holder = run.claim()
+        if holder is not None and holder["closing"] and run.wait_released(holder, CLOSING_WAIT_SECONDS):
+            holder = run.claim()  # the closing copy let its file go: this start claims it as a first one does
     except runfile.FolderNotWritable as refused:
         return _ends(FOLDER_FAILED_LINE.format(path=refused.filename), 1, show)
     except OSError:
         return _ends(CLAIM_FAILED_LINE.format(path=run.path), 1, show)
     if holder is not None:
+        if holder["closing"]:  # still closing at the bound: its page is going, so it is never opened
+            return _ends(QUIET_RUNNING_LINE if args.quiet else PAGE_NOT_KNOWN_LINE, 0, calm)
         port = holder["port"] if holder["port"] is not None else run.holder_port(holder)
         if port is None:  # a winner with no page yet: nothing is opened; a quiet start promises no page either
             return _ends(QUIET_RUNNING_LINE if args.quiet else PAGE_NOT_KNOWN_LINE, 0, calm)
@@ -189,6 +197,10 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             pass
         finally:
             stop.set()
+            try:  # first, so a start made while this one stops waits for it instead of opening a closing page
+                run.mark_closing()
+            except OSError:
+                pass  # unmarked, a start meanwhile opens this page as before; the stop goes on
             if watching.is_alive():
                 watching.join(STOP_SECONDS)
             alerter.flush(STOP_SECONDS)
