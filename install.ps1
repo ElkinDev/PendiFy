@@ -1,25 +1,25 @@
-# pcnotify installer for Windows. No administrator, nothing machine-wide, no policy change.
+# PendiFy installer for Windows. No administrator, nothing machine-wide, no policy change.
 # It runs as a file and as text fetched from the repository and piped into PowerShell, so it takes
 # no parameters; its options are environment variables:
-#   PCNOTIFY_SOURCE    what pip installs (default: the repository's main branch as a zip)
-#   PCNOTIFY_DRYRUN=1  print every step as a [plan] line and change nothing
-#   PCNOTIFY_NOSTART=1 leave the program stopped at the end
-#   PCNOTIFY_RUN_KEY   the key path under HKCU of the start with Windows, for test runs
+#   PENDIFY_SOURCE    what pip installs (default: the repository's main branch as a zip)
+#   PENDIFY_DRYRUN=1  print every step as a [plan] line and change nothing
+#   PENDIFY_NOSTART=1 leave the program stopped at the end
+#   PENDIFY_RUN_KEY   the key path under HKCU of the start with Windows, for test runs
 # It never creates the start with Windows; one that exists is rewritten with this install's start line.
 # The file is pure ASCII: Windows PowerShell 5.1 reads a file with no byte order mark in the
 # system code page, so the messages are Spanish written without accented letters.
 
 & {
-    $Repo = 'ElkinDev/pcnotify'
+    $Repo = 'ElkinDev/PendiFy'
     $DefaultSource = "https://github.com/$Repo/archive/refs/heads/main.zip"
     $PythonDownloads = 'https://www.python.org/downloads/'
     $WingetArgs = @('install', '--id', 'Python.Python.3.13', '-e', '--scope', 'user', '--silent',
         '--accept-package-agreements', '--accept-source-agreements')
     $WingetFolder = 'Python313'
-    $ShortcutName = 'pcnotify.lnk'
-    $StartArgs = '-m pcnotify'
+    $ShortcutName = 'PendiFy.lnk'
+    $StartArgs = '-m pendify'
     $RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run'
-    $RunName = 'pcnotify'
+    $RunName = 'PendiFy'
     $ProbeSeconds = 15
     # The interpreter pip used, one line, read by uninstall.ps1 so it removes from the same Python.
     $RecordName = 'python.txt'
@@ -28,7 +28,7 @@
         return [bool]($Value -and $Value.Trim() -ne '' -and $Value.Trim() -ne '0')
     }
 
-    $DryRun = Test-Flag $env:PCNOTIFY_DRYRUN
+    $DryRun = Test-Flag $env:PENDIFY_DRYRUN
     $LocalAppData = $env:LOCALAPPDATA
     if (-not $LocalAppData) { $LocalAppData = [Environment]::GetFolderPath('LocalApplicationData') }
     $AppData = $env:APPDATA
@@ -42,10 +42,10 @@
         return $Text
     }
 
-    # The start with Windows is the per-user Run value, which only the program's page creates. PCNOTIFY_RUN_KEY
+    # The start with Windows is the per-user Run value, which only the program's page creates. PENDIFY_RUN_KEY
     # replaces its key path under HKCU, for test runs.
     function Get-RunKey {
-        $key = $env:PCNOTIFY_RUN_KEY
+        $key = $env:PENDIFY_RUN_KEY
         if ($key) { $key = $key.Trim() }
         if (-not $key) { $key = $RunKey }
         return 'HKCU:\' + $key
@@ -143,8 +143,8 @@
     }
 
     function Invoke-Install {
-        Say 'pcnotify: instalador'
-        if ($DryRun) { Say 'Modo de prueba (PCNOTIFY_DRYRUN): se muestra el plan y no se cambia nada.' }
+        Say 'PendiFy: instalador'
+        if ($DryRun) { Say 'Modo de prueba (PENDIFY_DRYRUN): se muestra el plan y no se cambia nada.' }
         Say 'Buscando Python 3.10 o mas nuevo...'
         $info = Find-Python $true
         if ($info) {
@@ -177,23 +177,23 @@
             }
         }
 
-        $source = $env:PCNOTIFY_SOURCE
+        $source = $env:PENDIFY_SOURCE
         if ($source) { $source = $source.Trim() }
         if (-not $source) { $source = $DefaultSource }
         # --force-reinstall: a paste replaces the code even when the package version is unchanged; --no-deps: none to fetch.
         $pipArgs = @('-m', 'pip', 'install', '--user', '--upgrade', '--force-reinstall', '--no-deps', '--no-warn-script-location', $source)
-        Say 'Instalando pcnotify con pip...'
+        Say 'Instalando PendiFy con pip...'
         if ($DryRun) {
             Plan ((Format-Arg $python) + ' ' + (($pipArgs | ForEach-Object { Format-Arg $_ }) -join ' '))
         } else {
             & $python @pipArgs | Out-Host
             if ($LASTEXITCODE -ne 0) {
-                Say ('pip no pudo instalar pcnotify (codigo ' + $LASTEXITCODE + ').')
+                Say ('pip no pudo instalar PendiFy (codigo ' + $LASTEXITCODE + ').')
                 return 1
             }
         }
 
-        $recordFile = Join-Path (Join-Path $AppData 'pcnotify') $RecordName
+        $recordFile = Join-Path (Join-Path $AppData 'pendify') $RecordName
         if ($DryRun) {
             Plan ('anotar Python en ' + $recordFile)
         } else {
@@ -212,8 +212,8 @@
         # The icon pip laid beside the modules, asked of the interpreter that installed them. A failed read or a
         # missing file leaves the shortcuts with the interpreter's own icon, as before; it never stops the install.
         # Under -c the first search path entry is '', the folder the line runs in, so it goes before the lookup:
-        # a pcnotify folder there never answers for the installed package.
-        $iconArgs = @('-c', 'import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];print(os.path.join(os.path.dirname(u.find_spec(''pcnotify'').origin),''pcnotify.ico''))')
+        # a pendify folder there never answers for the installed package.
+        $iconArgs = @('-c', 'import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];print(os.path.join(os.path.dirname(u.find_spec(''pendify'').origin),''pendify.ico''))')
         $iconPath = $null
         if ($DryRun) {
             Plan ('icono: ' + (Format-Arg $python) + ' ' + (($iconArgs | ForEach-Object { Format-Arg $_ }) -join ' '))
@@ -242,7 +242,7 @@
                 $shortcut.TargetPath = $pythonw
                 $shortcut.Arguments = $StartArgs
                 $shortcut.WorkingDirectory = $env:USERPROFILE
-                $shortcut.Description = 'pcnotify'
+                $shortcut.Description = 'PendiFy'
                 if ($iconPath -and (Test-Path -LiteralPath $iconPath -PathType Leaf)) { try { $shortcut.IconLocation = $iconPath + ',0' } catch { } }
                 $shortcut.Save()
                 Say ('Acceso directo: ' + $link)
@@ -253,7 +253,7 @@
 
         Update-RunValue $startLine
 
-        if (Test-Flag $env:PCNOTIFY_NOSTART) {
+        if (Test-Flag $env:PENDIFY_NOSTART) {
             Say ('Listo. Para iniciar: ' + $startLine)
             return 0
         }
@@ -263,11 +263,11 @@
             try {
                 Start-Process -FilePath $pythonw -ArgumentList $StartArgs -ErrorAction Stop
             } catch {
-                Say ('No se pudo iniciar pcnotify. Para iniciar: ' + $startLine)
+                Say ('No se pudo iniciar PendiFy. Para iniciar: ' + $startLine)
                 return 1
             }
         }
-        Say 'El navegador abrira la pagina de pcnotify. Si este PC aun no esta enlazado, mostrara un QR: escanealo con la camara del telefono.'
+        Say 'El navegador abrira la pagina de PendiFy. Si este PC aun no esta enlazado, mostrara un QR: escanealo con la camara del telefono.'
         return 0
     }
 

@@ -54,8 +54,8 @@ class PackageShapeTest(unittest.TestCase):
         self.assertEqual(imports_outside(tools, {"icon_grid"}), [])
 
     def test_the_package_lists_its_icon_and_the_pyproject_ships_it(self):
-        # Mutation: the package-data table dropped. Red: setuptools would leave pcnotify.ico out of the wheel.
-        self.assertTrue((support.package_dir() / "pcnotify.ico").is_file(), "no pcnotify.ico beside the modules")
+        # Mutation: the package-data table dropped. Red: setuptools would leave pendify.ico out of the wheel.
+        self.assertTrue((support.package_dir() / "pendify.ico").is_file(), "no pendify.ico beside the modules")
         pyproject = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(pyproject["tool"]["setuptools"]["package-data"], {support.PACKAGE: ["*.ico"]})
 
@@ -108,8 +108,8 @@ class PackageShapeTest(unittest.TestCase):
             self.assertIsNotNone(section, pattern)
             self.assertEqual(section.group(1).strip().splitlines()[-1], last)
 
-    # The working-name pin was retired on 2026-09-30: pcnotify is the public name now, spelled by the
-    # installer, the uninstaller and the README (the repository slug stays one constant in install.ps1).
+    # The working-name pin was retired on 2026-09-30: the public name is spelled by the installer, the
+    # uninstaller and the README (the repository slug stays one constant in install.ps1).
 
     def test_the_former_name_is_gone_from_every_tracked_path_and_line_but_this_search(self):
         # Mutation: worker.py names itself by the former name again. Red: the count gains src/pendify/worker.py.
@@ -177,9 +177,9 @@ class PackageShapeTest(unittest.TestCase):
         self.assertEqual(carried, (support.ROOT / "LICENSE").read_bytes())
         self.assertEqual([name for name in names if name.lower().endswith(BINARY_SUFFIXES)], [])
         self.assertEqual([name for name in names if name.endswith("entry_points.txt")], [])
-        # Mutation: the package-data table dropped. Red: the wheel carries the modules and no pcnotify.ico.
+        # Mutation: the package-data table dropped. Red: the wheel carries the modules and no pendify.ico.
         self.assertEqual({name.split("/")[-1] for name in names if name.startswith(support.PACKAGE + "/")},
-                         {path.name for path in package_files()} | {"pcnotify.ico"})
+                         {path.name for path in package_files()} | {"pendify.ico"})
 
 
 if __name__ == "__main__":

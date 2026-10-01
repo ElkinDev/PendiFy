@@ -105,7 +105,7 @@ WORDS = {
         "autostart_help": "Al encender el PC el programa empieza solo, sin abrir esta página.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
-                       "pythonw -m pcnotify (o python -m pcnotify para verlo en una consola).",
+                       "pythonw -m pendify (o python -m pendify para verlo en una consola).",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -176,8 +176,8 @@ WORDS = {
         "autostart_label": "Start with Windows",
         "autostart_help": "When the PC turns on, the program starts by itself, without opening this page.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
-        "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pcnotify "
-                       "(or python -m pcnotify to see it in a console).",
+        "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
+                       "(or python -m pendify to see it in a console).",
     },
 }
 
@@ -196,7 +196,7 @@ LOG_WARNS = frozenset({"lost", "paused"})
 # A line of these kinds ends the phase collapse: the same phase after a reconnect or a resume is shown again.
 LOG_PHASE_BREAKS = frozenset({"lost", "connected", "paused", "resumed"})
 
-# The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
+# The design's stylesheet (page design, round 2 of 2026-09-30): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
 # action="/relink" or action="/quit" of a form it does not show.
 # The theme's colours, light and dark. The system's choice sets them; the theme button's choice, kept in data-theme
@@ -316,7 +316,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "align-self:start;margin:0}form[action='/check'] button,form[action='/relink'] button{width:auto}"
           ".more{grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}.panel{padding:24px}"
           "form[action='/typed']{grid-template-columns:1fr 1fr}form[action='/typed'] button{grid-column:1/-1}}\n"
-          # The card «Este PC» of placement A (mockup-pcnotify-controls-r2-2026-10-01.html, its separate style block
+          # The card «Este PC» of placement A (controls design, round 2 of 2026-10-01, its separate style block
           # without placement B's rules): the resume in the filled pair of «Comprobar ahora», the paused watcher line
           # in the refused pair with a two-bar mark, the switch of the start with Windows under a hairline.
           "form[action='/resume'] button{background:var(--brand);color:var(--on-brand)}\n"
@@ -340,7 +340,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".pc h2{margin:0}\n"
           ".pc form{justify-self:start}\n"
           ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n"
-          # The card «Actividad» of form A (mockup-pcnotify-log-r2-2026-10-01.html, its separate style block without
+          # The card «Actividad» of form A (log design, round 2 of 2026-10-01, its separate style block without
           # candidate B's rules): a list of 224 px that scrolls inside the card, each line its time in tabular figures
           # beside its text, a failure's text in the danger colour, the focus ring of the page's buttons.
           ".log-card{max-width:40rem;margin:16px 0 0}\n"

@@ -16,7 +16,7 @@ from pathlib import Path
 import support
 
 TOOLS = support.ROOT / "tools"
-ICO = support.package_dir() / "pcnotify.ico"
+ICO = support.package_dir() / "pendify.ico"
 ICON_PY = support.package_dir() / "icon.py"
 SIZES = [16, 32, 48, 64, 256]
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -24,7 +24,7 @@ TRANSPARENT = (0, 0, 0, 0)
 
 
 def load_tool(name):
-    spec = importlib.util.spec_from_file_location("pcnotify_tools_" + name, TOOLS / (name + ".py"))
+    spec = importlib.util.spec_from_file_location("pendify_tools_" + name, TOOLS / (name + ".py"))
     loaded = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loaded)
     return loaded
@@ -169,7 +169,7 @@ def run_check(root):
 
 class IconFileTest(unittest.TestCase):
     def test_the_committed_icon_files_are_what_the_tool_writes(self):
-        # Mutation: one byte of pcnotify.ico flipped. Red: --check exits 1.
+        # Mutation: one byte of pendify.ico flipped. Red: --check exits 1.
         done = run_check(support.ROOT)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         with support.temp_dir() as work:
@@ -180,7 +180,7 @@ class IconFileTest(unittest.TestCase):
             shutil.copy(ICON_PY, target)
             data = bytearray(ICO.read_bytes())
             data[len(data) // 2] ^= 0xFF
-            (target / "pcnotify.ico").write_bytes(bytes(data))
+            (target / "pendify.ico").write_bytes(bytes(data))
             self.assertEqual(run_check(copy).returncode, 1)
             shutil.copy(ICO, target)
             self.assertEqual(run_check(copy).returncode, 0)

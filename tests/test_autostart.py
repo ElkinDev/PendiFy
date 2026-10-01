@@ -1,7 +1,7 @@
 """AutostartTest: the start with Windows, the per-user Run value, no administrator.
 
 The registry is a seam of three calls on one value under one key path. Most cases run on a MemoryRegistry; the
-real registry class runs only against a scratch key, HKCU\\Software\\pcnotify-test-<random>, which the case
+real registry class runs only against a scratch key, HKCU\\Software\\pendify-test-<random>, which the case
 creates and removes even when it fails. No case reads or writes the real Run key: its path is asserted as text.
 """
 import contextlib
@@ -23,7 +23,7 @@ except ImportError:  # not Windows
     winreg = None
 
 NEEDS_WINREG = unittest.skipIf(winreg is None, "this platform has no winreg, so no Run value")
-SCRATCH_PREFIX = r"Software\pcnotify-test-"
+SCRATCH_PREFIX = r"Software\pendify-test-"
 
 
 def remove_scratch_key(key_path):
@@ -32,7 +32,7 @@ def remove_scratch_key(key_path):
         raise AssertionError(f"not a scratch key: {key_path}")
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            winreg.DeleteValue(key, "pcnotify")
+            winreg.DeleteValue(key, "PendiFy")
     except FileNotFoundError:
         pass
     try:
@@ -66,7 +66,7 @@ class AutostartTest(unittest.TestCase):
     def test_the_run_value_is_the_per_user_one_named_by_the_program_as_text_only(self):
         # Mutation: the machine-wide key or another value name. Red: the texts differ.
         self.assertEqual(autostart.RUN_KEY, r"Software\Microsoft\Windows\CurrentVersion\Run")
-        self.assertEqual(autostart.VALUE_NAME, "pcnotify")
+        self.assertEqual(autostart.VALUE_NAME, "PendiFy")
         if winreg is not None:  # built, never called: the real class reads nothing until asked
             self.assertEqual(autostart.WindowsRegistry().key_path, autostart.RUN_KEY)
             self.assertEqual(autostart.Autostart(executable=str(self.python)).registry.key_path, autostart.RUN_KEY)
@@ -79,7 +79,7 @@ class AutostartTest(unittest.TestCase):
         self.assertFalse(subject.enabled())
         self.assertTrue(subject.enable())
         self.assertEqual(registry.value, subject.command())
-        self.assertEqual(registry.value, f'"{self.python}" -m pcnotify --quiet')
+        self.assertEqual(registry.value, f'"{self.python}" -m pendify --quiet')
         self.assertTrue(subject.enabled())
         self.assertTrue(subject.disable())
         self.assertIsNone(registry.value)
@@ -106,17 +106,17 @@ class AutostartTest(unittest.TestCase):
 
     def test_the_command_prefers_pythonw_beside_the_interpreter_and_quotes_a_path_with_spaces(self):
         # Mutation: the interpreter always used. Red: python.exe where pythonw.exe exists.
-        self.assertEqual(self.subject().command(), f'"{self.python}" -m pcnotify --quiet')
+        self.assertEqual(self.subject().command(), f'"{self.python}" -m pendify --quiet')
         windowless = self.folder / "pythonw.exe"
         windowless.write_bytes(b"")
-        self.assertEqual(self.subject().command(), f'"{windowless}" -m pcnotify --quiet')
+        self.assertEqual(self.subject().command(), f'"{windowless}" -m pendify --quiet')
         plain = self.base / "plain"
         plain.mkdir()
         (plain / "python.exe").write_bytes(b"")
         self.assertIsNone(re.search(r"\s", str(plain)), "the precondition: a folder with no space")
         # As install.ps1's Format-Arg: a path with no space is written bare.
         self.assertEqual(self.subject(executable=plain / "python.exe").command(),
-                         f"{plain / 'python.exe'} -m pcnotify --quiet")
+                         f"{plain / 'python.exe'} -m pendify --quiet")
 
     def test_where_winreg_cannot_be_imported_it_is_not_available_and_touches_nothing(self):
         # Mutation: the import failure left to the caller. Red: ImportError leaves Autostart().
@@ -145,7 +145,7 @@ class AutostartTest(unittest.TestCase):
             self.assertFalse(subject.enabled())
             self.assertTrue(subject.enable())
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                self.assertEqual(winreg.QueryValueEx(key, "pcnotify"), (subject.command(), winreg.REG_SZ))
+                self.assertEqual(winreg.QueryValueEx(key, "PendiFy"), (subject.command(), winreg.REG_SZ))
                 self.assertEqual(winreg.QueryInfoKey(key)[1], 1)  # one value under the key, no other
             self.assertTrue(subject.enabled())
             self.assertTrue(subject.disable())

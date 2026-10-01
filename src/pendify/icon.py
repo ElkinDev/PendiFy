@@ -1,4 +1,4 @@
-"""The program's icon for the page: the 32 px frame of pcnotify.ico as PNG in base64.
+"""The program's icon for the page: the 32 px frame of pendify.ico as PNG in base64.
 
 Written by tools/make_icon.py from tools/icon_grid.py: run the tool, never edit this file by hand.
 """
