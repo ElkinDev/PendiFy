@@ -28,7 +28,7 @@ HOLD_SECONDS = 15.0  # S:778, S:793
 STEP_PAUSE = 0.3  # S:799
 NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
-LIVE_FALLBACK_SECONDS = 120.0  # a game that never answers its clock is announced on this wait
+LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 
 CONNECTED_LINE = "connected to the game client"
@@ -188,8 +188,9 @@ class Watcher:
         self._watch_since = self._next_live = self._clock()
 
     def _watch(self, phase):
-        """One turn of the watch: the game's clock asked when due, its value above zero the start; then the
-        wait, which fires on a step whose phase read was InProgress and ends with no alert with no client."""
+        """One turn of the watch: the game's clock asked when due, its value above zero the start and any other
+        number a restart of the wait; then the wait, which fires on a step whose phase read was InProgress and ends
+        with no alert with no client."""
         if self._watch_since is None:
             return
         now = self._clock()
@@ -201,6 +202,8 @@ class Watcher:
                 self._log(STARTED_LINE)
                 self._fire(MATCH_STARTED)
                 return
+            if seconds is not None:
+                self._watch_since = now
         if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
             if phase == IN_PROGRESS:
                 self._watch_since = None
