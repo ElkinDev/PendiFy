@@ -56,6 +56,38 @@ def silent_box(line):
     """The message box every test run of the entry point passes in place of the real one: it shows nothing."""
 
 
+class MemoryRegistry:
+    """The start with Windows' registry seam on one value held in memory, never the registry: read answers the
+    value or None, write sets it, delete clears it, and each call is recorded by its name. `failing` makes every
+    call raise the OSError a registry that refuses this user raises, before it changes anything."""
+
+    def __init__(self, value=None, failing=False):
+        self.value, self.failing, self.calls = value, failing, []
+
+    def _call(self, name):
+        self.calls.append(name)
+        if self.failing:
+            raise PermissionError(13, "access is denied")
+
+    def read(self):
+        self._call("read")
+        return self.value
+
+    def write(self, text):
+        self._call("write")
+        self.value = text
+
+    def delete(self):
+        self._call("delete")
+        self.value = None
+
+
+def silent_autostart():
+    """The start with Windows every test run of the entry point passes in place of the real one: its registry is
+    a MemoryRegistry, so no test run reads or writes the Run key."""
+    return module("autostart").Autostart(registry=MemoryRegistry())
+
+
 def temp_dir():
     """A TemporaryDirectory under build/tmp, so no test writes outside the repository."""
     base = BUILD / "tmp"
