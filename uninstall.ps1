@@ -1,13 +1,13 @@
-# pcnotify uninstaller for Windows. No administrator, nothing machine-wide, no policy change.
-# Same rules as install.ps1: no parameters, pure ASCII, PCNOTIFY_DRYRUN=1 prints the plan and
+# PendiFy uninstaller for Windows. No administrator, nothing machine-wide, no policy change.
+# Same rules as install.ps1: no parameters, pure ASCII, PENDIFY_DRYRUN=1 prints the plan and
 # changes nothing. It removes the package, the two shortcuts and the start with Windows when it
-# exists, and keeps the config folder. PCNOTIFY_RUN_KEY replaces the key path under HKCU of the
+# exists, and keeps the config folder. PENDIFY_RUN_KEY replaces the key path under HKCU of the
 # start with Windows, for test runs.
 
 & {
-    $ShortcutName = 'pcnotify.lnk'
+    $ShortcutName = 'PendiFy.lnk'
     $RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run'
-    $RunName = 'pcnotify'
+    $RunName = 'PendiFy'
     $ProbeSeconds = 15
     $PipSeconds = 120
     # Written by install.ps1: the interpreter pip installed into, one line.
@@ -17,7 +17,7 @@
         return [bool]($Value -and $Value.Trim() -ne '' -and $Value.Trim() -ne '0')
     }
 
-    $DryRun = Test-Flag $env:PCNOTIFY_DRYRUN
+    $DryRun = Test-Flag $env:PENDIFY_DRYRUN
     $LocalAppData = $env:LOCALAPPDATA
     if (-not $LocalAppData) { $LocalAppData = [Environment]::GetFolderPath('LocalApplicationData') }
     $AppData = $env:APPDATA
@@ -27,10 +27,10 @@
     function Plan([string]$Text) { Write-Host ('[plan] ' + $Text) }
     function Note([string]$Text) { if ($DryRun) { Plan $Text } else { Say $Text } }
 
-    # The start with Windows is the per-user Run value, which only the program's page creates. PCNOTIFY_RUN_KEY
+    # The start with Windows is the per-user Run value, which only the program's page creates. PENDIFY_RUN_KEY
     # replaces its key path under HKCU, for test runs.
     function Get-RunKey {
-        $key = $env:PCNOTIFY_RUN_KEY
+        $key = $env:PENDIFY_RUN_KEY
         if ($key) { $key = $key.Trim() }
         if (-not $key) { $key = $RunKey }
         return 'HKCU:\' + $key
@@ -126,7 +126,7 @@
     function Test-Gone([string]$Exe) {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $Exe
-        $psi.Arguments = '-m pip show pcnotify'
+        $psi.Arguments = '-m pip show pendify'
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -153,9 +153,9 @@
 
     function Invoke-Uninstall {
         $code = 0
-        Say 'pcnotify: desinstalador'
-        if ($DryRun) { Say 'Modo de prueba (PCNOTIFY_DRYRUN): se muestra el plan y no se cambia nada.' }
-        $recordFile = Join-Path (Join-Path $AppData 'pcnotify') $RecordName
+        Say 'PendiFy: desinstalador'
+        if ($DryRun) { Say 'Modo de prueba (PENDIFY_DRYRUN): se muestra el plan y no se cambia nada.' }
+        $recordFile = Join-Path (Join-Path $AppData 'pendify') $RecordName
         $python = Get-RecordedPython $recordFile
         if ($python) {
             Say ('Python: ' + $python + ' (anotado en ' + $recordFile + ')')
@@ -169,17 +169,17 @@
         if (-not $python) {
             Say 'No se encontro Python 3.10 o mas nuevo, asi que no hay paquete que quitar con pip.'
         } else {
-            $pipArgs = @('-m', 'pip', 'uninstall', '-y', 'pcnotify')
+            $pipArgs = @('-m', 'pip', 'uninstall', '-y', 'pendify')
             if ($DryRun) {
                 Plan ($python + ' ' + ($pipArgs -join ' '))
-                Plan ('comprobar: ' + $python + ' -m pip show pcnotify')
+                Plan ('comprobar: ' + $python + ' -m pip show pendify')
             } else {
                 & $python @pipArgs | Out-Host
                 if (-not (Test-Gone $python)) {
-                    Say ('pcnotify sigue instalado en ' + $python + ' (pip uninstall, codigo ' + $LASTEXITCODE + '); no se borra nada mas.')
+                    Say ('PendiFy sigue instalado en ' + $python + ' (pip uninstall, codigo ' + $LASTEXITCODE + '); no se borra nada mas.')
                     return 1
                 }
-                Say 'Paquete pcnotify quitado.'
+                Say 'Paquete PendiFy quitado.'
             }
         }
 
@@ -207,7 +207,7 @@
         if ((Remove-RunValue) -ne 0) { $code = 1 }
 
         if ($AppData) {
-            Say ('La configuracion queda en ' + (Join-Path $AppData 'pcnotify') + ' y no se borra; borrala a mano si ya no la quieres.')
+            Say ('La configuracion queda en ' + (Join-Path $AppData 'pendify') + ' y no se borra; borrala a mano si ya no la quieres.')
         }
         return $code
     }

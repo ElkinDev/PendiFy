@@ -1,5 +1,5 @@
 """PageLogTest: /state hands out the watcher's events as the log's lines (lane pclog round 1), and the page draws
-them in the card «Actividad» of form A (round 2, mockup-pcnotify-log-r2-2026-10-01.html, frames A1 to A6).
+them in the card «Actividad» of form A (the log design, round 2 of 2026-10-01, frames A1 to A6).
 
 The words are the design brief's, byte for byte (briefs/pclog-design-2026-10-01.md, "What the log is"); each line
 carries its seq, its time as HH:MM:SS in this PC's zone, its text in the answer's language and whether it reports a

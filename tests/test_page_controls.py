@@ -3,7 +3,7 @@
 The pause and the resume of the watcher and the start with Windows are three POST routes fenced as every other
 (host, length, token; 303 to the page); the state line says a linked PC's alerts are paused; /state carries
 paused and autostart so the page's poll follows a second tab. The start with Windows runs on a MemoryRegistry.
-The controls are drawn as placement A of mockups/mockup-pcnotify-controls-r2-2026-10-01.html (frames A1 to A6): one
+The controls are drawn as placement A of the controls design, round 2 of 2026-10-01 (frames A1 to A6): one
 card «Este PC» right after the watcher line, holding the pause or, while paused, the resume, then the switch of the
 start with Windows when one is available; while paused the watcher line is the sheet's paused block.
 """
