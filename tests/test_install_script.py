@@ -21,8 +21,13 @@ UNINSTALL = ROOT / "uninstall.ps1"
 README = ROOT / "README.md"
 
 DEFAULT_SOURCE = "https://github.com/ElkinDev/pcnotify/archive/refs/heads/main.zip"
-INSTALL_LINE = "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/install.ps1 | iex"
-UNINSTALL_LINE = "irm https://raw.githubusercontent.com/ElkinDev/pcnotify/main/uninstall.ps1 | iex"
+RAW = "https://raw.githubusercontent.com/ElkinDev/pcnotify/main/"
+# One line that runs unchanged from Win+R, the Command Prompt and PowerShell: irm exists only inside
+# PowerShell, so the line starts PowerShell itself, and -NoExit keeps the window open for the result.
+SHELL_PREFIX = 'powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "irm '
+INSTALL_LINE = SHELL_PREFIX + RAW + 'install.ps1 | iex"'
+UNINSTALL_LINE = SHELL_PREFIX + RAW + 'uninstall.ps1 | iex"'
+RUN_DIALOG_LIMIT = 259
 ALLOWED_HOSTS = {"github.com", "raw.githubusercontent.com", "www.python.org"}
 WINGET_LINE = (
     "winget install --id Python.Python.3.13 -e --scope user --silent "
@@ -361,6 +366,44 @@ class InstallScriptTest(unittest.TestCase):
         lines = _lines(done)
         self.assertTrue(lines[-1].startswith("pcnotify sigue instalado en " + str(fake)), lines)
         self.assertNotIn("Paquete pcnotify quitado.", lines)
+
+
+def _readme_sections():
+    text = README.read_text(encoding="utf-8")
+    spanish = re.search(r"^## Espa\S*ol\s*$(.*?)^## English\s*$", text, re.M | re.S)
+    english = re.search(r"^## English\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    if spanish is None or english is None:
+        raise AssertionError("README lacks the Spanish or the English section")
+    return text, spanish.group(1), english.group(1)
+
+
+class InstallLineAnyShellTest(unittest.TestCase):
+    """The published lines run unchanged from Win+R, the Command Prompt and PowerShell."""
+
+    def test_each_published_line_starts_powershell_and_fits_the_run_dialog(self):
+        # Mutation: INSTALL_LINE back to the bare irm form, red.
+        for line, script in ((INSTALL_LINE, "install.ps1"), (UNINSTALL_LINE, "uninstall.ps1")):
+            with self.subTest(script=script):
+                self.assertTrue(line.startswith("powershell "), line)
+                self.assertIn('-Command "', line)
+                self.assertTrue(line.endswith('| iex"'), line)
+                self.assertIn(RAW + script, line)
+                self.assertEqual(len(line.splitlines()), 1, line)
+                self.assertLess(len(line), RUN_DIALOG_LIMIT)
+
+    def test_readme_holds_no_bare_irm_line(self):
+        # Mutation: the bare short line restored in the Spanish section, red.
+        text, _, _ = _readme_sections()
+        rest = text.replace(INSTALL_LINE, "").replace(UNINSTALL_LINE, "")
+        self.assertNotIn("irm https", rest)
+        self.assertNotIn("| iex", rest)
+
+    def test_readme_explains_the_irm_message_in_both_languages(self):
+        # Mutation: the English note dropped, red.
+        _, spanish, english = _readme_sections()
+        self.assertIn('"irm no se reconoce como un comando interno o externo"', spanish)
+        self.assertIn("'irm' is not recognized as an internal or external command", english)
+
 
 if __name__ == "__main__":
     unittest.main()
