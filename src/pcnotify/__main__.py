@@ -29,6 +29,8 @@ STOP_SECONDS = 5.0
 REFUSED_LINE = "refused: the pairing of this PC was not accepted; link it again from the page"
 NOT_LINKED_LINE = "not linked: start the program without arguments and link this PC first"
 ALREADY_RUNNING_LINE = "already running: opening the page of the program that runs"
+# A quiet second start opens nothing, so its line promises nothing.
+QUIET_RUNNING_LINE = "already running"
 PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is not known yet; start it again in a "
                        "moment to open it")
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
@@ -158,10 +160,12 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         port = holder["port"] if holder["port"] is not None else run.holder_port(holder)
         if port is None:  # a winner with no page yet: nothing is opened, and the line says so
             return _ends(PAGE_NOT_KNOWN_LINE, 0, calm)
+        if args.quiet:  # the system's start at logon: nothing opened, nothing shown, a line of its own
+            print(QUIET_RUNNING_LINE, flush=True)
+            return 0
         print(ALREADY_RUNNING_LINE, flush=True)
-        if not args.quiet:
-            opener(f"http://{page.ADDRESS}:{port}/")
-        calm(ALREADY_RUNNING_LINE)
+        opener(f"http://{page.ADDRESS}:{port}/")
+        show(ALREADY_RUNNING_LINE)
         return 0
     try:
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
