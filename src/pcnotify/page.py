@@ -94,6 +94,8 @@ WORDS = {
         "log_ping": "Aviso al teléfono: {result}.",
         "log_paused": "Avisos en pausa.",
         "log_resumed": "Avisos reanudados.",
+        "log_title": "Actividad",
+        "log_help": "Lo que el programa vio y avisó desde que empezó en este PC.",
         "quit": "Salir",
         "this_pc": "Este PC",
         "pause": "Pausar avisos",
@@ -163,6 +165,8 @@ WORDS = {
         "log_ping": "Alert to the phone: {result}.",
         "log_paused": "Alerts paused.",
         "log_resumed": "Alerts resumed.",
+        "log_title": "Activity",
+        "log_help": "What the program saw and alerted since it started on this PC.",
         "quit": "Quit",
         "this_pc": "This PC",
         "pause": "Pause alerts",
@@ -187,6 +191,8 @@ LOG_WORDS = {"started": "log_started", "waiting": "log_waiting", "connected": "l
              "accepted": "log_accepted", "loading": "log_loading", "match_started": "log_match_started",
              "paused": "log_paused", "resumed": "log_resumed"}
 LOG_WARNS = frozenset({"lost", "paused"})
+# A line of these kinds ends the phase collapse: the same phase after a reconnect or a resume is shown again.
+LOG_PHASE_BREAKS = frozenset({"lost", "connected", "paused", "resumed"})
 
 # The design's stylesheet (mockup-pcnotify-page-r2-2026-09-30.html): light and dark by the system's choice, system
 # fonts only, nothing loaded. Its form[action=...] selectors quote the value with ' so no page carries the text
@@ -320,7 +326,19 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".pc{display:grid;gap:16px;max-width:40rem;margin:24px 0 0}\n"
           ".pc h2{margin:0}\n"
           ".pc form{justify-self:start}\n"
-          ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n")
+          ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n"
+          # The card «Actividad» of form A (mockup-pcnotify-log-r2-2026-10-01.html, its separate style block without
+          # candidate B's rules): a list of 224 px that scrolls inside the card, each line its time in tabular figures
+          # beside its text, a failure's text in the danger colour, the focus ring of the page's buttons.
+          ".log-card{max-width:40rem;margin:16px 0 0}\n"
+          ".log-card h2{margin:0 0 4px}\n"
+          ".log{max-height:224px;overflow-y:auto;overscroll-behavior:contain;border-radius:12px}\n"
+          ".log:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
+          ".log ol{margin:0;padding:0;list-style:none}\n"
+          ".log li{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:16px;padding:4px 0;"
+          "font-size:14px;line-height:20px}\n"
+          ".log time{color:var(--ink2);font-variant-numeric:tabular-nums}\n"
+          ".log .warn{color:var(--danger)}\n")
 # Polls the state; reloads when what the page shows changes, the watcher's pause included (data-paused, served only
 # beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
 # a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
@@ -331,11 +349,24 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
            "const shown=s.dataset.shown;const paused=s.dataset.paused;"
            "const sw=document.querySelector('input[name=autostart]');"
+           # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
+           # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
+           "const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
+           "g.setAttribute('tabindex','0');else g.removeAttribute('tabindex');}if(g)tabStop();"
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
            "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
-           "location.reload();})"
+           "location.reload();"
+           # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
+           # first, built as elements with their text (never as markup); the card keeps the last 50, as the ring
+           # does. An answer with no log changes nothing.
+           "if(g&&j.log){const o=g.firstElementChild;let last=Number(g.dataset.seq);"
+           "for(const l of j.log){if(l.seq<=last)continue;const li=document.createElement('li');"
+           "const t=document.createElement('time');t.setAttribute('datetime',l.time);t.textContent=l.time;"
+           "const x=document.createElement('span');if(l.warn)x.className='warn';x.textContent=l.text;"
+           "li.append(t,x);o.insertBefore(li,o.firstChild);last=l.seq;}g.dataset.seq=String(last);"
+           "while(o.children.length>50)o.lastElementChild.remove();tabStop();}})"
            ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
            # The code shows for a minute: 60 s after the details opens it closes again; one timer, cleared on every
            # toggle, so a close by hand leaves none running.
@@ -481,7 +512,8 @@ class PairingPage:
         with Windows; without it, or where it is not available, /autostart is no route and /state says nothing of
         it. Beside a watcher the page draws the card «Este PC» after the watcher line: the pause, or the resume while
         paused, and the switch of the start with Windows where it is available. `events` answers the watcher's
-        events, oldest first; with it /state carries the log's lines, without it no log key."""
+        events, oldest first; with it /state carries the log's lines and the page draws them in the card «Actividad»,
+        without it no log key and no card."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
@@ -540,7 +572,8 @@ class PairingPage:
     @staticmethod
     def _log_lines(events, lang):
         """The log's lines in `lang`, oldest first, each {seq, time, text, warn}. A phase whose word is the word of
-        the last phase line kept is dropped, so the three phases that end a match give one line; a kind or a ping
+        the last phase line kept is dropped, so the three phases that end a match give one line, until a line of
+        LOG_PHASE_BREAKS is kept: the same phase after a reconnect or a resume is shown again. A kind or a ping
         result the page does not know is dropped."""
         words, lines, last_phase = WORDS[lang], [], None
         for seq, at, kind, detail in events:
@@ -557,7 +590,24 @@ class PairingPage:
                 continue
             lines.append({"seq": seq, "time": _log_time(at), "text": text,
                           "warn": kind in LOG_WARNS or (kind == "ping" and detail != "sent")})
+            if kind in LOG_PHASE_BREAKS:
+                last_phase = None
         return lines
+
+    def _log_card(self, words, lang):
+        """The card «Actividad» (form A, frames A1 to A6): its title, its helper, and the list named by both, the
+        newest line first, carrying the highest seq it draws for the poll (0 before any line). `words` are escaped
+        already. Rendered with no tab stop: the script sets one while the list scrolls."""
+        lines = self._log_lines(self.events(), lang)
+        items = []
+        for line in reversed(lines):
+            span = '<span class="warn">' if line["warn"] else "<span>"
+            items.append(f'<li><time datetime="{line["time"]}">{line["time"]}</time>{span}{html.escape(line["text"])}'
+                         f"</span></li>")
+        last = lines[-1]["seq"] if lines else 0
+        return (f'<div class="panel log-card"><h2 id="log-title">{words["log_title"]}</h2><p id="log-help">'
+                f'{words["log_help"]}</p><div class="log" role="region" aria-labelledby="log-title" '
+                f'aria-describedby="log-help" data-seq="{last}"><ol>{"".join(items)}</ol></div></div>')
 
     def state_json(self, lang):
         """The state for the page's poll: the state line's sentence, and beside a watcher its line and whether it
@@ -596,6 +646,11 @@ class PairingPage:
             held = ' data-paused=""' if _paused(seen) else ""
             link += [f'<p id="watch" role="status"{held}>{html.escape(self._watch_text(seen, lang))}</p>',
                      self._card(words, token, _paused(seen))]
+        # The card «Actividad» follows the card «Este PC»; on the page that still shows the code it ends the first
+        # column instead, after the check form, so the code never moves (frame A6). No card without the events.
+        log_card = None if self.events is None else self._log_card(words, lang)
+        if log_card is not None and secret is None:
+            link.append(log_card)
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
             drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
@@ -613,6 +668,8 @@ class PairingPage:
                 link.append(f'<p class="note">{words["button_wait"]}</p>')
         if snapshot["relinkOffered"]:
             link.append(_form("relink", token, f'<button type="submit">{words["relink"]}</button>'))
+        if log_card is not None and secret is not None:
+            link.append(log_card)
         typed = [f"<h2>{words['typed_title']}</h2>",
                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
                                        f'autocomplete="off"></label><label>{words["secret_label"]} <input '

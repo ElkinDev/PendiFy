@@ -318,7 +318,8 @@ class Watcher:
             return
         if line is not None:
             self._log(line)
-            self._note("match_started")  # the line is given for the match's start only
+        if kind == MATCH_STARTED:  # noted on the kind, so a start fired with no line is still in the log
+            self._note("match_started")
         with self._lock:
             self._last_alert = (_ALERT_NAMES[kind], self._wall())
         self._alert(kind)

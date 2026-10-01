@@ -68,6 +68,11 @@ LOG_CARD = re.compile(r'<div class="panel log-card">.*?</ol></div></div>', re.S)
 PC_CARD = re.compile(r'<div class="panel pc"[^>]*>.*?</div>', re.S)  # the card «Este PC» holds no div of its own
 
 
+def markup(shown):
+    """The page's body without its script: the elements drawn, not the style's or the script's text."""
+    return shown[shown.index("<body>"):shown.rindex("<script>")]
+
+
 def drawn(lines):
     """The list's markup of /state's lines, the newest first: a time and its text, a failure's text in its class."""
     items = []
@@ -172,9 +177,8 @@ class PageLogTest(unittest.TestCase):
                     self.assertNotIn("log", json.loads(self.get("/state", language, served)))
 
     def test_the_card_follows_the_card_this_pc_and_draws_the_lines_state_answers_the_newest_first(self):
-        # Mutation: the lines drawn oldest first. Red: «El programa empezó.» on top. Mutation: the failure class on
-        # every line. Red: the sent ping in it. Mutation: the card drawn after the relink's place at the column's
-        # end. Red: on a linked page it still follows the card «Este PC»; frames A1 to A5.
+        # Frames A1 to A5. Mutation: the lines drawn oldest first. Red: «El programa empezó.» on top. Mutation: the
+        # failure class on every line. Red: the sent ping in it.
         for language, column in LANGUAGES:
             lang = page.language(language)
             with self.subTest(language=language):
@@ -200,6 +204,20 @@ class PageLogTest(unittest.TestCase):
                 for line in answered:
                     self.assertIsNone(GAME_WORDS.search(line["text"]), line["text"])
                 self.assertIsNone(GAME_WORDS.search(card))
+
+    def test_on_the_page_that_offers_the_relink_the_card_still_follows_the_card_this_pc(self):
+        # Mutation: the card drawn at the column's end on every page. Red: the relink form between the two cards.
+        for _ in range(pairing.REFUSED_PINGS_FOR_RELINK):
+            self.state.record_ping(worker.Refused())
+        for language, _ in LANGUAGES:
+            words = page.WORDS[page.language(language)]
+            with self.subTest(language=language):
+                shown, link, card = self.card(language)
+                relink = (f'<form method="post" action="/relink"><input type="hidden" name="token" '
+                          f'value="{self.page.token}"><button type="submit">{html.escape(words["relink"])}</button>'
+                          f"</form>")
+                self.assertTrue(link[PC_CARD.search(link).end():].startswith(card + relink))
+                self.assertTrue(link.endswith(relink))
 
     def test_on_the_page_that_still_shows_the_code_the_card_ends_the_first_column_and_the_code_does_not_move(self):
         # Mutation: the card drawn right after the card «Este PC» on this page too. Red: the scan sentence and the
@@ -229,8 +247,8 @@ class PageLogTest(unittest.TestCase):
         for served in (self.serve(watch=lambda: dict(self.snapshot)), self.serve()):
             for language, _ in LANGUAGES:
                 with self.subTest(language=language):
-                    shown = self.get("/", language, served)
-                    self.assertNotIn("log-card", shown)
+                    shown = markup(self.get("/", language, served))
+                    self.assertNotIn('class="panel log-card"', shown)
                     self.assertNotIn('class="log"', shown)
                     for word in TITLES[page.language(language)]:
                         self.assertNotIn(html.escape(word), shown)
@@ -257,7 +275,7 @@ class PageLogTest(unittest.TestCase):
         self.assertIn("const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
                       "g.setAttribute('tabindex','0');else g.removeAttribute('tabindex');}if(g)tabStop();",
                       page._SCRIPT)
-        self.assertNotIn("tabindex", self.get("/", "es"))
+        self.assertNotIn("tabindex", markup(self.get("/", "es")))
 
     def test_the_program_hands_the_watchers_events_to_the_page(self):
         # Mutation: the page built without them. Red: no events keyword on the page's call.
