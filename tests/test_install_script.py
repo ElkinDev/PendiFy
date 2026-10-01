@@ -37,7 +37,7 @@ PLAN = "[plan] "
 FOUND = "Python: "
 STUB = "rem the Microsoft Store alias stub prints nothing"
 # What the installer asks the interpreter it installed with: where pip laid pcnotify.ico beside the modules.
-ICON_READ = ("import importlib.util as u,os;"
+ICON_READ = ("import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];"
              "print(os.path.join(os.path.dirname(u.find_spec('pcnotify').origin),'pcnotify.ico'))")
 ICON_GUARD = re.compile(r"^if \(\$iconPath -and \(Test-Path -LiteralPath \$iconPath -PathType Leaf\)\) \{ "
                         r"try \{ \$shortcut\.IconLocation = \$iconPath \+ ',0' \} catch \{ \} \}$")
@@ -293,6 +293,30 @@ class InstallScriptTest(unittest.TestCase):
         self.assertRegex(lines[0], ICON_GUARD)
         self.assertEqual(text.count("ICON_READ"), 0)
         self.assertEqual(text.count("pcnotify.ico"), 1)
+
+    def test_the_icon_read_drops_the_current_folder_before_the_lookup(self):
+        # Mutation: the removal dropped from the line (the folder the line runs in searched first), red on the text
+        # and on the run from a folder that holds a decoy pcnotify package.
+        text = INSTALL.read_text(encoding="ascii")
+        lines = [line.strip() for line in text.splitlines() if line.strip().startswith("$iconArgs = @('-c', '")]
+        self.assertEqual(len(lines), 1, lines)
+        code = lines[0][len("$iconArgs = @('-c', '"):-len("')")].replace("''", "'")
+        self.assertEqual(code, ICON_READ)
+        drop = code.find("sys.path[:]=[p for p in sys.path if p]")
+        self.assertNotEqual(drop, -1, code)
+        self.assertLess(drop, code.index("find_spec"))
+        base = ROOT / "build" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as work:
+            decoy = Path(work) / "pcnotify"
+            decoy.mkdir()
+            (decoy / "__init__.py").write_text("", encoding="ascii")
+            env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+            done = subprocess.run([sys.executable, "-c", code], cwd=work, env=env, capture_output=True, text=True,
+                                  timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(os.path.normcase(done.stdout.strip()),
+                         os.path.normcase(str(ROOT / "src" / "pcnotify" / "pcnotify.ico")))
 
     def test_a_failed_icon_read_still_reaches_the_shortcut_save(self):
         # Mutation: a return in the icon read's catch (a failed read stops the install), red. Mutation: the read

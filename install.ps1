@@ -170,13 +170,15 @@
             }
         }
 
-        $pythonw =Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+        $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if ((Test-Path -LiteralPath $python) -and -not (Test-Path -LiteralPath $pythonw)) { $pythonw = $python }
         $startLine = (Format-Arg $pythonw) + ' ' + $StartArgs
 
         # The icon pip laid beside the modules, asked of the interpreter that installed them. A failed read or a
         # missing file leaves the shortcuts with the interpreter's own icon, as before; it never stops the install.
-        $iconArgs = @('-c', 'import importlib.util as u,os;print(os.path.join(os.path.dirname(u.find_spec(''pcnotify'').origin),''pcnotify.ico''))')
+        # Under -c the first search path entry is '', the folder the line runs in, so it goes before the lookup:
+        # a pcnotify folder there never answers for the installed package.
+        $iconArgs = @('-c', 'import importlib.util as u,os,sys;sys.path[:]=[p for p in sys.path if p];print(os.path.join(os.path.dirname(u.find_spec(''pcnotify'').origin),''pcnotify.ico''))')
         $iconPath = $null
         if ($DryRun) {
             Plan ('icono: ' + (Format-Arg $python) + ' ' + (($iconArgs | ForEach-Object { Format-Arg $_ }) -join ' '))
