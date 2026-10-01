@@ -318,6 +318,25 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(KeyPlace(added, codes.display(secret)).data_places, [[{}], []])
         self.assertEqual(KeyPlace(shown, codes.display(secret)).data_places, [[{}]])
 
+    def data_places_with(self, extra):
+        """KeyPlace's data_places on the unlinked page with `extra` added outside every details."""
+        shown = self.html()
+        added = shown.replace("</body>", extra + "</body>", 1)
+        self.assertEqual(added.count(extra), 1)
+        return KeyPlace(added, codes.display(self.secret())).data_places
+
+    def test_a_data_uri_with_a_leading_space_in_a_poster_is_a_place_outside_the_details(self):
+        # A browser strips the space before the scheme, so the poster loads the PNG.
+        self.assertEqual(self.data_places_with('<video poster=" data:image/png;base64,AAAA"></video>'), [[{}], []])
+
+    def test_a_data_uri_with_a_leading_space_in_a_table_background_is_a_place_outside_the_details(self):
+        self.assertEqual(self.data_places_with('<table background=" data:image/png;base64,AAAA"></table>'),
+                         [[{}], []])
+
+    def test_a_data_uri_with_an_upper_case_scheme_is_a_place_outside_the_details(self):
+        # A browser folds the scheme's case, so DATA: is data:.
+        self.assertEqual(self.data_places_with('<video poster="DATA:image/png;base64,AAAA"></video>'), [[{}], []])
+
     def test_the_typed_road_stores_a_normalized_pair_and_refuses_a_malformed_one(self):
         # Mutation: the typed fields stored without normalizing. Red: the dashed form lands in the file.
         before = self.store.read()
