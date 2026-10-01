@@ -15,8 +15,10 @@ no token.
 pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
 thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
 port; the first paused turn forgets the client, the watch, the hold and the start latch, and the first turn after
-a resume is a fresh connection, so a game already under way then alerts nothing. A pause that lands inside a step
-posts no accept after the delay and starts no alert. The pause lives in memory only: every start is active.
+a resume is a fresh connection, so a game already under way then alerts nothing. Each pause is counted, and the loop
+rests for every count it has not honored, so a pause and a resume that both land inside one sleep or one step still
+rest it once. A pause that lands inside a step posts no accept after the delay and starts no alert, and its started
+line is not said. The pause lives in memory only: every start is active.
 """
 import json
 import random
@@ -93,14 +95,20 @@ class Watcher:
         self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
         self._next_live = None  # the injected clock from which the game's clock may be asked again
         self._paused = threading.Event()  # set and cleared by the page's thread, read by the loop
+        self._pauses = 0  # every pause counted by the page's thread, under the lock; the loop compares it
+        self._honored = 0  # the count of the last pause the loop has rested for; read and written by it only
         self._resting = False  # the loop's own record that it has acted on a pause; read and written by it only
 
     def stop(self):
         self._stop.set()
 
     def pause(self):
-        """Stop reading the game; callable from any thread, honored by the loop at its next turn."""
+        """Stop reading the game; callable from any thread, honored by the loop at its next turn. The event is set
+        before the count moves, so a loop that reads the new count reads the event of this pause or of a later
+        resume."""
         self._paused.set()
+        with self._lock:
+            self._pauses += 1
 
     def resume(self):
         """Read the game again from the next turn, as a fresh connection; callable from any thread."""
@@ -114,9 +122,14 @@ class Watcher:
         """The loop: a step, then its pause, until stopped. A step that breaks is said by its type and the
         client is looked for again, so the watcher never ends while the page says it runs."""
         while not self._stop.is_set():
-            if self._paused.is_set():  # no step: nothing is read while paused
-                if not self._resting:
-                    self._rest()
+            with self._lock:
+                pauses = self._pauses
+            paused = self._paused.is_set()
+            # A pause not yet honored rests the loop even when a resume has already cleared the event.
+            if (paused or pauses != self._honored) and not self._resting:
+                self._rest()
+            self._honored = pauses
+            if paused:  # no step: nothing is read while paused
                 pause = STEP_PAUSE
             else:
                 if self._resting:
@@ -234,25 +247,27 @@ class Watcher:
             seconds = self._game_clock(self._live())
             if seconds is not None and seconds > 0:
                 self._watch_since = None
-                self._log(STARTED_LINE)
-                self._fire(MATCH_STARTED)
+                self._fire(MATCH_STARTED, STARTED_LINE)
                 return
             if seconds is not None:
                 self._watch_since = now
         if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
             if phase == IN_PROGRESS:
                 self._watch_since = None
-                self._log(STARTED_ON_WAIT_LINE)
-                self._fire(MATCH_STARTED)
+                self._fire(MATCH_STARTED, STARTED_ON_WAIT_LINE)
             elif self._found is None:
                 self._watch_since = None
 
     def _hold(self):
         self._hold_until = self._clock() + HOLD_SECONDS
 
-    def _fire(self, kind):
+    def _fire(self, kind, line=None):
+        """The alert of `kind`, its console `line` said first when one is given; nothing, the line included,
+        while paused."""
         if self._paused.is_set():  # an alert handed to the Alerter before the pause is delivered; none starts in it
             return
+        if line is not None:
+            self._log(line)
         with self._lock:
             self._last_alert = (_ALERT_NAMES[kind], self._wall())
         self._alert(kind)
