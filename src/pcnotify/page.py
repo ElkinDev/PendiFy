@@ -254,7 +254,8 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           # pendiapp.com's language switch (assets/styles.css, .langsw), its variables mapped to the page's own:
           # --hairline to --hair, --muted to --ink2, --brand and --on-brand as they are. Each entry is a submit
           # button, so the page's button look is set back to the site's link: no minimum height, no border, no fill,
-          # the group's font; the page's button focus ring stays.
+          # the group's font; the page's button focus ring stays. The switch is one form, the pill: .langsw's inline
+          # flex and the page's form{margin:0} already sit it inline as the span did, so no rule is added for it.
           ".langsw{display:inline-flex;border:1px solid var(--hair);border-radius:999px;padding:2px;font-size:.8rem;"
           "font-weight:600}\n"
           ".langsw button{min-height:0;padding:.28rem .62rem;border:0;border-radius:999px;background:transparent;"
@@ -522,12 +523,12 @@ _CURRENT = ' aria-current="true"'
 
 def _switch(words, token, lang):
     """pendiapp.com's language switch: ES then EN, the page's language marked aria-current. The page changes state
-    only by a POST with its token, so each entry is the submit button of its own small form to /lang. `words` are
-    escaped already."""
-    entries = "".join(_form("lang", token, f'<button type="submit" name="lang" value="{code}"'
-                                           f'{_CURRENT if code == lang else ""}>{code.upper()}</button>')
-                      for code in config.LANGS)
-    return f'<span class="langsw" aria-label="{words["language"]}">{entries}</span>'
+    only by a POST with its token, so the switch is one form to /lang that is the group, named «Idioma» or "Language"
+    for a screen reader, and each entry is a submit button posting its own value. `words` are escaped already."""
+    entries = "".join(f'<button type="submit" name="lang" value="{code}"{_CURRENT if code == lang else ""}>'
+                      f"{code.upper()}</button>" for code in config.LANGS)
+    return (f'<form class="langsw" role="group" aria-label="{words["language"]}" method="post" action="/lang">'
+            f'<input type="hidden" name="token" value="{token}">{entries}</form>')
 
 
 class PairingPage:
