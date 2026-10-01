@@ -401,7 +401,7 @@ class InstallLineAnyShellTest(unittest.TestCase):
     def test_readme_explains_the_irm_message_in_both_languages(self):
         # Mutation: the English note dropped, red.
         _, spanish, english = _readme_sections()
-        self.assertIn('"irm no se reconoce como un comando interno o externo"', spanish)
+        self.assertIn("\"'irm' no se reconoce como un comando interno o externo\"", spanish)
         self.assertIn("'irm' is not recognized as an internal or external command", english)
 
 

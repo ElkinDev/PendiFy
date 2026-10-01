@@ -14,11 +14,11 @@ Pulsa Windows + R, pega esta línea completa y pulsa Enter. También sirve en Po
 
 La ventana queda abierta al terminar para que leas el resultado; ciérrala cuando acabe.
 
-Si ves "irm no se reconoce como un comando interno o externo", pegaste solo la parte corta en el Símbolo del sistema: usa la línea completa de arriba.
+Si ves "'irm' no se reconoce como un comando interno o externo", pegaste solo la parte corta en el Símbolo del sistema: usa la línea completa de arriba.
 
 El instalador busca Python 3.10 o más nuevo; si no lo hay lo instala con winget solo para tu usuario, o te indica https://www.python.org/downloads/ cuando winget no existe. Después instala pcnotify con pip, deja un acceso directo `pcnotify` en el Escritorio y en el menú Inicio, y lo inicia.
 
-Para ver qué haría sin cambiar nada: `$env:PCNOTIFY_DRYRUN = "1"` antes de pegar la línea. Para no iniciarlo al final: `$env:PCNOTIFY_NOSTART = "1"`.
+En PowerShell: para ver qué haría sin cambiar nada: `$env:PCNOTIFY_DRYRUN = "1"` antes de pegar la línea. Para no iniciarlo al final: `$env:PCNOTIFY_NOSTART = "1"`.
 
 ### Enlazar
 
@@ -63,7 +63,7 @@ If you see "'irm' is not recognized as an internal or external command", you pas
 
 The installer looks for Python 3.10 or newer; when there is none it installs it with winget for your user only, or points you to https://www.python.org/downloads/ when winget is missing. Then it installs pcnotify with pip, leaves a `pcnotify` shortcut on the Desktop and in the Start menu, and starts it.
 
-To see what it would do without changing anything, set `$env:PCNOTIFY_DRYRUN = "1"` before pasting the line. To leave it stopped at the end, set `$env:PCNOTIFY_NOSTART = "1"`.
+In PowerShell: to see what it would do without changing anything, set `$env:PCNOTIFY_DRYRUN = "1"` before pasting the line. To leave it stopped at the end, set `$env:PCNOTIFY_NOSTART = "1"`.
 
 ### Link
 
