@@ -41,6 +41,7 @@ class PairingState:
         self._relink_offered = False
         self._config_failed = False
         self._theme = store.read_theme()
+        self._lang = store.read_lang()
 
     def page_seen(self):
         with self._lock:
@@ -120,6 +121,18 @@ class PairingState:
         ValueError and changes nothing."""
         with self._lock:
             self._theme = self._store.set_theme(choice)
+            self._config_failed = False
+
+    def lang(self):
+        """The page's kept language choice, es or en, or None for the browser's."""
+        with self._lock:
+            return self._lang
+
+    def set_lang(self, choice):
+        """The language switch's choice (es or en) kept in the config file; anything else raises ValueError and
+        changes nothing."""
+        with self._lock:
+            self._lang = self._store.set_lang(choice)
             self._config_failed = False
 
     def secret_for_display(self):

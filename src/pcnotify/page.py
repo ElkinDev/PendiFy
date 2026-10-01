@@ -43,6 +43,7 @@ WORDS = {
         "code_label": "Clave de este PC:",
         "show_code": "Mostrar el código",
         "theme_toggle": "Cambiar entre tema claro y oscuro",
+        "language": "Idioma",
         "state_waiting": "Esperando la confirmación en el teléfono.",
         "state_wait": "El servicio pidió esperar un momento. Se volverá a preguntar solo.",
         "state_offline": "No se pudo conectar. Se volverá a intentar.",
@@ -114,6 +115,7 @@ WORDS = {
         "code_label": "This PC's key:",
         "show_code": "Show the code",
         "theme_toggle": "Switch between light and dark theme",
+        "language": "Language",
         "state_waiting": "Waiting for the confirmation on the phone.",
         "state_wait": "The service asked to wait a moment. It will ask again by itself.",
         "state_offline": "Could not connect. It will try again.",
@@ -247,7 +249,17 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".key-card summary{display:inline-flex;align-items:center;list-style:none}\n"
           ".key-card summary::-webkit-details-marker{display:none}\n"
           ".key-card details[open] summary{margin-bottom:16px}\n"
-          ".bar{display:flex;justify-content:flex-end;margin:0 0 8px}\n"
+          # The header's actions as pendiapp.com's .nav-actions holds them: the language switch, then the theme button.
+          ".bar{display:flex;justify-content:flex-end;align-items:center;gap:.45rem;margin:0 0 8px}\n"
+          # pendiapp.com's language switch (assets/styles.css, .langsw), its variables mapped to the page's own:
+          # --hairline to --hair, --muted to --ink2, --brand and --on-brand as they are. Each entry is a submit
+          # button, so the page's button look is set back to the site's link: no minimum height, no border, no fill,
+          # the group's font; the page's button focus ring stays.
+          ".langsw{display:inline-flex;border:1px solid var(--hair);border-radius:999px;padding:2px;font-size:.8rem;"
+          "font-weight:600}\n"
+          ".langsw button{min-height:0;padding:.28rem .62rem;border:0;border-radius:999px;background:transparent;"
+          "color:var(--ink2);font:inherit}\n"
+          '.langsw button[aria-current="true"]{background:var(--brand);color:var(--on-brand)}\n'
           ".icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;min-height:0;padding:0;"
           "border-radius:999px;border:1px solid var(--hair);background:transparent;color:var(--ink);cursor:pointer;"
           "transition:background .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1)}\n"
@@ -343,11 +355,12 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
 # beside a watcher), so a second tab follows a pause or a resume made in another; the start with Windows as well, on
 # a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
 # /state answers, so a reload cannot loop, and a poll landing between a change and its post's answer cannot reload
-# the page under the post); says so when the program is gone.
+# the page under the post); the language too, against the one the page was drawn in (<html lang>), so a second tab
+# or another browser turns to a language chosen with the switch; says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
 # showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
-           "const shown=s.dataset.shown;const paused=s.dataset.paused;"
+           "const shown=s.dataset.shown;const paused=s.dataset.paused;const lang=document.documentElement.lang;"
            "const sw=document.querySelector('input[name=autostart]');"
            # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
            # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
@@ -356,7 +369,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
-           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
+           "||j.lang!==lang||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
            "location.reload();"
            # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
            # first, built as elements with their text (never as markup); the card keeps the last 50, as the ring
@@ -504,6 +517,19 @@ def _form(action, token, inner):
             f"{inner}</form>")
 
 
+_CURRENT = ' aria-current="true"'
+
+
+def _switch(words, token, lang):
+    """pendiapp.com's language switch: ES then EN, the page's language marked aria-current. The page changes state
+    only by a POST with its token, so each entry is the submit button of its own small form to /lang. `words` are
+    escaped already."""
+    entries = "".join(_form("lang", token, f'<button type="submit" name="lang" value="{code}"'
+                                           f'{_CURRENT if code == lang else ""}>{code.upper()}</button>')
+                      for code in config.LANGS)
+    return f'<span class="langsw" aria-label="{words["language"]}">{entries}</span>'
+
+
 class PairingPage:
     def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
@@ -540,6 +566,11 @@ class PairingPage:
 
     def host_allowed(self, host):
         return (host or "").strip().lower() in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
+
+    def language_of(self, accept_language):
+        """The page's language, the one resolver of every page, /state and the stopped page: the switch's choice
+        kept in the config file when there is one, else the browser's first Accept-Language tag (language())."""
+        return self.state.lang() or language(accept_language)
 
     def watch_text(self, lang):
         """The watcher's line in `lang`: waiting or connected, then the phase while connected once one is read,
@@ -614,7 +645,7 @@ class PairingPage:
         is paused, and where the start with Windows is available whether it is on."""
         snapshot = self.state.snapshot()
         seen = self.watch() if self.watch is not None else None
-        answer = {**snapshot, "text": WORDS[lang][_state_word(snapshot, seen)]}
+        answer = {**snapshot, "text": WORDS[lang][_state_word(snapshot, seen)], "lang": lang}
         if seen is not None:
             answer["watchText"] = self._watch_text(seen, lang)
             answer["paused"] = _paused(seen)
@@ -683,7 +714,8 @@ class PairingPage:
                   _form("forget", token, f'<button type="submit">{words["forget"]}</button>')]
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         foot = "" if self.on_quit is None else f'<footer class="foot">{_form("quit", token, quit_button)}</footer>'
-        bar = (f'<header class="bar"><button id="theme-toggle" class="icon-btn" type="button" aria-pressed="false" '
+        bar = (f'<header class="bar">{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
+               f'type="button" aria-pressed="false" '
                f'aria-label="{words["theme_toggle"]}">{_THEME_ICONS}</button></header>')
         theme = self.state.theme()
         kept = "" if theme is None else f' data-theme="{html.escape(theme)}"'
@@ -725,6 +757,19 @@ class PairingPage:
         said as act() says it and answered as a failed save is."""
         try:
             self.state.set_theme(choice)
+        except ValueError:
+            return "refused"
+        except config.ConfigError as failure:
+            _say_failure(failure)
+            self.state.config_failed()
+            return "failed"
+        return "kept"
+
+    def set_lang(self, choice):
+        """/lang: the switch's choice kept in the config file; "kept", or "refused" for a value that is not es or
+        en, which changes nothing, or "failed" for a config file that cannot be replaced, said as act() says it."""
+        try:
+            self.state.set_lang(choice)
         except ValueError:
             return "refused"
         except config.ConfigError as failure:
@@ -804,7 +849,7 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            lang = language(self.headers.get("Accept-Language"))
+            lang = page.language_of(self.headers.get("Accept-Language"))
             if seen and path in ("/", "/state"):
                 page.state.page_seen()
             if path == "/":
@@ -842,7 +887,7 @@ def _handler(page):
             if not page.host_allowed(self.headers.get("Host")):
                 return self._refuse(403)
             path = urllib.parse.urlsplit(self.path).path
-            routes = ("/check", "/typed", "/forget", "/relink", "/theme")
+            routes = ("/check", "/typed", "/forget", "/relink", "/theme", "/lang")
             routes += ("/quit",) if page.on_quit is not None else ()
             routes += ("/pause",) if page.on_pause is not None else ()
             routes += ("/resume",) if page.on_resume is not None else ()
@@ -866,7 +911,7 @@ def _handler(page):
                 # when the answer cannot be written, and that failure goes on to the server's handle_error.
                 try:
                     self._send(200, "text/html; charset=utf-8",
-                               page.render_stopped(language(self.headers.get("Accept-Language"))))
+                               page.render_stopped(page.language_of(self.headers.get("Accept-Language"))))
                 finally:
                     page.on_quit()
                 return
@@ -876,6 +921,10 @@ def _handler(page):
                     return self._refuse(400)
                 if outcome == "kept":
                     return self._send(204, "text/plain; charset=utf-8", "")
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
+            if path == "/lang":  # es or en, then the page again, drawn in it; anything else changes nothing
+                if page.set_lang(form.get("lang", "")) == "refused":
+                    return self._refuse(400)
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/autostart":  # on is 1 or 0; anything else changes nothing
                 if form.get("on") not in ("1", "0"):
