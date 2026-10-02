@@ -45,6 +45,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 - Iniciar: el acceso directo `PendiFy`, o `pythonw -m pendify`, que es lo que ejecuta el acceso directo; sin consola, si ya está abierto o no puede iniciarse te lo dice en una ventana. Para verlo en una consola: `python -m pendify`.
 - Detener: pulsa «Salir» en la página del programa; si no la tienes abierta, iniciarlo otra vez la abre. Como último recurso, cierra el proceso `pythonw.exe` en el Administrador de tareas.
+- Icono junto al reloj: un clic en el icono de PendiFy junto al reloj abre un menú para abrir la página, pausar o reanudar los avisos y salir del programa, también con la página y el navegador cerrados.
 - Pausar: «Pausar avisos», en la tarjeta «Este PC» de la página, deja de leer el cliente del juego: no acepta partidas ni avisa a tu teléfono, y la página sigue abierta. «Reanudar avisos» vuelve a leerlo. La pausa no se guarda: cada vez que el programa se inicia, empieza activo.
 - Iniciar con Windows: el interruptor «Iniciar con Windows», en la misma tarjeta, está apagado hasta que lo enciendas. Encendido, el programa empieza solo al iniciar sesión en Windows, solo para tu usuario y sin abrir el navegador ni la página.
 - Actividad: la tarjeta «Actividad» de la página lista lo que el programa hizo desde que empezó: el cliente del juego encontrado y perdido, cada fase, la partida aceptada y el aviso enviado. Guarda las últimas 50 líneas, solo en memoria.
@@ -107,6 +108,7 @@ The button at the top right switches between the light and the dark theme, and t
 
 - Start: the `PendiFy` shortcut, or `pythonw -m pendify`, which is what the shortcut runs; with no console, it tells you in a window when it is already running or cannot start. To see it in a console: `python -m pendify`.
 - Stop: press «Quit» on the program's page; if it is not open, starting the program again opens it. As a last resort, end the `pythonw.exe` process in Task Manager.
+- Icon by the clock: a click on the PendiFy icon by the clock opens a menu that opens the page, pauses or resumes the alerts and quits the program, also with the page and the browser closed.
 - Pause: «Pause alerts», on the page's «This PC» card, stops reading the game client: it accepts no match and sends no alert to your phone, and the page stays open. «Resume alerts» reads it again. The pause is not kept: every start of the program is active again.
 - Start with Windows: the «Start with Windows» switch, on the same card, is off until you turn it on. When it is on, the program starts by itself when you sign in to Windows, for your user only, without opening the browser or the page.
 - Activity: the page's «Activity» card lists what the program did since it started: the game client found and lost, each phase, the match accepted and the alert sent. It keeps the last 50 lines, in memory only.

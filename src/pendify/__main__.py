@@ -6,9 +6,10 @@
                                      unless the start fails
     python -m <package> ping <kind>  one alert with the stored pair, one fixed line per answer
 
-The page and the watcher stop together on Ctrl+C, on Ctrl+Break and on the page's quit button, which
-removes the run file and exits 0. One instance per config folder: a second start opens the running page
-and exits 0, and one made while that program is still closing after its quit waits for it to end and starts.
+The page and the watcher stop together on Ctrl+C, on Ctrl+Break, on the page's quit button and on the quit of
+the icon by the clock, which remove the run file and exit 0. One instance per config folder: a second start
+opens the running page and exits 0, and one made while that program is still closing after its quit waits for
+it to end and starts.
 Where no console is attached (a pythonw start), the line a start ends on is also shown in a
 message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
@@ -24,6 +25,7 @@ from pathlib import Path
 
 from . import alert, client, config, page, pairing, runfile, watcher, worker
 from .autostart import Autostart
+from .tray import Tray
 
 TICK_SECONDS = 1.0
 STOP_SECONDS = 5.0
@@ -41,6 +43,8 @@ CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
 FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
 _MB_ICONINFORMATION = 0x40
 _MB_SETFOREGROUND = 0x10000
+# The icon by the clock's picture: pendify.ico beside the modules, the file install.ps1 points the shortcuts at.
+ICON_PATH = Path(__file__).with_name("pendify.ico")
 
 
 def _data_dir(value):
@@ -150,7 +154,7 @@ def _ends(line, code, show):
     return code
 
 
-def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart):
+def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray):
     # A quiet start is the system's, at logon: it never opens the browser, and a start that ends well shows no box.
     calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
@@ -192,8 +196,14 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events)
         url = pairing_page.start()
+        # The icon by the clock, under --quiet as well: the way to stop a copy the Run key started. Its words are
+        # the page's, in the language the page resolves with no browser to ask: the kept choice, else Spanish.
+        icon = tray(url, on_open=lambda: opener(url), on_pause=watch.pause, on_resume=watch.resume,
+                    on_quit=quit_page, paused=lambda: watch.paused,
+                    words=lambda: page.WORDS[pairing_page.language_of(None)], icon_path=ICON_PATH)
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
+            icon.start()
             run.publish(pairing_page.port)
             print(f"page: {url}", flush=True)
             if not args.quiet and not opener(url):  # a start by a person opens the page, linked or not
@@ -217,6 +227,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
                 watching.join(STOP_SECONDS)
             alerter.flush(STOP_SECONDS)
             pairing_page.close()
+            icon.close()
     finally:
         run.release()
     return 0
@@ -231,10 +242,11 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep):
+         sleep=time.sleep, tray=Tray):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
-    line reaches anybody; `clock` and `sleep` time the run file's re-reads."""
+    line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the
+    seam a test run fills with a fake, so no test shows a real icon."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -250,7 +262,7 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
                           delay or watcher.accept_delay, beep, show, clock, sleep,
-                          autostart if autostart is not None else Autostart())
+                          autostart if autostart is not None else Autostart(), tray)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)
