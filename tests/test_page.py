@@ -738,19 +738,31 @@ class PairingPageTest(unittest.TestCase):
         # query. Red: the rule sits inside a block, so the phone width misses it.
         style = page._STYLE
         found = [(selectors.strip(), body) for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", style)]
-        check = [body for selectors, body in found if "form[action='/check']" in
-                 [selector.strip() for selector in selectors.split(",")] and "margin" in body]
-        self.assertEqual(check, ["margin-top:16px"])
+        # The relink form of the linked page follows the card «Este PC» the same way: the one rule names both.
+        check = [(selectors, body) for selectors, body in found if "margin" in body and
+                 {"form[action='/check']", "form[action='/relink']"} & {selector.strip()
+                                                                         for selector in selectors.split(",")}]
+        self.assertEqual(check, [("form[action='/check'],form[action='/relink']", "margin-top:16px")])
+        check = [body for selectors, body in check]
         log_card = [body for selectors, body in found if selectors == ".log-card"]
         self.assertEqual(len(log_card), 1)
         self.assertEqual(re.search(r"(?:^|;)margin-top:([^;]+)", check[0]).group(1),
                          re.search(r"(?:^|;)margin:([^ ;]+)", log_card[0]).group(1))
-        rule = "\nform[action='/check']{margin-top:16px}\n"
+        rule = "\nform[action='/check'],form[action='/relink']{margin-top:16px}\n"
         self.assertEqual(style.count(rule), 1)
         before = style[:style.index(rule)]
         self.assertEqual(before.count("{"), before.count("}"))
         # The form is still the link's own child right after the key's card, the place the rule spaces.
         self.assertEqual(self.html().count('</figure><form method="post" action="/check">'), 1)
+        # The relink form is the link's own child on the linked page that offers it, never inside a card: here, with
+        # no watcher reading, right after the state line; in use the card «Este PC» sits between the two.
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for _ in range(3):
+            self.state.record_ping(worker.Refused())
+        offered = self.html()
+        self.assertEqual(offered.count('<form method="post" action="/relink">'), 1)
+        self.assertEqual(len(re.findall(r'<p id="state"[^>]*>[^<]*</p><form method="post" action="/relink">',
+                                        offered)), 1)
 
     def test_the_linked_page_keeps_the_pendiapp_com_qr_visible(self):
         # Mutation: the sponsored QR put under the key's data-shown or any hiding rule. Red: a rule names it, or the

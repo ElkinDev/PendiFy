@@ -332,6 +332,9 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
           "form[action='/check'] button,form[action='/relink'] button{width:100%;background:var(--brand);"
           "color:var(--on-brand)}\n"
+          # The form under the QR and the linked page's relink form keep the card «Actividad»'s rhythm (OR-106): from
+          # 880 px the key's card leaves for its column, and form{margin:0} alone left each flush under «Este PC».
+          "form[action='/check'],form[action='/relink']{margin-top:16px}\n"
           "form[action='/forget'] button{background:transparent;border-color:var(--line);color:var(--danger)}\n"
           "form[action='/quit'] button{padding-inline:16px;background:transparent;color:var(--ink2)}\n"
           ".more{display:grid;gap:16px;margin-top:32px}\n"
@@ -383,9 +386,6 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           # candidate B's rules): a list of 224 px that scrolls inside the card, each line its time in tabular figures
           # beside its text, a failure's text in the danger colour, the focus ring of the page's buttons.
           ".log-card{max-width:40rem;margin:16px 0 0}\n"
-          # The form under the QR keeps the card «Actividad»'s rhythm (OR-106): from 880 px the key's card leaves
-          # for its column, and form{margin:0} alone left the form flush under the card «Este PC».
-          "form[action='/check']{margin-top:16px}\n"
           ".log-card h2{margin:0 0 4px}\n"
           ".log{max-height:224px;overflow-y:auto;overscroll-behavior:contain;border-radius:12px}\n"
           ".log:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
