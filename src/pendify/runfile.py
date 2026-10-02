@@ -221,13 +221,23 @@ def _written_after(path, instant):
         return False
 
 
+def _started_before_written(path, created):
+    """True when the process created at `created`, a FILETIME (100 ns ticks since 1601), started before the run file
+    at `path` was last written, as its true holder did: it wrote the file after it started. False when it is gone."""
+    try:
+        return created / 10**7 - 11644473600 < os.stat(path).st_mtime
+    except FileNotFoundError:
+        return False
+
+
 def terminate(pid, started, path, probe=_probe, boot_instant=_boot_instant, end=_end):
     """Ends the process `pid` the run file at `path` names only once that process is proven its holder, and answers
     ENDED, NOT_OURS or REFUSED. The pid is opened with PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE and its
     creation time read: with `started`, the record's creation time, it is ended only when the two are equal; with
-    None, as an older record (0.1.5 and before) has it, only when its image is python.exe or pythonw.exe and the run
-    file was written more than BOOT_MARGIN_SECONDS after the boot, so the pid of a holder that died with the system,
-    another process's now, is never ended. NOT_OURS: the pid is not the holder's and its run file is stale. REFUSED:
+    None, as an older record (0.1.5 and before) has it, only when its image is python.exe or pythonw.exe, the run
+    file was written more than BOOT_MARGIN_SECONDS after the boot, and the process started before that write, so the
+    pid of a holder that died with the system, another process's now, is never ended, also after a Fast Startup
+    shutdown, which keeps GetTickCount64 counting from the last cold boot. NOT_OURS: the pid is not the holder's and its run file is stale. REFUSED:
     an OSError opening or ending it, kept on the answer. The pid the record names is the one process opened, never a
     process searched by its name or its command line, and this process is never ended. The seams a test fakes, so no
     test opens a process to end it: `probe(pid)` gives (creation time, image file name), `boot_instant()` the boot
@@ -242,7 +252,7 @@ def terminate(pid, started, path, probe=_probe, boot_instant=_boot_instant, end=
         if started is not None:
             ours = created == started
         else:
-            ours = str(image).lower() in _PYTHON_IMAGES
+            ours = str(image).lower() in _PYTHON_IMAGES and _started_before_written(path, created)
         if not ours or not end(pid, created):  # the end reads the creation time again on the handle it ends
             return Answer(NOT_OURS)
     except OSError as error:
@@ -281,11 +291,11 @@ class RunFile:
             try:
                 handle = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
-                holder = self._live_holder()
-                if holder is not None:
-                    return holder
-                try:
-                    os.remove(self.path)  # a holder that is gone, or a file that names none: taken over
+                record = self._read()
+                if self._live(record) is not None:
+                    return record
+                try:  # a holder that is gone, or a file that names none: taken over while it holds the record read
+                    self._take_aside(record)
                 except FileNotFoundError:
                     pass
                 except PermissionError:  # held open by another start, or a file this user cannot remove
@@ -410,15 +420,26 @@ class RunFile:
 
     def evict(self, holder):
         """Removes the run file `holder` was read from, a record terminate answered NOT_OURS for, so stale: only while
-        the file still holds that record, under the retries of release. True when it removed it; False when the file
-        holds another record by then, or is gone; PermissionError when the remove is still refused after its retries,
-        so the start says it cannot replace the file."""
-        if self._read() != holder:
-            return False
+        the file still holds that record, compared and removed in one step (_take_aside). True when it removed it;
+        False when the file holds another record by then, put back under its name, or when another start moved it
+        first (FileNotFoundError) or a step stays refused after its retries (PermissionError)."""
         try:
-            self._retried(os.remove, self.path)
-        except FileNotFoundError:
+            return self._take_aside(holder)
+        except (FileNotFoundError, PermissionError):  # another newcomer won: the claim that follows reads its record
             return False
+
+    def _take_aside(self, record):
+        """The run file removed only while it holds `record`: moved aside first, to <path>.evict-<this pid>, so no
+        other start's file can take its place between the compare and the remove, then read there. `record`: the
+        moved file removed, True. Another record, a claim written since `record` was read: moved back under its
+        name, False. Each move and the remove under the retries of release; FileNotFoundError when the file is gone
+        at the move aside, PermissionError when a step is still refused after its retries."""
+        aside = f"{self.path}.evict-{self._pid}"
+        self._retried(os.replace, self.path, aside)
+        if self._read(aside) != record:
+            self._retried(os.replace, aside, self.path)
+            return False
+        self._retried(os.remove, aside)
         return True
 
     def _retried(self, move, *args):
@@ -434,14 +455,18 @@ class RunFile:
 
     def _live_holder(self):
         """The record of a live process other than this one, or None."""
-        holder = self._read()
+        return self._live(self._read())
+
+    def _live(self, holder):
+        """`holder`, a record read, when it names a live process other than this one; else None."""
         if holder is not None and holder["pid"] != self._pid and self._alive(holder["pid"]):
             return holder
         return None
 
-    def _read(self):
+    def _read(self, path=None):
+        """The record in the run file, or in `path`; None when it is gone, unreadable or names no pid."""
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(Path(self.path if path is None else path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
         pid = data.get("pid") if isinstance(data, dict) else None

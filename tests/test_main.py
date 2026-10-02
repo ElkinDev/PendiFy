@@ -1086,6 +1086,8 @@ class MainCommandTest(unittest.TestCase):
 
     def test_a_refused_terminate_that_leaves_the_holder_ends_on_the_already_running_line_the_reason_printed(self):
         # Mutation: no wait after a refused terminate. Red: the already-running line before CLOSING_BOUND.
+        # Mutation: the snapshot returned when wait_released is False. Red: the snapshot's port opened, not the one
+        # the holder re-published during the wait.
         lines = {"es": "No se pudo cerrar la copia anterior: access denied",
                  "en": "The older copy could not be closed: access denied"}
         for lang, line in lines.items():
@@ -1093,17 +1095,18 @@ class MainCommandTest(unittest.TestCase):
                 if lang == "en":
                     self.store.set_typed(LINK_ID, SECRET)  # a linked PC, whose config file keeps the choice
                     self.store.set_lang("en")  # the kept choice, read with no page and no browser
-                record = self.running_holder()  # an older copy's record, alive (this test's parent): never ended
-                asked, clock = [], FakeClock()
+                self.running_holder()  # an older copy's record, alive (this test's parent): never ended
+                moved = CLOSING_PORT + 1  # the port the holder re-publishes during the wait, its pid the same
+                asked, clock = [], FakeClock(lambda: self.running_holder(port=moved))
                 refused = runfile.Answer("refused", PermissionError(13, "access denied"))
                 result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep,
                                                   terminate=lambda *args: asked.append(args) or refused)
                 self.assertEqual(result, (0, f"{line}\n{entry.ALREADY_RUNNING_LINE}\n", ""))
-                self.assertEqual((opened, asked), ([f"http://127.0.0.1:{CLOSING_PORT}/"],
+                self.assertEqual((opened, asked), ([f"http://127.0.0.1:{moved}/"],
                                                    [(os.getppid(), None, self.run_file)]))
                 self.assertGreaterEqual(clock.now, CLOSING_BOUND)
                 self.assertLess(clock.now, CLOSING_BOUND + 2 * runfile.REREAD_STEP)
-                self.assertEqual(self.read_run(), record)
+                self.assertEqual(self.read_run(), {"pid": os.getppid(), "port": moved})
 
 
 if __name__ == "__main__":

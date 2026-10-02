@@ -17,6 +17,10 @@ PORT = 54321
 HOLDER_VERSION = "1.2.3"  # a test vector, the version the holder runs
 STARTED = 133_000_000_000_000_000  # a test vector: a creation time as GetProcessTimes gives it, 100 ns ticks
 MTIME = 1_000_000_000.0  # a test vector: the run file's last write, in seconds since the epoch
+# Creation times a minute before and after MTIME, as FILETIME counts them: 100 ns ticks since 1601.
+BEFORE_MTIME = (int(MTIME) - 60 + 11_644_473_600) * 10**7
+AFTER_MTIME = (int(MTIME) + 60 + 11_644_473_600) * 10**7
+DAYS_BACK = MTIME - 3 * 86_400  # the boot GetTickCount64 gives after a Fast Startup shutdown: the last cold boot
 
 
 class RunFileTest(unittest.TestCase):
@@ -237,10 +241,30 @@ class RunFileTest(unittest.TestCase):
                                         ("written within the margin", "pythonw.exe", MTIME - 1, "not-ours"),
                                         ("written before the boot", "pythonw.exe", MTIME + 3600, "not-ours")):
             with self.subTest(record=name):
-                ended = [(HOLDER, STARTED)] if word == "ended" else []
-                self.assertEqual(self.terminate(None, STARTED, image, boot), (word, ended))
+                ended = [(HOLDER, BEFORE_MTIME)] if word == "ended" else []
+                self.assertEqual(self.terminate(None, BEFORE_MTIME, image, boot), (word, ended))
         self.path.unlink()  # the file gone: nothing proves the pid is the holder's
-        self.assertEqual(self.terminate(None, STARTED, "pythonw.exe", MTIME - 3600), ("not-ours", []))
+        self.assertEqual(self.terminate(None, BEFORE_MTIME, "pythonw.exe", MTIME - 3600), ("not-ours", []))
+
+    def test_an_older_record_is_not_ours_when_the_pid_started_after_the_file_was_written(self):
+        # Mutation: the created-before-mtime test removed. Red: another python.exe of the user, started after a Fast
+        # Startup shutdown left the record, holds its pid and is ended.
+        self.stale()
+        self.assertEqual(self.terminate(None, AFTER_MTIME, "python.exe", DAYS_BACK), ("not-ours", []))
+        ended = []
+
+        def gone(pid):  # the file removed between the boot test and the creation-time read: nothing proves the pid
+            self.path.unlink()
+            return BEFORE_MTIME, "python.exe"
+
+        answer = runfile.terminate(HOLDER, None, self.path, probe=gone, boot_instant=lambda: DAYS_BACK,
+                                   end=lambda pid, at: ended.append((pid, at)) or True)
+        self.assertEqual((answer, ended), ("not-ours", []))
+
+    def test_an_older_record_is_ended_when_the_pid_started_before_the_file_was_written(self):
+        self.stale()
+        self.assertEqual(self.terminate(None, BEFORE_MTIME, "python.exe", DAYS_BACK),
+                         ("ended", [(HOLDER, BEFORE_MTIME)]))
 
     def test_terminate_answers_refused_on_an_oserror(self):
         # Mutation: the OSError raised out of terminate, as before. Red: no answer.
@@ -299,6 +323,70 @@ class RunFileTest(unittest.TestCase):
         with remove:  # refused twice by a reader, retried as release's remove is
             self.assertEqual((start.evict(holder), self.path.exists(), len(calls)), (True, False, 3))
         self.assertFalse(start.evict(holder))  # gone already: nothing to remove
+
+    def evicting(self):
+        """A stale record of HOLDER on disk and the start OTHER that read it: (that start, the record it read)."""
+        self.folder.mkdir(parents=True)
+        stale = {"pid": HOLDER, "port": PORT, "version": HOLDER_VERSION, "secret": "s" * 32, "started": STARTED}
+        self.path.write_text(json.dumps(stale), encoding="utf-8")
+        start = self.start(OTHER)
+        return start, start.claim()
+
+    def test_evict_renames_aside_compares_then_deletes(self):
+        start, holder = self.evicting()
+        moves, calls = self.refused("replace", 0)
+        with moves:
+            self.assertEqual((start.evict(holder), self.path.exists(), self.temps()), (True, False, []))
+        self.assertEqual([tuple(map(os.fspath, call)) for call in calls],
+                         [(os.fspath(self.path), f"{self.path}.evict-{OTHER}")])
+
+    def test_evict_puts_back_a_record_it_did_not_read(self):
+        # Mutation: evict's compare removed. Red: the fresh claim is removed.
+        # Mutation: evict's put-back removed. Red: the fresh claim is left under the aside name, the run file gone.
+        start, holder = self.evicting()
+        fresh = {"pid": HOLDER + 1, "port": None}  # a claim written between this start's read and its move aside
+        self.path.write_text(json.dumps(fresh), encoding="utf-8")
+        moves, calls = self.refused("replace", 0)
+        with moves:
+            self.assertEqual((start.evict(holder), self.path.exists(), self.temps(), len(calls)), (False, True, [], 2))
+        self.assertEqual(self.record(), fresh)
+
+    def test_evict_answers_false_when_another_newcomer_renamed_first(self):
+        start, holder = self.evicting()
+        stale, real = self.record(), os.replace
+        theirs = Path(f"{self.path}.evict-{HOLDER + 1}")
+
+        def theirs_first(source, target):  # another newcomer's move aside lands just before this start's
+            if not theirs.exists():
+                real(self.path, theirs)
+            return real(source, target)
+
+        with mock.patch.object(runfile.os, "replace", theirs_first):
+            self.assertEqual((start.evict(holder), self.path.exists()), (False, False))
+        self.assertEqual(json.loads(theirs.read_text(encoding="utf-8")), stale)  # theirs, untouched
+        theirs.replace(self.path)
+        moves, calls = self.refused("replace", runfile.REFUSED_TRIES)
+        with moves:  # held by another newcomer to the end of the retries
+            self.assertEqual((start.evict(holder), len(calls)), (False, runfile.REFUSED_TRIES))
+        self.assertEqual((self.record(), self.temps()), (stale, []))
+
+    def test_claim_takes_a_dead_holders_file_over_only_while_it_still_holds_the_record_read(self):
+        # Mutation: the take-over without the compare. Red: another start's fresh claim, written between this start's
+        # read and its move aside, is removed and both starts hold the file.
+        self.stale()
+        fresh, real, written = {"pid": OTHER + 1, "port": None}, os.replace, []
+
+        def claimed_first(source, target):
+            if not written:
+                written.append(source)
+                self.path.write_text(json.dumps(fresh), encoding="utf-8")
+            return real(source, target)
+
+        start = runfile.RunFile(self.folder, pid=OTHER, alive=lambda pid: pid != HOLDER)  # HOLDER died
+        with mock.patch.object(runfile.os, "replace", claimed_first):
+            self.assertEqual(start.claim(), {"pid": OTHER + 1, "port": None, "closing": False, "version": None,
+                                             "secret": None, "started": None})
+        self.assertEqual((self.record(), self.temps()), (fresh, []))
 
 
 if __name__ == "__main__":
