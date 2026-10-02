@@ -690,8 +690,8 @@ class MainCommandTest(unittest.TestCase):
 
     def test_the_updater_starts_after_the_page_closes_in_the_finally_and_off_never_starts_it(self):
         # Mutation: the updater started before the page. Red: the page does not answer at its start.
-        # Mutation: --no-update ignored. Red: the mode reads auto. Mutation: the close left out of the finally, or
-        # made before the page's. Red: no close, or the page still answers at it.
+        # Mutation: --no-update ignored. Red: the mode reads auto. Mutation: the close left out of the finally. Red: no
+        # close. Mutation: the close moved back after the page's close. Red: ("close", False).
         update = support.module("update")
         for flags, stored, mode in (((), None, "auto"), ((), "notify", "notify"), ((), "off", "off"),
                                     (("--no-update",), None, "off"), (("--no-update",), "notify", "off"),
@@ -724,7 +724,7 @@ class MainCommandTest(unittest.TestCase):
                 self.assertEqual(len(made), 1)
                 self.assertEqual((made[0].current_version, made[0].mode), (update.RUNNING_VERSION, mode))
                 self.assertEqual(made[0].moments,
-                                 ([] if mode == "off" else [("start", True)]) + [("close", False), ("wait", 60, False)])
+                                 ([] if mode == "off" else [("start", True)]) + [("close", True), ("wait", 60, False)])
 
     def test_a_restart_asked_from_the_page_spawns_without_quiet_and_carries_dry_data_dir_worker_and_client_lockfile(
             self):

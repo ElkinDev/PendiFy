@@ -261,6 +261,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             pass
         finally:
             stop.set()
+            updating.close()  # the restart gate shuts at the quit
             # First, so a start made while this one stops waits for it instead of opening a closing page: Ctrl+C
             # and Ctrl+Break are marked only here, and the page's quit, marked already, is marked again.
             try:
@@ -272,7 +273,6 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             alerter.flush(STOP_SECONDS)
             pairing_page.close()
             icon.close()
-            updating.close()
             # An install under way is waited for before the run file goes, so a quit does not end this copy while
             # pip swaps the files; past the bound pip goes on alone, its output in a file.
             updating.wait(update.INSTALL_JOIN_SECONDS)
