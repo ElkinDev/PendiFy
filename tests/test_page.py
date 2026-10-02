@@ -71,7 +71,7 @@ CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
 # The code is shown, its key under the mask and the reveal after it; the lower part is one fold; the top bar names the
 # creator and the repository before the language switch, and «Salir» closes the page.
 PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", NAME, "title", "intro", "state_waiting",
-              "watch_waiting", "this_pc", "pause", "scan", "code_label", None, "show_code", "check", "log_title",
+              "watch_waiting", "this_pc", "pause", "scan", "code_label", None, "qr_for", "show_code", "check", "log_title",
               "log_help", "fold", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence",
               "forget", "quit")
 # The texts of PAGE_ORDER before the language switch: the title tag and the credit.
@@ -83,6 +83,11 @@ SWITCH_LABELS = ["ES", "EN"]
 SHOW = {"es": "Mostrar el código", "en": "Show the code"}
 HIDE = {"es": "Ocultar el código", "en": "Hide the code"}
 MASK_LABEL = {"es": "Clave oculta", "en": "Key hidden"}
+# The label over the reveal (owner 2026-10-02 09:5x, his words): what the pairing QR is for, no game and no maker.
+QR_FOR = {"es": "Escanea este código con Pendi para recibir en el teléfono las notificaciones de este PC: cuando "
+                "empieza la partida o cuando se acepta la cola.",
+          "en": "Scan this code with Pendi to get this PC's notifications on your phone: when the match starts or the "
+                "queue is accepted."}
 FOLD = {"es": "Más opciones: escribir los valores del enlace u olvidar este PC",
         "en": "More options: type the link values, or forget this PC"}
 SPONSOR = {"es": {"by": "Patrocinado por Pendiapp.com", "cap": "Escanéalo para abrir pendiapp.com",
@@ -568,6 +573,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertTrue(card.endswith(
                     f'<p class="key" data-shown="false"><span class="key-label">{html.escape(words["code_label"])}</span> '
                     f'<span class="key-val">{mask.group(0)}<span class="code" id="code">{key}</span></span></p>'
+                    f'<p class="qr-for">{html.escape(QR_FOR[lang])}</p>'
                     f'<button type="button" class="reveal" aria-controls="code" data-show="{SHOW[lang]}" '
                     f'data-hide="{HIDE[lang]}">{SHOW[lang]}</button>{page._PARTY}</figure>'), card[-600:])
                 # The key's text is only the code's own: never in an attribute, a label or a name.
@@ -597,6 +603,72 @@ class PairingPageTest(unittest.TestCase):
         linked = self.html()
         self.assertEqual([marker for marker in ('class="key"', 'class="reveal"', 'class="mask"') if marker in linked],
                          [])
+
+    def test_the_pairing_qr_is_hidden_until_the_code_is_shown(self):
+        # Mutation: the QR's hiding rule dropped, as on 8158c78. Red: the style misses it. Mutation: the QR left out
+        # of the noscript rule. Red: the no-script road keeps the QR hidden. Mutation: the QR drawn outside the card
+        # whose key carries data-shown. Red: the card does not start with the QR.
+        rule = '.key-card:has(.key[data-shown="false"]) .qr'
+        for accept in ("es-CO,es;q=0.9", "en-US,en;q=0.9"):
+            with self.subTest(accept=accept):
+                shown = self.html(accept)
+                cards = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)
+                self.assertEqual(len(cards), 1)
+                self.assertTrue(cards[0].startswith('<figure class="key-card"><svg class="qr"'), cards[0][:120])
+                self.assertEqual(cards[0].count('<svg class="qr"'), 1)
+                self.assertEqual(cards[0].count('<p class="key" data-shown="false">'), 1)
+                style = re.search(r"<style>(.*?)</style><noscript>", shown, re.S).group(1)
+                self.assertIn(rule + "{visibility:hidden}", style)
+                self.assertNotIn('.key[data-shown="true"] .qr', style)
+                noscript = re.search(r"<noscript><style>([^<]*)</style></noscript>", shown).group(1)
+                rules = {selector.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", noscript)
+                         for selector in selectors.split(",")}
+                self.assertEqual(rules.get(rule), "visibility:visible")
+        # The same data-shown and the same timer as the key: the script is the key's own, unchanged.
+        self.assertIn("function showKey(on){k.dataset.shown=String(on);", page._SCRIPT)
+        self.assertEqual(page._SCRIPT.count("setTimeout("), 1)
+
+    def test_the_label_says_what_the_qr_is_for(self):
+        # Mutation: the label left out of a word table. Red: the words differ. Mutation: the label drawn after the
+        # reveal. Red: the card misses it before the button. Mutation: the label kept on the linked page. Red: the
+        # linked page holds it.
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                self.assertEqual(page.WORDS[lang].get("qr_for"), QR_FOR[lang])
+                shown = self.html(accept)
+                card = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)[0]
+                self.assertIn(f'</p><p class="qr-for">{html.escape(QR_FOR[lang])}</p><button type="button" '
+                              'class="reveal"', card)
+                self.assertEqual(shown.count(html.escape(QR_FOR[lang])), 1)
+                self.assertIsNone(GAME_WORDS.search(QR_FOR[lang]))
+        self.assertIn(".qr-for{margin:0}", page._STYLE)
+        self.assertNotIn(".qr-for", page._NOSCRIPT_STYLE)
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(page="linked", lang=lang):
+                linked = self.html(accept)
+                self.assertEqual([marker for marker in ('class="qr-for"', html.escape(QR_FOR[lang]))
+                                  if marker in linked], [])
+
+    def test_the_linked_page_keeps_the_pendiapp_com_qr_visible(self):
+        # Mutation: the sponsored QR put under the key's data-shown or any hiding rule. Red: a rule names it, or the
+        # aside carries a data-shown or a control.
+        self.assertEqual(page.SPONSOR_ADDRESS, "https://pendiapp.com")
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        for accept in ("es-CO,es;q=0.9", "en-US,en;q=0.9"):
+            with self.subTest(accept=accept):
+                linked = self.html(accept)
+                side = re.findall(r'<aside class="side">.*?</aside>', linked, re.S)
+                self.assertEqual(len(side), 1)
+                self.assertEqual(side[0].count('<svg class="qr2"'), 1)
+                self.assertEqual([marker for marker in ("data-shown", "<button", "<details") if marker in side[0]], [])
+                # aria-hidden on the figures is a screen reader's, never a hiding: only the bare attribute counts.
+                self.assertIsNone(re.search(r"(?<![-\w])hidden(?=[\s>=])", side[0]))
+                for sheet in (page._STYLE, page._NOSCRIPT_STYLE):
+                    for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+                        if re.search(r"\.(?:side|sponsor|arcade|qr2)\b", selectors):
+                            self.assertIsNone(re.search(r"visibility:hidden|display:none|opacity:0\b", body),
+                                              selectors + "{" + body + "}")
 
     def assert_the_key_reads_with_scripts_off(self, document):
         """The page's head holds one <noscript> whose only child is a <style> that shows the code and hides the
