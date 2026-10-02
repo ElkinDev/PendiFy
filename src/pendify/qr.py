@@ -223,22 +223,82 @@ def penalty(modules):
             + 10 * (abs(dark * 2 - total) * 10 // total))
 
 
-# The mask over the pairing QR's modules (owner 2026-10-02 10:3x): one pixelated figure, the same for every key and
-# drawn from no module of any, a 7 by 7 mosaic laid over the symbol. F is a finder's corner (svg() draws the finder
-# there as the real one is; the scene's plate holds its own), # a dark block, + a mid block, . a light block, each in
-# the drawing's own colours.
-_MASK_ART = ("FF.#+FF",
-             "FF#.#FF",
-             "+#..##.",
-             "#.#+..#",
-             ".#.#+#.",
-             "FF+..#.",
-             "FF.#+.#")
+# The two masks over the pairing QR's modules (owner 2026-10-02 12:4x, ledger OR-104, lane pfmaskimpl), one picked at
+# random by the page once per start: the bust, a helmeted bust in left profile of 32 by 32 blocks (the pfmask design
+# lane's bust.py, options A and C of mockups/pendify-qr-mask-2026-10-02.html), and the board, 8 by 8 flat cells in
+# the page's --brand and --tonal (option B). Each lies on one GROUND path over the whole symbol, finders and timing
+# included, so no finder, module or grid shows through, and each carries the instruction as plain text (the owner's
+# correction: both with option C's words). Neither is drawn from any module of any key.
+MASKS = ("bust", "board")
+# The bust's blocks as bust.py prints them: '.' empty, 'o' the outline in the theme's --px-line (class "pl", as the
+# party's sprites), the rest the party's colours, page._FIGURE_COLOURS: v d l the helmet, y a the plume, h s the plates.
+_BUST = ("................................",
+         "................................",
+         "................................",
+         "..............ooooo.............",
+         ".............oyyyyyoy...........",
+         "............oyaaaaayyy..........",
+         "............oaayyyyaayy.........",
+         "............ooyyyyyyaayy........",
+         ".........ooodvoooyyyyaao........",
+         ".......oodvvvlvo.ooyyyaao.......",
+         "......odvvvvddlvo..ooyyayo......",
+         ".....oddvddddddlvo...ooaoo......",
+         ".....ooooodddddvvo.....o........",
+         ".....odddddddddvvo..............",
+         ".....ooooooodddddvo.............",
+         ".....odvvvvvoooddvvo............",
+         "....odddddddvo.ooddvooooooo.....",
+         "....oddddddddvo..oddvvoshhhoo...",
+         "....odddddddldvo.ooooossssshho..",
+         ".....oddddddddvooshhhhsssssss...",
+         "......oddddddddossssssssssss....",
+         ".....oooodooooossssoooooooo.....",
+         "......hhhoshhhhsssosssssss......",
+         ".......sshsssssssssssssss.......",
+         "........ssssssssssssssss........",
+         ".........ssssssssssssss.........",
+         "..........oooooooooooo..........",
+         "...........ssssssssss...........",
+         "............ssssssss............",
+         ".............ssssss.............",
+         "..............ssss..............",
+         "...............ss...............")
+_BUST_COLOURS = {"v": "#6D28D9", "d": "#40277C", "l": "#C3B1F7", "y": "#FBBE3C", "a": "#A5510B", "h": "#ECE8F6",
+                 "s": "#A79FC2"}
+_BUST_CELL = 10.5      # one block in plate units: 5.25 px in the page's 288 px box, 8.75 px at 480
+_BUST_SAY_ROW = 23.6   # the bust's row the instruction sits on: its lower band, the chest's upper plate
+_BOARD = 8             # the board's cells a side
 
 
-def _mask_blocks():
-    """The mosaic's blocks as (column, row, tone), the finders' corners left out."""
-    return [(c, r, tone) for r, line in enumerate(_MASK_ART) for c, tone in enumerate(line) if tone != "F"]
+def _bust_paths():
+    """The bust as the page's _paths() draws a pixel drawing: one path per colour, one closed run per row."""
+    runs = {}
+    for y, row in enumerate(_BUST):
+        x = 0
+        while x < len(row):
+            if row[x] == ".":
+                x += 1
+                continue
+            start = x
+            while x < len(row) and row[x] == row[start]:
+                x += 1
+            runs.setdefault(row[start], []).append(f"M{start} {y}h{x - start}v1h-{x - start}z")
+    return "".join(f'<path class="pl" d="{"".join(d)}"/>' if key == "o" else
+                   f'<path fill="{_BUST_COLOURS[key]}" d="{"".join(d)}"/>' for key, d in runs.items())
+
+
+def _mask_named(mask, words):
+    """A mask is one of MASKS and is drawn with its words; anything else is refused, never drawn as another."""
+    if mask not in MASKS:
+        raise ValueError(f"no such mask: {mask!r}; the masks are {MASKS}")
+    if words is None:
+        raise ValueError(f"the mask {mask!r} is drawn with its words")
+
+
+def _say(words, x, y, board):
+    """The instruction on a mask: plain svg text in the page's .qm-say rule (no plate, no box, no corner)."""
+    return f'<text class="qm-say{" qm-board" if board else ""}" x="{x:.1f}" y="{y:.1f}">{words}</text>'
 
 
 def _finder(x, y):
@@ -248,17 +308,31 @@ def _finder(x, y):
             f'<rect x="{x + 2}" y="{y + 2}" width="3" height="3" rx="1" fill="{_QR_INK}"/>')
 
 
-def _flat_mask(n, q, name):
-    """svg()'s mask: the three finders and the mosaic's blocks over the n by n symbol, named for a screen reader."""
-    step = n / len(_MASK_ART)
-    fill = {"#": _QR_INK, "+": _QR_RING, ".": _QR_TILE}
-    blocks = "".join(f'<rect x="{q + c * step:.2f}" y="{q + r * step:.2f}" width="{step:.2f}" height="{step:.2f}" '
-                     f'fill="{fill[tone]}"/>' for c, r, tone in _mask_blocks())
-    finders = "".join(_finder(left + q, top + q) for top, left in ((0, 0), (0, n - 7), (n - 7, 0)))
-    return f'<g class="qr-mask" role="img" aria-label="{name}" shape-rendering="crispEdges">{finders}{blocks}</g>'
+def _flat_mask(n, q, mask, words):
+    """svg()'s mask, the scene's laid on the flat symbol: one GROUND path over the n by n symbol, finders included,
+    then the bust's 32 blocks fitted to it or the board's 8 by 8 cells, and the words placed as the scene places
+    them, in the scene's own units scaled to this box, so the page's one .qm-say rule draws both."""
+    side = n + 2 * q
+    ground = f'<path fill="{GROUND}" d="M{q} {q}h{n}v{n}h-{n}z"/>'
+    if mask == "bust":
+        art = (f'<g transform="translate({q} {q}) scale({n / len(_BUST):.6g})" shape-rendering="crispEdges">'
+               f"{_bust_paths()}</g>")
+        row = _BUST_SAY_ROW * n / len(_BUST)
+    else:
+        step = n / _BOARD
+        cells = {1: "", 2: ""}
+        for r in range(_BOARD):
+            for c in range(_BOARD):
+                cells[1 + (r + c) % 2] += f"M{q + c * step:.6g} {q + r * step:.6g}h{step:.6g}v{step:.6g}h-{step:.6g}z"
+        art = f'<path class="qm-1" d="{cells[1]}"/><path class="qm-2" d="{cells[2]}"/>'
+        row = n / 2
+    unit = VIEW / side
+    say = _say(words, (q + n / 2) * unit, (q + row) * unit, mask == "board")
+    return (f'<g class="qr-mask" role="img" aria-label="{words}">{ground}{art}'
+            f'<g transform="scale({side / VIEW:.6g})">{say}</g></g>')
 
 
-def svg(modules, labelledby=None, mask=None):
+def svg(modules, labelledby=None, mask=None, mask_words=None):
     """An inline SVG of the symbol on a white tile that keeps a four-module quiet zone, one unit per module.
 
     The grid is the encoder's; only how a module is painted changes. A dark data module is a 0.88 dot with
@@ -268,9 +342,12 @@ def svg(modules, labelledby=None, mask=None):
     corner centre inside the arc only while its radius is under 0.5*sqrt(2)/(sqrt(2)-1), about 1.707.
 
     Every module, finders and alignment patterns included, is drawn in one group, class "modules", over the tile.
-    Given `mask`, the escaped name of the mask for a screen reader, a second group, class "qr-mask", draws the
-    constant pixelated figure in the same place and size (_flat_mask); the page's rules show one of the two.
+    Given `mask`, one of MASKS, and `mask_words`, the escaped instruction drawn on it and its name for a screen
+    reader, a second group, class "qr-mask", draws that mask over the symbol (_flat_mask); the page's rules show one
+    of the two.
     """
+    if mask is not None:
+        _mask_named(mask, mask_words)
     n, q = len(modules), QUIET_ZONE
     side = n + 2 * q
     finders = ((0, 0), (0, n - 7), (n - 7, 0))
@@ -300,7 +377,7 @@ def svg(modules, labelledby=None, mask=None):
                    f'<rect x="{x + 2}" y="{y + 2}" width="1" height="1" rx=".3" fill="{_QR_INK}"/>')
     out.append("</g>")
     if mask is not None:
-        out.append(_flat_mask(n, q, mask))
+        out.append(_flat_mask(n, q, mask, mask_words))
     out.append("</svg>")
     return "".join(out)
 
@@ -401,7 +478,7 @@ def _runs(cells):
     return out
 
 
-def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None):
+def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None, mask_words=None):
     """The pairing QR as the scene: the plate image under a group of polygons. None when the symbol is not version 3,
     and the caller draws svg() instead.
 
@@ -413,8 +490,11 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None):
     near kerb clips it all.
 
     All that a key changes is one group, class "modules"; the plate is drawn before it and outside it. Given `mask`,
-    the escaped name of the mask for a screen reader, a second group, class "qr-mask", lays the constant pixelated
-    figure flat on the symbol under the same kerb: its blocks only, since the plate holds the finders."""
+    one of MASKS, and `mask_words`, the escaped instruction and the mask's name for a screen reader, a second group,
+    class "qr-mask", lays that mask flat on the symbol under the same kerb, over one GROUND path that covers the whole
+    symbol, the plate's finders and timing included, with the words over it."""
+    if mask is not None:
+        _mask_named(mask, mask_words)
     n = len(modules)
     if n != MODULES:
         return None
@@ -460,12 +540,24 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None):
 
     veil = ""
     if mask is not None:
-        step = n / len(_MASK_ART)
-        fill = {"#": INK, "+": FACE_U, ".": GROUND}
-        blocks = {tone: "".join(area(c * step, r * step, (c + 1) * step, (r + 1) * step, 0.0)
-                                for c, r, t in _mask_blocks() if t == tone) for tone in fill}
-        veil = (f'<g class="qr-mask" role="img" aria-label="{mask}" clip-path="url(#{uid}k)">'
-                + "".join(f'<path fill="{fill[tone]}" d="{blocks[tone]}"/>' for tone in fill if blocks[tone]) + "</g>")
+        cx, cy = _pt(s0 + n / 2, s0 + n / 2, 0.0)       # the symbol's centre
+        if mask == "bust":
+            gx, gy = cx - len(_BUST) / 2 * _BUST_CELL, cy - len(_BUST) / 2 * _BUST_CELL
+            art = (f'<g transform="translate({gx:.2f} {gy:.2f}) scale({_BUST_CELL})" shape-rendering="crispEdges">'
+                   f"{_bust_paths()}</g>")
+            say = _say(mask_words, cx, gy + _BUST_SAY_ROW * _BUST_CELL, False)
+        else:
+            step = n / _BOARD
+            cells = {1: "", 2: ""}
+            for r in range(_BOARD):
+                for c in range(_BOARD):
+                    cells[1 + (r + c) % 2] += area(c * step, r * step, (c + 1) * step, (r + 1) * step, 0.0)
+            art = f'<path class="qm-1" d="{cells[1]}"/><path class="qm-2" d="{cells[2]}"/>'
+            say = _say(mask_words, cx, cy, True)
+        # the drawing lies on the field under the kerb's clip, the ground path first; the words are laid over the
+        # scene, never clipped
+        veil = (f'<g class="qr-mask" role="img" aria-label="{mask_words}"><g clip-path="url(#{uid}k)">'
+                f'<path fill="{GROUND}" d="{area(0, 0, n, n, 0.0)}"/>{art}</g>{say}</g>')
     dot = _poly([((du - dv) * AX, (du + dv) * AY) for du, dv in _OCTAGON])   # one dot, centred on 0 0
     dots = {True: [], False: []}
     for r in range(n):
