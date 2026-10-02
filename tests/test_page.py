@@ -72,7 +72,7 @@ CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
 # lower part is one fold; the top bar names the creator and the repository before the language switch, and «Salir»
 # closes the page.
 PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", NAME, "title", "intro", "state_waiting",
-              "watch_waiting", "this_pc", "pause", "scan", "code_label", None, "qr_for", "show_code", "check", "log_title",
+              "watch_waiting", "this_pc", "pause", "code_label", None, "qr_for", "show_code", "check", "log_title",
               "log_help", "fold", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence",
               "forget", "quit")
 # The texts of PAGE_ORDER before the language switch: the title tag and the credit.
@@ -91,6 +91,12 @@ QR_FOR = {"es": "Escanea este código con Pendi para recibir en el teléfono las
                 "queue is accepted."}
 FOLD = {"es": "Más opciones: escribir los valores del enlace u olvidar este PC",
         "en": "More options: type the link values, or forget this PC"}
+# The scan sentence the card held before the label became the QR's one sentence (owner 2026-10-02 10:3x, his B):
+# gone from both tables and from the page.
+SCAN = {"es": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
+        "en": "Scan this code with the camera of the phone that holds your account and confirm the link."}
+# The name of the pixelated mask over the QR's modules, for a screen reader.
+QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 SPONSOR = {"es": {"by": "Patrocinado por Pendiapp.com", "cap": "Escanéalo para abrir pendiapp.com",
                   "qr": "Código QR de pendiapp.com",
                   "note": "Este PC ya está enlazado, por eso ya no se muestra su código. «Olvidar este PC», en «Más "
@@ -456,7 +462,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual(state["text"], page.WORDS[expected]["state_waiting"])
 
     def test_the_page_loads_nothing_from_outside_and_every_word_keeps_its_one_place(self):
-        # Mutation: the scan sentence left out of the QR's column. Red: the words miss WORDS["es"]["scan"].
+        # Mutation: the label left out of the QR's card. Red: the words miss WORDS["es"]["qr_for"].
         # Mutation: a web font imported by the style. Red: "@import" and an http address on the page.
         secret = self.secret()
         self.page = page.PairingPage(self.state, watch=lambda: {"client": "waiting"}, on_quit=lambda: None,
@@ -478,7 +484,8 @@ class PairingPageTest(unittest.TestCase):
                 # The pairing address is only in the QR's own modules: the page draws the scene of the encoder's
                 # symbol over the one plate (SceneDecodeTest reads it with ZXing).
                 drawn = re.findall(r'<svg class="qr".*?</svg>', shown, re.S)
-                self.assertEqual(drawn, [qr.scene_svg(symbol, plate_almena.PLATE_DATA_URI, labelledby="scan")])
+                self.assertEqual(drawn, [qr.scene_svg(symbol, plate_almena.PLATE_DATA_URI, labelledby="qr-for",
+                                                      mask=html.escape(words["qr_mask"]))])
         self.assertEqual(self.call("POST", "/typed", form={"linkId": "WXYZ6789ABC", "secret": SECRET})[0], 303)
         refused = list(PAGE_ORDER)
         refused.insert(refused.index("save") + 1, "typed_refused")
@@ -574,7 +581,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertTrue(card.endswith(
                     f'<p class="key" data-shown="false"><span class="key-label">{html.escape(words["code_label"])}</span> '
                     f'<span class="key-val">{mask.group(0)}<span class="code" id="code">{key}</span></span></p>'
-                    f'<p class="qr-for">{html.escape(QR_FOR[lang])}</p>'
+                    f'<p class="qr-for" id="qr-for">{html.escape(QR_FOR[lang])}</p>'
                     f'<button type="button" class="reveal" aria-controls="code" data-show="{SHOW[lang]}" '
                     f'data-hide="{HIDE[lang]}">{SHOW[lang]}</button>{page._PARTY}</figure>'), card[-600:])
                 # The key's text is only the code's own: never in an attribute, a label or a name.
@@ -605,11 +612,81 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual([marker for marker in ('class="key"', 'class="reveal"', 'class="mask"') if marker in linked],
                          [])
 
+    def test_the_pairing_qr_s_modules_are_masked_until_the_code_is_shown_and_the_drawings_stay_visible(self):
+        # Mutation: the whole QR hidden, as on a0572b4. Red: no modules group, and a rule hides .qr. Mutation: the
+        # plate drawn inside the modules group. Red: the modules group comes first. Mutation: a rule hiding the party
+        # at data-shown false. Red: a hiding rule's target is .party.
+        hiding = re.compile(r"visibility:hidden|display:none|opacity:0\b")
+        drawing = re.compile(r"\.(?:qr|party|px)(?![-\w])|^(?:svg|use|image|figure|\.key-card)(?![-\w])")
+        for accept in ("es-CO,es;q=0.9", "en-US,en;q=0.9"):
+            with self.subTest(accept=accept):
+                shown = self.html(accept)
+                card = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)[0]
+                drawn = re.findall(r'<svg class="qr".*?</svg>', card, re.S)[0]
+                self.assertEqual(drawn.count('<g class="modules"'), 1)
+                self.assertEqual(drawn.count('<g class="qr-mask"'), 1)
+                # The plate is drawn first, outside both groups; the party is the card's, outside the QR.
+                self.assertLess(drawn.index('<use href="#qp"/>'), drawn.index('<g class="modules"'))
+                self.assertEqual(card.count('<div class="party" aria-hidden="true"><svg class="px"'), 1)
+                self.assertNotIn('class="px"', drawn)
+                style = re.search(r"<style>(.*?)</style><noscript>", shown, re.S).group(1)
+                noscript = re.search(r"<noscript><style>([^<]*)</style></noscript>", shown).group(1)
+                self.assertIn('.key-card:has(.key[data-shown="false"]) .modules{visibility:hidden}', style)
+                self.assertIn('.key-card:has(.key[data-shown="true"]) .qr-mask{visibility:hidden}', style)
+                for sheet in (style, noscript):
+                    for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+                        if hiding.search(body):
+                            for selector in selectors.split(","):
+                                target = re.split(r"[\s>+~]+", selector.strip())[-1]
+                                self.assertIsNone(drawing.search(target), selector + "{" + body + "}")
+
+    def test_the_qr_mask_is_the_same_for_every_key_and_holds_no_module_of_the_code(self):
+        # Mutation: the mask drawn from the symbol's own modules. Red: two keys give two masks, and the mask differs
+        # from the one over a symbol with no dark module. Mutation: no mask, as on a0572b4. Red: none found.
+        mask = re.compile(r'<g class="qr-mask"[^>]*>.*?</g>', re.S)
+        modules = re.compile(r'<g class="modules".*?</g>(?=<g class="qr-mask")', re.S)
+        served = []
+        for _ in range(2):
+            served.append((self.secret(), self.html("es-CO,es;q=0.9")))
+            self.assertEqual(self.call("POST", "/forget")[0], 303)
+        self.assertNotEqual(served[0][0], served[1][0])
+        masks = [mask.findall(shown) for _, shown in served]
+        self.assertEqual([len(found) for found in masks], [1, 1])
+        self.assertEqual(masks[0][0], masks[1][0])
+        self.assertNotEqual(*[modules.findall(shown)[0] for _, shown in served])
+        self.assertNotIn("<use", masks[0][0])
+        label = html.escape(page.WORDS["es"]["qr_mask"])
+        for secret, _ in served:
+            symbol = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
+            blank = [[False] * len(symbol) for _ in symbol]
+            self.assertEqual(mask.findall(qr.scene_svg(blank, plate_almena.PLATE_DATA_URI, mask=label)), masks[0])
+            real = re.findall(r'<use href="#qd" x="[^"]+" y="[^"]+"/>',
+                              qr.scene_svg(symbol, plate_almena.PLATE_DATA_URI))
+            self.assertGreater(len(real), 100)
+            self.assertEqual([dot for dot in set(real) if dot in masks[0][0]], [])
+
+    def test_the_label_is_the_qr_s_accessible_name_and_the_scan_sentence_is_gone(self):
+        # Mutation: the scan sentence kept, as on a0572b4. Red: the tables hold "scan" and the QR is named by it.
+        self.assertNotIn(".scan{", page._STYLE)
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                self.assertNotIn("scan", page.WORDS[lang])
+                self.assertEqual(page.WORDS[lang].get("qr_mask"), QR_MASK[lang])
+                shown = self.html(accept)
+                card = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)[0]
+                self.assertIn(' aria-labelledby="qr-for"', re.search(r'<svg class="qr"[^>]*>', card).group(0))
+                self.assertEqual(shown.count('id="qr-for"'), 1)
+                self.assertIn('<p class="qr-for" id="qr-for">', card)
+                self.assertIn(f'<g class="qr-mask" role="img" aria-label="{html.escape(QR_MASK[lang])}"', card)
+                for gone in ('class="scan"', 'id="scan"', html.escape(SCAN["es"]), html.escape(SCAN["en"])):
+                    self.assertNotIn(gone, shown)
+
     def test_the_pairing_qr_is_hidden_until_the_code_is_shown(self):
-        # Mutation: the QR's hiding rule dropped, as on 8158c78. Red: the style misses it. Mutation: the QR left out
-        # of the noscript rule. Red: the no-script road keeps the QR hidden. Mutation: the QR drawn outside the card
-        # whose key carries data-shown. Red: the card does not start with the QR.
-        rule = '.key-card:has(.key[data-shown="false"]) .qr'
+        # Rewritten for round 2: the QR's modules, never the whole QR. Mutation: the modules' hiding rule dropped.
+        # Red: the style misses it. Mutation: the modules left out of the noscript rule. Red: the no-script road keeps
+        # them hidden. Mutation: the QR drawn outside the card whose key carries data-shown. Red: the card does not
+        # start with the QR.
+        rule = '.key-card:has(.key[data-shown="false"]) .modules'
         for accept in ("es-CO,es;q=0.9", "en-US,en;q=0.9"):
             with self.subTest(accept=accept):
                 shown = self.html(accept)
@@ -620,11 +697,13 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual(cards[0].count('<p class="key" data-shown="false">'), 1)
                 style = re.search(r"<style>(.*?)</style><noscript>", shown, re.S).group(1)
                 self.assertIn(rule + "{visibility:hidden}", style)
-                self.assertNotIn('.key[data-shown="true"] .qr', style)
+                self.assertIn('.key-card:has(.key[data-shown="true"]) .qr-mask{visibility:hidden}', style)
+                self.assertNotIn(".qr{visibility:hidden}", style)
                 noscript = re.search(r"<noscript><style>([^<]*)</style></noscript>", shown).group(1)
                 rules = {selector.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", noscript)
                          for selector in selectors.split(",")}
                 self.assertEqual(rules.get(rule), "visibility:visible")
+                self.assertEqual(rules.get(".qr-mask"), "display:none")
         # The same data-shown and the same timer as the key: the script is the key's own, unchanged.
         self.assertIn("function showKey(on){k.dataset.shown=String(on);", page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("setTimeout("), 1)
@@ -638,7 +717,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual(page.WORDS[lang].get("qr_for"), QR_FOR[lang])
                 shown = self.html(accept)
                 card = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)[0]
-                self.assertIn(f'</p><p class="qr-for">{html.escape(QR_FOR[lang])}</p><button type="button" '
+                self.assertIn(f'</p><p class="qr-for" id="qr-for">{html.escape(QR_FOR[lang])}</p><button type="button" '
                               'class="reveal"', card)
                 self.assertEqual(shown.count(html.escape(QR_FOR[lang])), 1)
                 self.assertIsNone(GAME_WORDS.search(QR_FOR[lang]))
