@@ -14,12 +14,16 @@ as an older copy writes it, reads as not closing.
 The record also carries the holder's version and a replace secret, written at the publish and kept by the mark: a
 newer copy started over it posts the secret to the holder's page, POST /replace, and the holder stops as its quit
 does (__main__.py). A record with neither, as an older copy writes it, reads version None and secret None.
+
+The record's `started` is the holder's creation time: a newer copy whose post gets no 202 ends the older one by
+its pid only once terminate proves the pid is still that holder, and evicts the stale file of a holder whose
+pid another process has now.
 """
 import errno
 import json
+import ntpath
 import os
 import secrets
-import signal
 import tempfile
 import time
 from pathlib import Path
@@ -39,6 +43,13 @@ _STILL_ACTIVE = 259
 _ERROR_ACCESS_DENIED = 5
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_TERMINATE = 0x0001
+# terminate's three answers: the holder ended; the pid names another process, so the run file is stale; the
+# system refused to open or end it.
+ENDED, NOT_OURS, REFUSED = "ended", "not-ours", "refused"
+# The images an older record's holder runs, the python of its install, compared lower-cased.
+_PYTHON_IMAGES = ("python.exe", "pythonw.exe")
+# An older record's file proves its holder started after the boot only when written this long after it.
+BOOT_MARGIN_SECONDS = 2.0
 
 
 class FolderNotWritable(PermissionError):
@@ -81,32 +92,162 @@ def _windows_alive(pid):
         kernel32.CloseHandle(handle)
 
 
-def terminate(pid):
-    """Ends the process `pid`, named by its pid alone, never by its name or its command line: TerminateProcess
-    through ctypes on Windows, opened as pid_alive opens it, and SIGTERM elsewhere. OSError when it cannot be ended;
-    this process is never ended."""
-    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
-        raise ProcessLookupError(errno.ESRCH, "no other process has this pid", str(pid))
-    if os.name != "nt":
-        os.kill(pid, signal.SIGTERM)
-        return
+class Answer(str):
+    """One of terminate's three answers, ENDED, NOT_OURS or REFUSED, compared as its word; `error` is the OSError
+    behind REFUSED, which the caller prints, else None."""
+
+    def __new__(cls, word, error=None):
+        answer = super().__new__(cls, word)
+        answer.error = error
+        return answer
+
+
+def _kernel32():
+    """kernel32 through ctypes, the calls terminate and process_started make typed."""
     import ctypes
     from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetCurrentProcess.argtypes = ()
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                    ctypes.POINTER(wintypes.DWORD))
     kernel32.TerminateProcess.restype = wintypes.BOOL
     kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+    kernel32.GetTickCount64.argtypes = ()
     kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    handle = kernel32.OpenProcess(_PROCESS_TERMINATE, False, pid)
+    return kernel32
+
+
+def _creation_time(kernel32, handle):
+    """The creation time of the process `handle` opens, the 100 ns FILETIME integer GetProcessTimes gives."""
+    import ctypes
+    from ctypes import wintypes
+
+    created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+    if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(ended), ctypes.byref(kernel),
+                                    ctypes.byref(user)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return created.dwHighDateTime << 32 | created.dwLowDateTime
+
+
+def _image_name(kernel32, handle):
+    """The file name of the image the process `handle` opens runs: QueryFullProcessImageNameW's path, no folder."""
+    import ctypes
+    from ctypes import wintypes
+
+    size = wintypes.DWORD(32768)
+    path = ctypes.create_unicode_buffer(size.value)
+    if not kernel32.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(size)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return ntpath.basename(path.value)
+
+
+def _open_to_end(kernel32, pid):
+    """The process `pid` opened to read its times and image and to end it; OSError when the system refuses."""
+    import ctypes
+
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION | _PROCESS_TERMINATE, False, pid)
     if not handle:
         raise ctypes.WinError(ctypes.get_last_error())
+    return handle
+
+
+def _off_windows(pid):
+    return OSError(errno.ENOSYS, "a process is told apart from another one only on Windows", str(pid))
+
+
+def process_started():
+    """This process's creation time, the 100 ns FILETIME integer GetProcessTimes gives for GetCurrentProcess: the
+    holder's identity in its record. None on a platform with no kernel32."""
+    if os.name != "nt":
+        return None
+    kernel32 = _kernel32()
+    return _creation_time(kernel32, kernel32.GetCurrentProcess())
+
+
+def _probe(pid):
+    """(creation time, image file name) of the process `pid`, opened as terminate opens it; OSError when the system
+    refuses to open or read it."""
+    if os.name != "nt":
+        raise _off_windows(pid)
+    kernel32 = _kernel32()
+    handle = _open_to_end(kernel32, pid)
     try:
-        if not kernel32.TerminateProcess(handle, 1):
-            raise ctypes.WinError(ctypes.get_last_error())
+        return _creation_time(kernel32, handle), _image_name(kernel32, handle)
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _end(pid, created):
+    """Ends the process `pid` while it is still the one created at `created`: opened again, its creation time read on
+    that same handle before TerminateProcess. True when ended; False when the pid names another process by now;
+    OSError when the system refuses to open or end it."""
+    if os.name != "nt":
+        raise _off_windows(pid)
+    import ctypes
+
+    kernel32 = _kernel32()
+    handle = _open_to_end(kernel32, pid)
+    try:
+        if _creation_time(kernel32, handle) != created:
+            return False
+        if not kernel32.TerminateProcess(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return True
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _boot_instant():
+    """The instant this system booted, in seconds since the epoch: now less GetTickCount64's milliseconds."""
+    if os.name != "nt":
+        raise _off_windows(0)
+    return time.time() - _kernel32().GetTickCount64() / 1000
+
+
+def _written_after(path, instant):
+    """True when the run file at `path` was last written after `instant`, in seconds since the epoch; False when it
+    is gone."""
+    try:
+        return os.stat(path).st_mtime > instant
+    except FileNotFoundError:
+        return False
+
+
+def terminate(pid, started, path, probe=_probe, boot_instant=_boot_instant, end=_end):
+    """Ends the process `pid` the run file at `path` names only once that process is proven its holder, and answers
+    ENDED, NOT_OURS or REFUSED. The pid is opened with PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE and its
+    creation time read: with `started`, the record's creation time, it is ended only when the two are equal; with
+    None, as an older record (0.1.5 and before) has it, only when its image is python.exe or pythonw.exe and the run
+    file was written more than BOOT_MARGIN_SECONDS after the boot, so the pid of a holder that died with the system,
+    another process's now, is never ended. NOT_OURS: the pid is not the holder's and its run file is stale. REFUSED:
+    an OSError opening or ending it, kept on the answer. The pid the record names is the one process opened, never a
+    process searched by its name or its command line, and this process is never ended. The seams a test fakes, so no
+    test opens a process to end it: `probe(pid)` gives (creation time, image file name), `boot_instant()` the boot
+    in seconds since the epoch, and `end(pid, created)` ends the pid only while it still names the process created
+    then (False otherwise)."""
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return Answer(NOT_OURS)
+    try:
+        if started is None and not _written_after(path, boot_instant() + BOOT_MARGIN_SECONDS):
+            return Answer(NOT_OURS)  # whatever the pid shows: the holder died with the boot
+        created, image = probe(pid)
+        if started is not None:
+            ours = created == started
+        else:
+            ours = str(image).lower() in _PYTHON_IMAGES
+        if not ours or not end(pid, created):  # the end reads the creation time again on the handle it ends
+            return Answer(NOT_OURS)
+    except OSError as error:
+        return Answer(REFUSED, error)
+    return Answer(ENDED)
 
 
 class RunFile:
@@ -120,11 +261,14 @@ class RunFile:
         self._port = None
         # The replace secret, made at the publish: the page's /replace answers only a post that carries it.
         self.secret = None
+        # This process's creation time, written at the publish: a newer copy ends this one by its pid only when
+        # the pid's own creation time equals it.
+        self.started = None
 
     def claim(self):
         """None when this process now holds the file; the live holder's record, {pid, port, closing, version,
-        secret}, when another does. A refused remove or create (PermissionError on Windows: the file held open, or
-        pending its removal, by another start) is that other start only when its live record shows within
+        secret, started}, when another does. A refused remove or create (PermissionError on Windows: the file held
+        open, or pending its removal, by another start) is that other start only when its live record shows within
         REREAD_SECONDS. FolderNotWritable when the config folder takes no new file; OSError when the file
         can neither be created nor taken over."""
         try:
@@ -218,11 +362,13 @@ class RunFile:
             self._sleep(REREAD_STEP)
 
     def publish(self, port):
-        """This process's pid, its page's port, its version and the replace secret, written over the claim in one
-        move; PermissionError when the move is still refused after its retries. The secret is never logged or
-        shown."""
+        """This process's pid, its page's port, its version, the replace secret and its creation time, written over
+        the claim in one move; PermissionError when the move is still refused after its retries. The secret is never
+        logged or shown."""
         if self.secret is None:
             self.secret = secrets.token_hex(16)
+        if self.started is None:
+            self.started = process_started()
         self._write(self._record(port))
         self._port = port
 
@@ -233,7 +379,8 @@ class RunFile:
             self._write({**self._record(self._port), "closing": True})
 
     def _record(self, port):
-        return {"pid": self._pid, "port": port, "version": update.RUNNING_VERSION, "secret": self.secret}
+        return {"pid": self._pid, "port": port, "version": update.RUNNING_VERSION, "secret": self.secret,
+                "started": self.started}
 
     def _write(self, record):
         handle, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".run-", suffix=".tmp")
@@ -260,6 +407,19 @@ class RunFile:
                 pass
             except PermissionError:
                 pass  # refused to the end: the file stays, and a start waiting on it takes it over once this pid dies
+
+    def evict(self, holder):
+        """Removes the run file `holder` was read from, a record terminate answered NOT_OURS for, so stale: only while
+        the file still holds that record, under the retries of release. True when it removed it; False when the file
+        holds another record by then, or is gone; PermissionError when the remove is still refused after its retries,
+        so the start says it cannot replace the file."""
+        if self._read() != holder:
+            return False
+        try:
+            self._retried(os.remove, self.path)
+        except FileNotFoundError:
+            return False
+        return True
 
     def _retried(self, move, *args):
         """`move(*args)`, tried again REFUSED_STEP later while a reader makes the system refuse it, REFUSED_TRIES
@@ -289,7 +449,8 @@ class RunFile:
             return None
         port = data.get("port")
         valid = isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536
-        version, secret = data.get("version"), data.get("secret")
+        version, secret, started = data.get("version"), data.get("secret"), data.get("started")
         return {"pid": pid, "port": port if valid else None, "closing": data.get("closing") is True,
                 "version": version if isinstance(version, str) and version else None,
-                "secret": secret if isinstance(secret, str) and secret else None}
+                "secret": secret if isinstance(secret, str) and secret else None,
+                "started": started if isinstance(started, int) and not isinstance(started, bool) else None}

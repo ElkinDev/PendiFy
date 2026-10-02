@@ -2,6 +2,7 @@
 the bounded retry of a write or remove a reader refuses, and the wait's end when the closing holder's pid dies."""
 import json
 import os
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,6 +15,8 @@ update = support.module("update")
 HOLDER, OTHER = 4242, 4343  # two pids the alive seam answers for: no process is asked
 PORT = 54321
 HOLDER_VERSION = "1.2.3"  # a test vector, the version the holder runs
+STARTED = 133_000_000_000_000_000  # a test vector: a creation time as GetProcessTimes gives it, 100 ns ticks
+MTIME = 1_000_000_000.0  # a test vector: the run file's last write, in seconds since the epoch
 
 
 class RunFileTest(unittest.TestCase):
@@ -58,7 +61,8 @@ class RunFileTest(unittest.TestCase):
         held = self.start(HOLDER)
         self.assertIsNone(held.claim())
         held.publish(PORT)
-        published = {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION, "secret": held.secret}
+        published = {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION, "secret": held.secret,
+                     "started": held.started}
         self.assertEqual(self.record(), published)  # a running holder's record
         held.mark_closing()
         self.assertEqual(self.record(), {**published, "closing": True})
@@ -73,7 +77,8 @@ class RunFileTest(unittest.TestCase):
             with self.subTest(record=name):
                 self.path.write_text(json.dumps(record), encoding="utf-8")
                 self.assertEqual(self.start(OTHER).claim(),
-                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None})
+                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None,
+                                  "started": None})
                 self.assertEqual(self.record(), record)  # read, never rewritten
 
     def test_release_after_the_mark_removes_the_file_as_before(self):
@@ -104,7 +109,7 @@ class RunFileTest(unittest.TestCase):
         with refusal:
             held.release()
         self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION,
-                                         "secret": held.secret})
+                                         "secret": held.secret, "started": held.started})
         self.assertEqual((len(calls), sleeps),
                          (runfile.REFUSED_TRIES, [runfile.REFUSED_STEP] * (runfile.REFUSED_TRIES - 1)))
         self.assertLess(runfile.REFUSED_STEP * (runfile.REFUSED_TRIES - 1), 1.0)  # well under a second in all
@@ -116,7 +121,7 @@ class RunFileTest(unittest.TestCase):
         with refusal:
             held.mark_closing()
         self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION,
-                                         "secret": held.secret, "closing": True})
+                                         "secret": held.secret, "started": held.started, "closing": True})
         self.assertEqual((len(calls), sleeps, self.temps()), (3, [runfile.REFUSED_STEP] * 2, []))
 
     def test_a_publish_refused_to_the_end_raises_and_leaves_no_temp(self):
@@ -146,7 +151,8 @@ class RunFileTest(unittest.TestCase):
         start = runfile.RunFile(self.folder, pid=OTHER, alive=lambda pid: pid in alive, clock=lambda: now[0],
                                 sleep=sleep)
         holder = start.claim()
-        self.assertEqual(holder, {"pid": HOLDER, "port": PORT, "closing": True, "version": None, "secret": None})
+        self.assertEqual(holder, {"pid": HOLDER, "port": PORT, "closing": True, "version": None, "secret": None,
+                                  "started": None})
         self.assertTrue(start.wait_released(holder, 15.0))
         self.assertEqual((self.record()["pid"], now[0]), (HOLDER, runfile.REREAD_STEP))  # ended by the pid alone
         self.assertIsNone(start.claim())  # taken over
@@ -163,8 +169,11 @@ class RunFileTest(unittest.TestCase):
             secret = record.get("secret")
             self.assertRegex(str(secret), r"\A[0-9a-f]{32}\Z")
             self.assertEqual(getattr(held, "secret", None), secret)  # the secret the page's /replace answers to
-            self.assertEqual(record, {"pid": HOLDER, "port": PORT, "version": HOLDER_VERSION, "secret": secret})
-            claimed = {"pid": HOLDER, "port": PORT, "closing": False, "version": HOLDER_VERSION, "secret": secret}
+            started = runfile.process_started()  # this process's creation time, the holder's identity
+            self.assertEqual(record, {"pid": HOLDER, "port": PORT, "version": HOLDER_VERSION, "secret": secret,
+                                      "started": started})
+            claimed = {"pid": HOLDER, "port": PORT, "closing": False, "version": HOLDER_VERSION, "secret": secret,
+                       "started": started}
             self.assertEqual(self.start(OTHER).claim(), claimed)
             held.mark_closing()
             self.assertEqual(self.record(), {**record, "closing": True})
@@ -180,7 +189,116 @@ class RunFileTest(unittest.TestCase):
             with self.subTest(record=name):
                 self.path.write_text(json.dumps(record), encoding="utf-8")
                 self.assertEqual(self.start(OTHER).claim(),
-                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None})
+                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None,
+                                  "started": None})
+
+    def stale(self, mtime=MTIME):
+        """A run file a holder left, last written at `mtime`."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps({"pid": HOLDER, "port": PORT}), encoding="utf-8")
+        os.utime(self.path, (mtime, mtime))
+
+    def terminate(self, started, created, image, boot, ends=True):
+        """runfile.terminate of HOLDER, `started` read from its record, every Windows call faked: the pid's process
+        created at `created` from the image `image`, the system booted at `boot`, `ends` what the end answers. The
+        answer and the (pid, creation time) pairs TerminateProcess was asked to end."""
+        ended = []
+
+        def end(pid, at):
+            ended.append((pid, at))
+            return ends
+
+        answer = runfile.terminate(HOLDER, started, self.path, probe=lambda pid: (created, image),
+                                   boot_instant=lambda: boot, end=end)
+        return answer, ended
+
+    def test_terminate_ends_the_pid_only_when_its_creation_time_equals_the_records(self):
+        # Mutation: terminate without the creation-time compare. Red: a reused pid, its process created after the
+        # record's holder, is ended.
+        # Mutation: the end's answer ignored. Red: a pid reused between the read and the end reads ended.
+        self.stale()
+        for name, created, ends, expected in (
+                ("the holder", STARTED, True, ("ended", [(HOLDER, STARTED)])),
+                ("a reused pid", STARTED + 1, True, ("not-ours", [])),
+                ("a pid reused between the read and the end", STARTED, False, ("not-ours", [(HOLDER, STARTED)]))):
+            with self.subTest(process=name):
+                self.assertEqual(self.terminate(STARTED, created, "pythonw.exe", MTIME - 3600, ends), expected)
+        never = mock.Mock(side_effect=AssertionError("this process opened"))
+        self.assertEqual(runfile.terminate(os.getpid(), STARTED, self.path, probe=never, boot_instant=never, end=never),
+                         "not-ours")
+
+    def test_an_older_record_is_ended_only_for_a_python_image_younger_than_the_boot(self):
+        # Mutation: the image not read. Red: explorer.exe, the pid's image now, is ended.
+        # Mutation: the boot not read. Red: the reused pid of a holder that died with the boot is ended.
+        self.stale()
+        for name, image, boot, word in (("python.exe, written after the boot", "python.exe", MTIME - 3, "ended"),
+                                        ("pythonw.exe in capitals", "PythonW.EXE", MTIME - 3, "ended"),
+                                        ("another image", "explorer.exe", MTIME - 3, "not-ours"),
+                                        ("written within the margin", "pythonw.exe", MTIME - 1, "not-ours"),
+                                        ("written before the boot", "pythonw.exe", MTIME + 3600, "not-ours")):
+            with self.subTest(record=name):
+                ended = [(HOLDER, STARTED)] if word == "ended" else []
+                self.assertEqual(self.terminate(None, STARTED, image, boot), (word, ended))
+        self.path.unlink()  # the file gone: nothing proves the pid is the holder's
+        self.assertEqual(self.terminate(None, STARTED, "pythonw.exe", MTIME - 3600), ("not-ours", []))
+
+    def test_terminate_answers_refused_on_an_oserror(self):
+        # Mutation: the OSError raised out of terminate, as before. Red: no answer.
+        self.stale()
+        denied = PermissionError(13, "access denied")
+
+        def refuse(*args):
+            raise denied
+
+        for name, probe, end in (("opening the pid", refuse, lambda pid, at: True),
+                                 ("ending it", lambda pid: (STARTED, "pythonw.exe"), refuse)):
+            with self.subTest(call=name):
+                try:
+                    answer = runfile.terminate(HOLDER, STARTED, self.path, probe=probe,
+                                               boot_instant=lambda: MTIME - 3600, end=end)
+                except OSError as error:
+                    self.fail(f"raised {error!r}")
+                self.assertEqual((answer, answer.error), ("refused", denied))
+
+    def test_publish_writes_the_holders_start_time_and_claim_hands_it_back(self):
+        # Mutation: publish writes no start time. Red: the record and the claim carry none.
+        # Mutation: the start time handed back unchecked. Red: a text, a truth value or a fraction comes back.
+        with mock.patch.object(runfile, "process_started", lambda: STARTED, create=True):
+            held = self.start(HOLDER)
+            self.assertIsNone(held.claim())
+            held.publish(PORT)
+            self.assertEqual((self.record().get("started"), self.start(OTHER).claim().get("started")),
+                             (STARTED, STARTED))
+            held.mark_closing()  # kept by the mark
+            self.assertEqual((self.record().get("started"), self.start(OTHER).claim().get("started")),
+                             (STARTED, STARTED))
+        for name, value in (("a text", str(STARTED)), ("a truth value", True), ("a fraction", 1.5)):
+            with self.subTest(started=name):
+                self.path.write_text(json.dumps({"pid": HOLDER, "port": PORT, "started": value}), encoding="utf-8")
+                self.assertIsNone(self.start(OTHER).claim().get("started", "missing"))
+        own = runfile.process_started()  # this process's own creation time, read on its pseudo handle
+        if os.name == "nt":  # FILETIME counts 100 ns from 1601; this test process started less than a day ago
+            age = time.time() - (own / 10**7 - 11_644_473_600)
+            self.assertTrue(0 < age < 86_400, age)
+        else:
+            self.assertIsNone(own)
+
+    def test_evict_removes_the_file_only_while_it_still_holds_the_record_read(self):
+        # Mutation: evict without the content check. Red: another start's record, written since, is removed.
+        self.folder.mkdir(parents=True)
+        stale = {"pid": HOLDER, "port": PORT, "version": HOLDER_VERSION, "secret": "s" * 32, "started": STARTED}
+        self.path.write_text(json.dumps(stale), encoding="utf-8")
+        start = self.start(OTHER)
+        holder = start.claim()
+        other = {"pid": HOLDER + 1, "port": PORT + 1}  # another start's record, written since the read
+        self.path.write_text(json.dumps(other), encoding="utf-8")
+        self.assertEqual((start.evict(holder), self.path.exists()), (False, True))
+        self.assertEqual(self.record(), other)
+        self.path.write_text(json.dumps(stale), encoding="utf-8")
+        remove, calls = self.refused("remove", 2)
+        with remove:  # refused twice by a reader, retried as release's remove is
+            self.assertEqual((start.evict(holder), self.path.exists(), len(calls)), (True, False, 3))
+        self.assertFalse(start.evict(holder))  # gone already: nothing to remove
 
 
 if __name__ == "__main__":

@@ -57,6 +57,10 @@ RESTART_FAILED_LINE = "cannot restart: the new copy did not start; start the pro
 REPLACED_LINES = {"es": "Se reemplazó la copia anterior ({old}) por esta ({new}).",
                   "en": "The older copy ({old}) was replaced by this one ({new})."}
 UNKNOWN_VERSION = {"es": "desconocida", "en": "unknown"}
+# The line a start prints when the older copy it would replace cannot be ended, in the page's language, with the
+# system's reason.
+CLOSE_REFUSED_LINES = {"es": "No se pudo cerrar la copia anterior: {reason}",
+                       "en": "The older copy could not be closed: {reason}"}
 REPLACE_TIMEOUT_SECONDS = 5.0  # the replace post to the older copy's page
 _MB_ICONINFORMATION = 0x40
 _MB_SETFOREGROUND = 0x10000
@@ -217,17 +221,39 @@ def _ask_replace(holder):
         return False
 
 
-def _replace(run, holder, terminate):
-    """The older `holder` stopped: asked through its page's /replace, else, with no secret in its record or no 202
-    from its page, ended by its pid alone through `terminate`. True once the run file no longer names it as a live
-    process within CLOSING_WAIT_SECONDS: its file gone, or left stale by its death, which claim() takes over; False
-    when it is still alive then, or cannot be ended."""
+def _kept_language(store):
+    """The page's language before the page is made, with no browser to ask: the kept choice, else Spanish, as the
+    icon's words. A config file that cannot be read gives Spanish: the choice only words one line."""
+    try:
+        return store.read_lang() or page.language(None)
+    except (OSError, ValueError):
+        return page.language(None)
+
+
+def _replace(run, holder, terminate, store):
+    """The older `holder` dealt with, then the run file claimed again: (the claim's answer, `holder` when this start
+    replaced it, else None). It is asked through its page's /replace; with no secret in its record or no 202 from its
+    page, `terminate` is asked to end it by its pid, which it does only for the process its record names
+    (runfile.terminate):
+    - a 202, or ended: once the run file no longer names it as a live process within CLOSING_WAIT_SECONDS, its file
+      gone or left stale by its death, the file is claimed; a holder still alive then is handed back as it was read;
+    - not-ours: the pid names another process now, so the file is stale: evicted while it still holds that record,
+      then claimed as a first start claims it;
+    - refused: the reason printed on one line and the file waited for as long, since the pid may be dying under
+      another start's terminate, then claimed again: a holder that still stands is read afresh, never the snapshot."""
     if holder["secret"] is None or not _ask_replace(holder):
-        try:
-            terminate(holder["pid"])
-        except OSError:
-            return False
-    return run.wait_released(holder, CLOSING_WAIT_SECONDS)
+        answer = terminate(holder["pid"], holder["started"], run.path)
+        if answer == runfile.NOT_OURS:
+            run.evict(holder)
+            return run.claim(), holder
+        if answer == runfile.REFUSED:
+            reason = answer.error.strerror or answer.error
+            print(CLOSE_REFUSED_LINES[_kept_language(store)].format(reason=reason), flush=True)
+            run.wait_released(holder, CLOSING_WAIT_SECONDS)
+            return run.claim(), None
+    if run.wait_released(holder, CLOSING_WAIT_SECONDS):
+        return run.claim(), holder
+    return holder, None
 
 
 def _ready_version(updater):
@@ -246,9 +272,10 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         holder = run.claim()
         if holder is not None and holder["closing"] and run.wait_released(holder, CLOSING_WAIT_SECONDS):
             holder = run.claim()  # the closing copy let its file go: this start claims it as a first one does
-        # A running older copy is replaced; one still alive after the wait keeps the road below, its page opened.
-        if holder is not None and not holder["closing"] and _replaces(holder) and _replace(run, holder, terminate):
-            replaced, holder = holder, run.claim()  # its file gone or stale: claimed as a first one does
+        # A running older copy is replaced (_replace); a holder that still stands after it keeps the road below,
+        # its page opened.
+        if holder is not None and not holder["closing"] and _replaces(holder):
+            holder, replaced = _replace(run, holder, terminate, store)
     except runfile.FolderNotWritable as refused:
         return _ends(FOLDER_FAILED_LINE.format(path=refused.filename), 1, show)
     except OSError:

@@ -49,16 +49,20 @@ PAGE_LINE = re.compile(r"page: (http://127\.0\.0\.1:\d+/)\n")
 # Test vectors: the version a newer copy runs, an older and a newer holder's, and a run file's replace secret.
 NEWER, OLDER, NEWEST = "0.2.0", "0.1.9", "0.10.0"
 RUN_SECRET = "0123456789abcdef" * 2
+STARTED = 133_000_000_000_000_000  # a test vector: a holder's creation time as GetProcessTimes gives it
 
 
 def published(record):
-    """`record`, a record this start wrote, with its replace secret checked, 32 hex digits, and left out: a secret is
-    never compared by value. Anything else as it is."""
-    if not isinstance(record, dict) or "secret" not in record:
+    """`record`, a record this start wrote, with its replace secret checked, 32 hex digits, and its start time
+    checked, this process's creation time, and both left out: a secret is never compared by value. Anything else as
+    it is."""
+    if not isinstance(record, dict) or not {"secret", "started"} & record.keys():
         return record
-    if re.fullmatch(r"[0-9a-f]{32}", str(record["secret"])) is None:
+    if "secret" in record and re.fullmatch(r"[0-9a-f]{32}", str(record["secret"])) is None:
         raise AssertionError(f"not a replace secret: {record['secret']!r}")
-    return {key: value for key, value in record.items() if key != "secret"}
+    if "started" in record and record["started"] != runfile.process_started():
+        raise AssertionError(f"not this process's start time: {record['started']!r}")
+    return {key: value for key, value in record.items() if key not in ("secret", "started")}
 
 
 def answers(port):
@@ -203,7 +207,7 @@ class MainCommandTest(unittest.TestCase):
         kwargs.setdefault("tray", FakeTray)  # never a real icon by the clock
         kwargs.setdefault("updater", FakeUpdater)  # never PyPI, never pip
         kwargs.setdefault("spawn", lambda command, **options: self.fail(f"a copy started: {command}"))
-        kwargs.setdefault("terminate", lambda pid: self.fail(f"a process ended: {pid}"))  # never a real one
+        kwargs.setdefault("terminate", lambda *args: self.fail(f"a process ended: {args}"))  # never a real one
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -978,25 +982,36 @@ class MainCommandTest(unittest.TestCase):
 
     def test_a_newer_copy_terminates_an_older_holder_that_has_no_secret_and_takes_the_file(self):
         # Mutation: a holder with no secret kept, as before. Red: nothing ended, the holder's page opened.
+        # Mutation: the holder ended only when its record has no secret (review MINOR 2). Red: after its page's 403,
+        # nothing ended.
         # The holder: a child that ends by itself once its input closes, so no process is terminated by the test.
-        holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
-        self.addCleanup(holder.wait, 30)
-        self.addCleanup(holder.stdin.close)
-        self.running_holder(pid=holder.pid)  # an older copy's record: no version, no secret
-        ended = []
+        for road in ("no secret in its record", "its page answered 403"):
+            with self.subTest(road=road):
+                holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+                self.addCleanup(holder.wait, 30)
+                self.addCleanup(holder.stdin.close)
+                holder_page, fields, posted, old = None, {}, [], "desconocida"  # an older copy's record: pid, port
+                if road == "its page answered 403":
+                    holder_page = self.holder_page(403)
+                    fields = {"port": holder_page.port, "version": OLDER, "secret": RUN_SECRET, "started": STARTED}
+                    posted, old = [("/replace", {"secret": [RUN_SECRET]})], OLDER
+                self.running_holder(pid=holder.pid, **fields)
+                ended, clock = [], FakeClock()
 
-        def terminate(pid):  # the seam: the holder's input closed, it ends, and its run file turns stale
-            ended.append(pid)
-            holder.stdin.close()
-            holder.wait(30)
+                def terminate(*args, holder=holder):  # the seam: the holder's input closed, it ends, its file stale
+                    ended.append(args)
+                    holder.stdin.close()
+                    holder.wait(30)
+                    return "ended"
 
-        (code, out, err), opened = self.start_newer(terminate=terminate)
-        self.assertEqual(ended, [holder.pid])
-        served = PAGE_LINE.search(out)
-        self.assertEqual((code, err, served is not None), (0, "", True), out)
-        self.assertEqual(out, f"Se reemplazó la copia anterior (desconocida) por esta ({NEWER}).\n" + served.group(0))
-        self.assertEqual(opened, [served.group(1)])
-        self.assertFalse(self.run_file.exists())
+                (code, out, err), opened = self.start_newer(clock=clock.clock, sleep=clock.sleep, terminate=terminate)
+                self.assertEqual(ended, [(holder.pid, fields.get("started"), self.run_file)])
+                self.assertEqual(holder_page.posts if holder_page else [], posted)
+                served = PAGE_LINE.search(out)
+                self.assertEqual((code, err, served is not None), (0, "", True), out)
+                self.assertEqual(out, f"Se reemplazó la copia anterior ({old}) por esta ({NEWER}).\n" + served.group(0))
+                self.assertEqual(opened, [served.group(1)])
+                self.assertFalse(self.run_file.exists())
 
     def test_a_same_version_second_start_opens_the_holders_page_as_before(self):
         # Mutation: the compare as at least as new. Red: the same version's replace route posted.
@@ -1019,11 +1034,73 @@ class MainCommandTest(unittest.TestCase):
                 fields = {"port": holder_page.port, "version": OLDER, "secret": RUN_SECRET}
                 record = self.running_holder(**(fields if road == "its page answered" else {}))
                 clock, ended = FakeClock(), []
-                result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep, terminate=ended.append)
+                result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep,
+                                                  terminate=lambda *args: ended.append(args) or "ended")
                 self.assertEqual((result, opened), ((0, entry.ALREADY_RUNNING_LINE + "\n", ""),
                                                     [f"http://127.0.0.1:{record['port']}/"]))
                 posted = [("/replace", {"secret": [RUN_SECRET]})] if road == "its page answered" else []
-                self.assertEqual((holder_page.posts, ended), (posted, [] if posted else [os.getppid()]))
+                asked = [] if posted else [(os.getppid(), None, self.run_file)]
+                self.assertEqual((holder_page.posts, ended), (posted, asked))
+                self.assertGreaterEqual(clock.now, CLOSING_BOUND)
+                self.assertLess(clock.now, CLOSING_BOUND + 2 * runfile.REREAD_STEP)
+                self.assertEqual(self.read_run(), record)
+
+    def test_a_reused_pid_is_never_ended_and_the_stale_file_is_taken(self):
+        # Mutation: not-ours read as ended, the file waited for. Red: the already-running line, the dead page opened.
+        # The record: an older copy's left by a shutdown, its pid another process's now (this test's parent), its
+        # page gone; terminate, faked, answers that the pid is not the holder's, so nothing is ended.
+        self.running_holder(version=OLDER, secret=RUN_SECRET, started=STARTED)
+        asked, clock = [], FakeClock()
+        (code, out, err), opened = self.start_newer(clock=clock.clock, sleep=clock.sleep,
+                                                    terminate=lambda *args: asked.append(args) or "not-ours")
+        self.assertEqual(asked, [(os.getppid(), STARTED, self.run_file)])
+        served = PAGE_LINE.search(out)
+        self.assertEqual((code, err, served is not None), (0, "", True), out)
+        self.assertEqual(out, f"Se reemplazó la copia anterior ({OLDER}) por esta ({NEWER}).\n" + served.group(0))
+        self.assertEqual(opened, [served.group(1)])
+        self.assertFalse(self.run_file.exists())  # its own run file, released at its own stop
+
+    def test_a_refused_terminate_waits_then_takes_the_file_once_the_holder_is_gone(self):
+        # Mutation: a refused terminate ends on the snapshot, as before. Red: the already-running line, the dead page
+        # opened.
+        holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+        self.addCleanup(holder.wait, 30)
+        self.addCleanup(holder.stdin.close)
+        self.running_holder(pid=holder.pid)  # an older copy's record: no version, no secret, no start time
+        asked = []
+
+        def terminate(*args):  # refused, while the holder dies under another start's terminate
+            asked.append(args)
+            holder.stdin.close()
+            holder.wait(30)
+            return runfile.Answer("refused", PermissionError(13, "access denied"))
+
+        clock = FakeClock()
+        (code, out, err), opened = self.start_newer(clock=clock.clock, sleep=clock.sleep, terminate=terminate)
+        self.assertEqual(asked, [(holder.pid, None, self.run_file)])
+        served = PAGE_LINE.search(out)
+        self.assertEqual((code, err, served is not None), (0, "", True), out)
+        self.assertEqual(out, "No se pudo cerrar la copia anterior: access denied\n" + served.group(0))
+        self.assertEqual(opened, [served.group(1)])
+        self.assertFalse(self.run_file.exists())
+
+    def test_a_refused_terminate_that_leaves_the_holder_ends_on_the_already_running_line_the_reason_printed(self):
+        # Mutation: no wait after a refused terminate. Red: the already-running line before CLOSING_BOUND.
+        lines = {"es": "No se pudo cerrar la copia anterior: access denied",
+                 "en": "The older copy could not be closed: access denied"}
+        for lang, line in lines.items():
+            with self.subTest(lang=lang):
+                if lang == "en":
+                    self.store.set_typed(LINK_ID, SECRET)  # a linked PC, whose config file keeps the choice
+                    self.store.set_lang("en")  # the kept choice, read with no page and no browser
+                record = self.running_holder()  # an older copy's record, alive (this test's parent): never ended
+                asked, clock = [], FakeClock()
+                refused = runfile.Answer("refused", PermissionError(13, "access denied"))
+                result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep,
+                                                  terminate=lambda *args: asked.append(args) or refused)
+                self.assertEqual(result, (0, f"{line}\n{entry.ALREADY_RUNNING_LINE}\n", ""))
+                self.assertEqual((opened, asked), ([f"http://127.0.0.1:{CLOSING_PORT}/"],
+                                                   [(os.getppid(), None, self.run_file)]))
                 self.assertGreaterEqual(clock.now, CLOSING_BOUND)
                 self.assertLess(clock.now, CLOSING_BOUND + 2 * runfile.REREAD_STEP)
                 self.assertEqual(self.read_run(), record)
