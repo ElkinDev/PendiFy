@@ -37,7 +37,7 @@ Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y 
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
 
-El código QR y la clave se muestran durante un minuto al pulsar «Mostrar el código» y luego se ocultan de nuevo.
+El código QR y la clave están ocultos; se muestran durante un minuto al pulsar «Mostrar el código», y la página dice para qué sirve el código.
 
 El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el programa guarda la elección para la próxima vez.
 
@@ -100,7 +100,7 @@ This way leaves no shortcut on the Desktop or in the Start menu, and the start w
 
 When it starts, the browser opens a local page with a QR code. Scan it with the phone's camera: the Pendi app opens and asks you to confirm the link. The page shows when the link is done.
 
-The QR code and the key show for a minute when «Show the code» is pressed, and then hide again.
+The QR code and the key are hidden; they show for a minute when «Show the code» is pressed, and the page says what the code is for.
 
 The button at the top right switches between the light and the dark theme, and the program keeps the choice for the next time.
 

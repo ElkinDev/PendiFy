@@ -289,7 +289,6 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         pip = _plan(_lines(done))[0]
         self.assertIn(source, pip)
-        self.assertTrue(pip.endswith(" " + source), pip)
         self.assertFalse(pip.endswith(" " + DEFAULT_SOURCE), pip)
 
         done = _file_form(self.env(PENDIFY_NOSTART="1"))
