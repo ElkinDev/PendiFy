@@ -326,9 +326,10 @@ class PageControlsTest(unittest.TestCase):
                 self.assertEqual(places, sorted(places))
                 texts = PageText(shown).texts
                 key = texts.index(page.WORDS[language]["code_label"])
+                # The key card opens with the QR, whose mask carries the instruction as text (lane pfmaskimpl).
                 self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:key],
                                  [page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"],
-                                  page.WORDS[language]["autostart_help"]])
+                                  page.WORDS[language]["autostart_help"], page.WORDS[language]["qr_press"]])
 
     def test_the_poll_reloads_the_page_when_the_pause_differs_from_what_it_rendered(self):
         # Mutation: the poll ignores the pause. Red: a second tab keeps the old line under its old controls.

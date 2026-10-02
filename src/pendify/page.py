@@ -8,6 +8,7 @@ nothing from any origin; no request line and no body is ever logged.
 import hmac
 import html
 import json
+import random
 import secrets
 import sys
 import threading
@@ -49,9 +50,9 @@ WORDS = {
         "intro": "Este programa envía sus avisos a tu cuenta de Pendi. Para eso, este PC tiene que quedar enlazado "
                  "con tu cuenta.",
         "code_label": "Clave de este PC:",
-        "qr_for": "Escanea este código con Pendi para recibir en el teléfono las notificaciones de este PC: cuando "
-                  "empieza la partida o cuando se acepta la cola.",
-        "qr_mask": "Código oculto",
+        "qr_for": "ESCANEA ESTE CÓDIGO QR con tu teléfono para recibir notificaciones cuando empiece la partida y "
+                  "se acepte la cola.",
+        "qr_press": "Pulsa Mostrar el código",
         "show_code": "Mostrar el código",
         "hide_code": "Ocultar el código",
         "mask": "Clave oculta",
@@ -141,9 +142,9 @@ WORDS = {
         "intro": "This program sends its alerts to your Pendi account. For that, this PC has to be linked to your "
                  "account.",
         "code_label": "This PC's key:",
-        "qr_for": "Scan this code with Pendi to get this PC's notifications on your phone: when the match starts or "
-                  "the queue is accepted.",
-        "qr_mask": "Hidden code",
+        "qr_for": "SCAN THIS QR CODE with your phone to get notifications when the match starts and the queue is "
+                  "accepted.",
+        "qr_press": "Press Show the code",
         "show_code": "Show the code",
         "hide_code": "Hide the code",
         "mask": "Key hidden",
@@ -332,6 +333,9 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           "button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"
           "form[action='/check'] button,form[action='/relink'] button{width:100%;background:var(--brand);"
           "color:var(--on-brand)}\n"
+          # The form under the QR and the linked page's relink form keep the card «Actividad»'s rhythm (OR-106): from
+          # 880 px the key's card leaves for its column, and form{margin:0} alone left each flush under «Este PC».
+          "form[action='/check'],form[action='/relink']{margin-top:16px}\n"
           "form[action='/forget'] button{background:transparent;border-color:var(--line);color:var(--danger)}\n"
           "form[action='/quit'] button{padding-inline:16px;background:transparent;color:var(--ink2)}\n"
           ".more{display:grid;gap:16px;margin-top:32px}\n"
@@ -424,6 +428,18 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
            '.key-card:has(.key[data-shown="false"]) .modules{visibility:hidden}\n'
            '.key-card:has(.key[data-shown="true"]) .qr-mask{visibility:hidden}\n'
            ".qr-for{margin:0}\n"
+           # The label with impact (OR-105, the pfmask mockup): the #state linked block's recipe, stretched to the
+           # card, the owner's leading capitals as its lead line and the rest under it. The masks over the QR (OR-104,
+           # qr.MASKS): the board's two tokens, and the instruction as plain text in the outline token over a halo in
+           # the masks' own ground, qr.GROUND, with no plate.
+           ".key-card .qr-for{justify-self:stretch;padding:16px 20px;border-radius:12px;background:var(--tonal);"
+           "color:var(--on-tonal);font-size:16px;line-height:24px;font-weight:500}\n"
+           ".key-card .qr-for b{display:block;margin:0 0 2px;font-size:20px;line-height:28px;font-weight:600;"
+           "letter-spacing:.02em}\n"
+           ".qm-1{fill:var(--brand)}.qm-2{fill:var(--tonal)}\n"
+           f".qm-say{{fill:var(--px-line);stroke:{qr.GROUND};stroke-width:10px;stroke-linejoin:round;"
+           "paint-order:stroke;font:600 28px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}"
+           ".qm-board{font-size:32px}\n"
            ".mask{display:flex;align-items:flex-end;gap:10px}\n"
            ".mask .grp{display:flex;align-items:flex-end;gap:2px}\n"
            ".mask svg{display:block;flex:none}\n"
@@ -670,6 +686,19 @@ _NOSCRIPT_STYLE = ('.key[data-shown="false"] .code,.key-card:has(.key[data-shown
                    '{visibility:visible}.mask,.qr-mask,.reveal{display:none}')
 
 
+def _lead(sentence):
+    """The QR label's leading capitals and the rest (OR-105): the words before the first one that holds a lower-case
+    letter, and the words from it. The tables keep the owner's sentence as one string; the page draws the capitals
+    as the label's lead line."""
+    words = sentence.split(" ")
+    for i, word in enumerate(words):
+        if any(letter.islower() for letter in word):
+            if i == 0:
+                break
+            return " ".join(words[:i]), " ".join(words[i:])
+    raise ValueError(f"the label holds no leading capitals followed by lower-case words: {sentence!r}")
+
+
 def _mask(words):
     """The mask over the key, three groups of the four heads, named for a screen reader. `words` are escaped."""
     return f'<span class="mask" role="img" aria-label="{words["mask"]}">{_MASK_GROUP * 3}</span>'
@@ -765,7 +794,7 @@ def _switch(words, token, lang):
 
 class PairingPage:
     def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None,
-                 updater=None):
+                 updater=None, mask=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
@@ -775,7 +804,10 @@ class PairingPage:
         events, oldest first; with it /state carries the log's lines and the page draws them in the card «Actividad»,
         without it no log key and no card. `updater` is the update (update.py), set by main once the page serves;
         with it /state carries its state, the page draws its line under the state line, and /update and /restart
-        are routes; without it none of them."""
+        are routes; without it none of them. `mask` is the QR's mask, one of qr.MASKS; without it the page picks one
+        here, once, at random (the standard random module: a cosmetic pick), so each start, a fresh install's first
+        included, shows the bust or the board, and every render of this page draws the same one (owner 2026-10-02
+        12:4x)."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
@@ -783,6 +815,7 @@ class PairingPage:
         self.autostart = autostart if autostart is not None and autostart.available else None
         self.events = events
         self.updater = updater
+        self.mask = mask if mask is not None else random.choice(qr.MASKS)
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -937,16 +970,18 @@ class PairingPage:
             link.append(log_card)
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
-            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="qr-for", mask=words["qr_mask"])
+            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="qr-for", mask=self.mask,
+                                 mask_words=words["qr_press"])
             if drawn is None:  # the scene is drawn for version 3 only
-                drawn = qr.svg(modules, labelledby="qr-for", mask=words["qr_mask"])
+                drawn = qr.svg(modules, labelledby="qr-for", mask=self.mask, mask_words=words["qr_press"])
+            lead, rest = _lead(words["qr_for"])
             link += [# The code is hidden until asked (owner 2026-10-02): the QR's modules under their pixelated
                      # mask and the key's text under its heads until its person presses the reveal, a real button
                      # whose label says what a press does, with the label of what the QR is for over it, the QR's
                      # one sentence and its name; _SCRIPT hides both again 60 s after a show. The drawings stay.
                      f'<figure class="key-card">{drawn}<p class="key" data-shown="false"><span class="key-label">'
                      f'{words["code_label"]}</span> <span class="key-val">{_mask(words)}<span class="code" id="code">'
-                     f'{codes.display(secret)}</span></span></p><p class="qr-for" id="qr-for">{words["qr_for"]}</p>'
+                     f'{codes.display(secret)}</span></span></p><p class="qr-for" id="qr-for"><b>{lead}</b> {rest}</p>'
                      f'<button type="button" class="reveal" '
                      f'aria-controls="code" data-show="{words["show_code"]}" data-hide="{words["hide_code"]}">'
                      f'{words["show_code"]}</button>{_PARTY}</figure>',
