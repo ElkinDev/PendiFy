@@ -108,8 +108,9 @@ QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 QR_PRESS = {"es": "Pulsa Mostrar el código", "en": "Press Show the code"}
 # The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress).
 REVEAL_BINDING = "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
-MASK_BINDING = ("document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));m.a"
-                "ddEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();showKey(true);}});});")
+MASK_BINDING = ("document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));"
+                "m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();"
+                "showKey(true);}});});")
 QR_LEAD = {"es": "ESCANEA ESTE CÓDIGO QR", "en": "SCAN THIS QR CODE"}
 
 

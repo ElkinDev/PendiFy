@@ -55,7 +55,6 @@ WORDS = {
         "qr_press": "Pulsa Mostrar el código",
         "show_code": "Mostrar el código",
         "hide_code": "Ocultar el código",
-        "mask": "Clave oculta",
         "fold": "Más opciones: escribir los valores del enlace u olvidar este PC",
         "credit": "Creado por",
         "sponsor_by": "Patrocinado por Pendiapp.com",
@@ -147,7 +146,6 @@ WORDS = {
         "qr_press": "Press Show the code",
         "show_code": "Show the code",
         "hide_code": "Hide the code",
-        "mask": "Key hidden",
         "fold": "More options: type the link values, or forget this PC",
         "credit": "Created by",
         "sponsor_by": "Sponsored by Pendiapp.com",
@@ -427,6 +425,8 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
            '.key[data-shown="true"] .mask{visibility:hidden}\n'
            '.key-card:has(.key[data-shown="false"]) .modules{visibility:hidden}\n'
            '.key-card:has(.key[data-shown="true"]) .qr-mask{visibility:hidden}\n'
+           # A press on either mask shows the code (OR-108).
+           ".qr-mask,.mask{cursor:pointer}\n"
            ".qr-for{margin:0}\n"
            # The label with impact (OR-105, the pfmask mockup): the #state linked block's recipe, stretched to the
            # card, the owner's leading capitals as its lead line and the rest under it. The masks over the QR (OR-104,
@@ -576,6 +576,11 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "function showKey(on){k.dataset.shown=String(on);r.textContent=on?r.dataset.hide:r.dataset.show;"
            "clearTimeout(hide);if(on)hide=setTimeout(()=>showKey(false),60000);}"
            "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
+           # Both masks do what the reveal does (OR-108): a click, Enter or Space on the QR's mask or on the
+           # key's shows the code, never hides it; Space would scroll the page, so its default is prevented.
+           "document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));"
+           "m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();"
+           "showKey(true);}});});"
            # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
            # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
            # its localStorage is a new origin each time. The server's value, served as data-theme, wins on the next
@@ -700,8 +705,10 @@ def _lead(sentence):
 
 
 def _mask(words):
-    """The mask over the key, three groups of the four heads, named for a screen reader. `words` are escaped."""
-    return f'<span class="mask" role="img" aria-label="{words["mask"]}">{_MASK_GROUP * 3}</span>'
+    """The mask over the key, three groups of the four heads, a control named by the press words, as the QR's
+    mask is: a press on either shows the code (lane pfpress). `words` are escaped."""
+    return (f'<span class="mask" role="button" tabindex="0" aria-label="{words["qr_press"]}">'
+            f'{_MASK_GROUP * 3}</span>')
 
 
 def _sponsor_runs():
