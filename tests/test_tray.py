@@ -159,6 +159,18 @@ class StuckWin32(FakeWin32):
         return super().Shell_NotifyIconW(action, data)
 
 
+class SlowWin32(FakeWin32):
+    """GetModuleHandleW waits until the case lets it go, as an _open slower than close's wait for the window."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = threading.Event()
+
+    def GetModuleHandleW(self, name):
+        self.release.wait(10)
+        return super().GetModuleHandleW(name)
+
+
 def tray_threads():
     return [thread for thread in threading.enumerate() if thread.name == tray.THREAD_NAME]
 
@@ -308,6 +320,26 @@ class TrayTest(unittest.TestCase):
         self.assertEqual(self.err.getvalue(),
                          " [tray] the icon's thread did not end in 0.2 seconds: its icon deleted from close\n")
         self.assertTrue(all(thread.daemon for thread in tray_threads()))
+
+    def test_close_before_the_window_exists_adds_no_icon_and_claims_no_delete(self):
+        # Mutation: _open adds the icon after close has run. Red: a NIM_ADD that no one deletes, a dead icon.
+        # Mutation: the held line said whatever the window. Red: a delete claimed for an icon never deleted.
+        slow = SlowWin32()
+        icon = self.make(slow)
+        self.addCleanup(ended)  # last: a loop a red left serving gets its WM_QUIT and ends before the next case
+        self.addCleanup(slow.messages.put, None)
+        self.addCleanup(slow.release.set)
+        self.addCleanup(setattr, tray, "CLOSE_SECONDS", tray.CLOSE_SECONDS)
+        tray.CLOSE_SECONDS = 0.2
+        early = " [tray] the icon's thread did not end in 0.2 seconds before its window existed" + chr(10)
+        icon.start()
+        icon.close()
+        self.assertEqual(self.err.getvalue(), early)
+        slow.release.set()
+        self.assertTrue(ended())
+        self.assertNotIn(0, [call[1] for call in slow.calls if call[0] == "Shell_NotifyIconW"])  # no NIM_ADD
+        self.assertEqual(slow.calls[-1], ("UnregisterClassW", tray.CLASS_NAME, INSTANCE))
+        self.assertEqual(self.err.getvalue(), early)
 
     def test_a_failed_shell_call_is_logged_and_does_not_raise(self):
         # Mutation: a zero return raised. Red: the thread dies with a traceback on stderr and serves no menu.

@@ -34,6 +34,7 @@ OPEN, PAUSE, RESUME, QUIT = 1, 2, 3, 4  # the menu's commands
 FAILED_LINE = " [tray] {call} failed (error {code})"
 BROKE_LINE = " [tray] the icon broke: {kind}"
 HELD_LINE = " [tray] the icon's thread did not end in {seconds:g} seconds: its icon deleted from close"
+EARLY_LINE = " [tray] the icon's thread did not end in {seconds:g} seconds before its window existed"
 OTHER_PLATFORM_LINE = " [tray] no icon by the clock: this platform is not Windows"
 
 # The Win32 types for 64-bit Windows: handles as c_void_p, WPARAM as c_size_t, LPARAM and LRESULT as c_ssize_t.
@@ -133,6 +134,7 @@ class Tray:
         self._ready = threading.Event()  # set once the window exists, or once it cannot
         self._instance = self._hwnd = self._icon = None
         self._registered, self._taskbar_created = False, 0
+        self._closing = False  # set by close(): an _open still under way then adds no icon
 
     def start(self):
         """The icon on its own thread, a daemon, so a thread held past close() never keeps the process alive."""
@@ -150,7 +152,9 @@ class Tray:
 
     def close(self):
         """Posts WM_CLOSE to the window when it exists, then waits a few seconds for the thread. A thread still held
-        then (in TrackPopupMenu's modal loop, say) leaves no dead icon: close deletes it from the calling thread."""
+        then (in TrackPopupMenu's modal loop, say) leaves no dead icon: close deletes it from the calling thread.
+        A thread held before its window existed adds no icon once it goes on, so there is none to delete."""
+        self._closing = True
         if self._thread is None:
             return
         self._ready.wait(CLOSE_SECONDS)
@@ -159,8 +163,11 @@ class Tray:
             self._failed("PostMessageW")
         self._thread.join(CLOSE_SECONDS)
         if self._thread.is_alive():
-            self._notify(NIM_DELETE, hwnd)
-            _say(HELD_LINE.format(seconds=CLOSE_SECONDS))
+            if hwnd is not None:
+                self._notify(NIM_DELETE, hwnd)
+                _say(HELD_LINE.format(seconds=CLOSE_SECONDS))
+            else:
+                _say(EARLY_LINE.format(seconds=CLOSE_SECONDS))
 
     def _failed(self, call):
         _say(FAILED_LINE.format(call=call, code=self._win32.last_error()))
@@ -199,6 +206,8 @@ class Tray:
         self._taskbar_created = win32.RegisterWindowMessageW("TaskbarCreated")
         if not self._taskbar_created:
             self._failed("RegisterWindowMessageW")
+        if self._closing:  # close() has run: no icon, and _release destroys the window and unregisters the class
+            return False
         self._notify(NIM_ADD)
         self._ready.set()
         return True
