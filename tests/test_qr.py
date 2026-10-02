@@ -55,7 +55,7 @@ class QrMaskTest(unittest.TestCase):
             for name, drawn in drawings(SECRET, mask)[1].items():
                 with self.subTest(mask=mask, drawing=name):
                     self.assertEqual(drawn.count('<g class="modules"'), 1)
-                    self.assertEqual(drawn.count(f'<g class="qr-mask" role="img" aria-label="{WORDS}">'), 1)
+                    self.assertEqual(drawn.count(f'<g class="qr-mask" role="button" tabindex="0" aria-label="{WORDS}">'), 1)
                     self.assertLess(drawn.index('<g class="modules"'), drawn.index('<g class="qr-mask"'))
                     self.assertTrue(drawn.endswith(MASK.search(drawn).group(0) + "</svg>"))
         scene = drawings(SECRET)[1]["scene"]
@@ -120,7 +120,7 @@ class QrMaskTest(unittest.TestCase):
             drawn = drawings(SECRET, mask)[1]
             with self.subTest(mask=mask, drawing="scene"):
                 found = MASK.search(drawn["scene"]).group(0)
-                ground = re.match(rf'<g class="qr-mask" role="img" aria-label="{WORDS}"><g clip-path="url\(#qk\)">'
+                ground = re.match(rf'<g class="qr-mask" role="button" tabindex="0" aria-label="{WORDS}"><g clip-path="url\(#qk\)">'
                                   rf'<path fill="{qr.GROUND}" d="([^"]*)"/>', found)
                 self.assertIsNotNone(ground, found[:200])
                 [polygon] = polygons(ground.group(1))
@@ -130,7 +130,7 @@ class QrMaskTest(unittest.TestCase):
                                         (top, left, dc, dr))
             with self.subTest(mask=mask, drawing="svg"):
                 found = MASK.search(drawn["svg"]).group(0)
-                ground = re.match(rf'<g class="qr-mask" role="img" aria-label="{WORDS}">'
+                ground = re.match(rf'<g class="qr-mask" role="button" tabindex="0" aria-label="{WORDS}">'
                                   rf'<path fill="{qr.GROUND}" d="M(\d+) (\d+)h(\d+)v(\d+)h-(\d+)z"/>', found)
                 self.assertIsNotNone(ground, found[:200])
                 x, y, w, h, back = (int(v) for v in ground.groups())

@@ -15,6 +15,7 @@ import sys
 import unittest
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 import support
 from support import LINK_ID, SECRET, FakeClock, MemoryRegistry
@@ -330,6 +331,35 @@ class PageControlsTest(unittest.TestCase):
                 self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:key],
                                  [page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"],
                                   page.WORDS[language]["autostart_help"], page.WORDS[language]["qr_press"]])
+
+    def test_on_the_pairing_page_both_masks_are_controls_named_by_the_press_words_beside_the_one_reveal(self):
+        # Lane pfpress (OR-108): the QR's mask and the key's are pressable, named by the press words. Mutation: a
+        # mask kept as role img. Red: the census misses it. Mutation: tabindex dropped. Red: the mask is listed with
+        # no tabindex. Mutation: the key's mask named «Clave oculta». Red: its name is not the press words.
+        self.call("POST", "/forget")
+        for mask in page.qr.MASKS:
+            served = self.serve(mask=mask)
+            for road in ("scene", "flat"):
+                for language in ("es", "en"):
+                    with self.subTest(mask=mask, road=road, language=language):
+                        if road == "flat":
+                            with mock.patch.object(page.qr, "scene_svg", return_value=None):
+                                shown = self.call("GET", "/", language=language, served=served)[2]
+                        else:
+                            shown = self.call("GET", "/", language=language, served=served)[2]
+                        [card] = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)
+                        self.assertEqual("data:image/webp;base64," in card, road == "scene")
+                        controls = []
+                        for tag, attributes in re.findall(r"<(\w+)((?:\s[^>]*)?)>", card):
+                            named = dict(re.findall(r'([\w-]+)="([^"]*)"', attributes))
+                            if tag == "button" or named.get("role") == "button":
+                                controls.append((tag, named.get("class"), named.get("role"), named.get("tabindex"),
+                                                 named.get("aria-label")))
+                        press = html.escape(page.WORDS[language]["qr_press"])
+                        self.assertEqual(controls, [("g", "qr-mask", "button", "0", press),
+                                                    ("span", "mask", "button", "0", press),
+                                                    ("button", "reveal", None, None, None)])
+                        self.assertEqual(card.count('class="reveal"'), 1)
 
     def test_the_poll_reloads_the_page_when_the_pause_differs_from_what_it_rendered(self):
         # Mutation: the poll ignores the pause. Red: a second tab keeps the old line under its old controls.

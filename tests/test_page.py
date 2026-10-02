@@ -87,10 +87,9 @@ BEFORE_SWITCH = 5
 # The language switch's two labels, the same in both languages, sit in the header between the title tag and the
 # title row (lane pclang, owner report OR-96).
 SWITCH_LABELS = ["ES", "EN"]
-# The reveal's two labels, the mask's name, the fold's summary and the words of the sponsored aside.
+# The reveal's two labels, the fold's summary and the words of the sponsored aside.
 SHOW = {"es": "Mostrar el código", "en": "Show the code"}
 HIDE = {"es": "Ocultar el código", "en": "Hide the code"}
-MASK_LABEL = {"es": "Clave oculta", "en": "Key hidden"}
 # The label over the reveal (owner 2026-10-02 09:5x, his words): what the pairing QR is for, no game and no maker.
 QR_FOR = {"es": "ESCANEA ESTE CÓDIGO QR con tu teléfono para recibir notificaciones cuando empiece la partida y "
                 "se acepte la cola.",
@@ -107,6 +106,10 @@ QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 # The instruction on both masks of the pairing QR (owner 2026-10-02 12:4x, his correction: both carry option C's
 # words), and the label's leading capitals, its lead line (OR-105); the label's words are QR_FOR, unchanged.
 QR_PRESS = {"es": "Pulsa Mostrar el código", "en": "Press Show the code"}
+# The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress).
+REVEAL_BINDING = "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
+MASK_BINDING = ("document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));m.a"
+                "ddEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();showKey(true);}});});")
 QR_LEAD = {"es": "ESCANEA ESTE CÓDIGO QR", "en": "SCAN THIS QR CODE"}
 
 
@@ -134,7 +137,7 @@ SPONSOR = {"es": {"by": "Patrocinado por Pendiapp.com", "cap": "Escanéalo para 
                   "note": "This PC is already linked, so its code is no longer shown. «Forget this PC», under «More "
                           "options», makes a new code to link."}}
 # The mask over the key: three groups of the same four 8 by 8 heads, whatever the key, named for a screen reader.
-MASK = re.compile(r'<span class="mask" role="img" aria-label="([^"]*)">(<span class="grp">((?:<svg class="mx" '
+MASK = re.compile(r'<span class="mask" role="button" tabindex="0" aria-label="([^"]*)">(<span class="grp">((?:<svg class="mx" '
                   r'viewBox="0 0 8 8" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true">'
                   r'(?:(?!</?svg).)*</svg>){4})</span>)\2\2</span>')
 # Each figure's own move, one after another, one second apart, once every 15 s, only while the system asks for no
@@ -605,7 +608,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual((card.count("<details"), card.count("<summary")), (0, 0))
                 mask = MASK.search(card)
                 self.assertIsNotNone(mask, "no mask of three groups of the same four heads in the code card")
-                self.assertEqual(mask.group(1), MASK_LABEL[lang])
+                self.assertEqual(mask.group(1), html.escape(QR_PRESS[lang]))
                 self.assertEqual(mask.group(0).count('<svg class="mx"'), 12)
                 self.assertEqual(len(set(re.findall(r'<svg class="mx".*?</svg>', mask.group(3)))), 4)
                 self.assertTrue(card.endswith(
@@ -619,7 +622,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertEqual([value for value in values if key in value or first in value], [])
                 masks.append(mask.group(0))
         self.assertEqual(len(masks), 2, "a language's code card holds no mask")
-        self.assertEqual(masks[0], masks[1].replace(MASK_LABEL["en"], MASK_LABEL["es"]))
+        self.assertEqual(masks[0], masks[1].replace(html.escape(QR_PRESS["en"]), html.escape(QR_PRESS["es"])))
         # The same heads whatever the key: the new key «Olvidar este PC» makes is masked by the same bytes.
         self.assertEqual(self.call("POST", "/forget")[0], 303)
         again = self.html("es-CO,es;q=0.9")
@@ -627,8 +630,10 @@ class PairingPageTest(unittest.TestCase):
         self.assertIn(f'<span class="code" id="code">{codes.display(self.secret())}</span>', again)
         self.assertEqual([found.group(0) for found in MASK.finditer(again)], masks[:1])
         for lang in ("es", "en"):
-            self.assertEqual(tuple(page.WORDS[lang].get(name) for name in ("show_code", "hide_code", "mask")),
-                             (SHOW[lang], HIDE[lang], MASK_LABEL[lang]))
+            self.assertEqual(tuple(page.WORDS[lang].get(name) for name in ("show_code", "hide_code")),
+                             (SHOW[lang], HIDE[lang]))
+            # The key's mask is named by the press words (lane pfpress); its old name left the tables.
+            self.assertNotIn("mask", page.WORDS[lang])
         # The reveal shows the key and flips its label; 60 s after a show the key is masked again; one timer,
         # cleared on every press.
         self.assertIn("const k=document.querySelector('.key'),r=document.querySelector('.reveal');let hide;"
@@ -641,6 +646,20 @@ class PairingPageTest(unittest.TestCase):
         linked = self.html()
         self.assertEqual([marker for marker in ('class="key"', 'class="reveal"', 'class="mask"') if marker in linked],
                          [])
+
+    def test_a_press_on_either_mask_shows_the_code_and_the_reveal_keeps_its_toggle(self):
+        # Lane pfpress (OR-108): «Pulsa Mostrar el código» does what the reveal does. Mutation: the masks left
+        # unbound. Red: the binding is not after the reveal's. Mutation: a mask's press bound to the toggle. Red: two
+        # toggles and one show. Mutation: Space left to scroll the page. Red: no preventDefault on Space. Mutation:
+        # the pointer rule dropped. Red: the style misses it.
+        self.assertIn(REVEAL_BINDING + MASK_BINDING, page._SCRIPT)
+        self.assertEqual(page._SCRIPT.count("showKey(k.dataset.shown!=='true')"), 1)
+        self.assertEqual(page._SCRIPT.count("showKey(true)"), 2)
+        shown = self.html("es-CO,es;q=0.9")
+        style = re.search(r"<style>(.*?)</style>", shown, re.S).group(1)
+        self.assertEqual(style.count(".qr-mask,.mask{cursor:pointer}"), 1)
+        noscript = re.search(r"<noscript><style>([^<]*)</style></noscript>", shown).group(1)
+        self.assertNotIn("cursor", noscript)
 
     def test_the_pairing_qr_s_modules_are_masked_until_the_code_is_shown_and_the_drawings_stay_visible(self):
         # Mutation: the whole QR hidden, as on a0572b4. Red: no modules group, and a rule hides .qr. Mutation: the
@@ -706,7 +725,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(' aria-labelledby="qr-for"', re.search(r'<svg class="qr"[^>]*>', card).group(0))
                 self.assertEqual(shown.count('id="qr-for"'), 1)
                 self.assertIn('<p class="qr-for" id="qr-for">', card)
-                self.assertIn(f'<g class="qr-mask" role="img" aria-label="{html.escape(QR_PRESS[lang])}">', card)
+                self.assertIn(f'<g class="qr-mask" role="button" tabindex="0" aria-label="{html.escape(QR_PRESS[lang])}">', card)
                 self.assertNotIn(html.escape(QR_MASK[lang]), shown)
                 for gone in ('class="scan"', 'id="scan"', html.escape(SCAN["es"]), html.escape(SCAN["en"])):
                     self.assertNotIn(gone, shown)
@@ -780,7 +799,7 @@ class PairingPageTest(unittest.TestCase):
                     found = mask.findall(drawn[0])
                     self.assertEqual(len(found), 1)
                     words = html.escape(QR_PRESS[lang])
-                    self.assertTrue(found[0].startswith(f'<g class="qr-mask" role="img" aria-label="{words}">'),
+                    self.assertTrue(found[0].startswith(f'<g class="qr-mask" role="button" tabindex="0" aria-label="{words}">'),
                                     found[0][:120])
                     self.assertEqual(re.findall(r'<text class="([^"]*)"[^>]*>([^<]*)</text>', found[0]),
                                      [("qm-say" if name == "bust" else "qm-say qm-board", words)])
