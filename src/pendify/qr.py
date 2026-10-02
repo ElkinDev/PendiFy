@@ -328,7 +328,7 @@ def _flat_mask(n, q, mask, words):
         row = n / 2
     unit = VIEW / side
     say = _say(words, (q + n / 2) * unit, (q + row) * unit, mask == "board")
-    return (f'<g class="qr-mask" role="button" tabindex="0" aria-label="{words}">{ground}{art}'
+    return (f'<g class="qr-mask" role="img" aria-label="{words}">{ground}{art}'
             f'<g transform="scale({side / VIEW:.6g})">{say}</g></g>')
 
 
@@ -556,7 +556,7 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None, mask
             say = _say(mask_words, cx, cy, True)
         # the drawing lies on the field under the kerb's clip, the ground path first; the words are laid over the
         # scene, never clipped
-        veil = (f'<g class="qr-mask" role="button" tabindex="0" aria-label="{mask_words}"><g clip-path="url(#{uid}k)">'
+        veil = (f'<g class="qr-mask" role="img" aria-label="{mask_words}"><g clip-path="url(#{uid}k)">'
                 f'<path fill="{GROUND}" d="{area(0, 0, n, n, 0.0)}"/>{art}</g>{say}</g>')
     dot = _poly([((du - dv) * AX, (du + dv) * AY) for du, dv in _OCTAGON])   # one dot, centred on 0 0
     dots = {True: [], False: []}

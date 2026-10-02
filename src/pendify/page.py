@@ -576,11 +576,15 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "function showKey(on){k.dataset.shown=String(on);r.textContent=on?r.dataset.hide:r.dataset.show;"
            "clearTimeout(hide);if(on)hide=setTimeout(()=>showKey(false),60000);}"
            "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
-           # Both masks do what the reveal does (OR-108): a click, Enter or Space on the QR's mask or on the
-           # key's shows the code, never hides it; Space would scroll the page, so its default is prevented.
-           "document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));"
-           "m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();"
-           "showKey(true);}});});"
+           # Both masks do what the reveal does (OR-108), and never hide the code. The QR's mask is an image in
+           # the svg that a click shows the code from; the keyboard and the screen reader have the reveal. The
+           # key's mask is a button: a click, Enter or Space shows the code, then focus moves to the reveal,
+           # since the mask turns visibility:hidden and would drop it to the body; Space would scroll the page,
+           # so its default is prevented.
+           "document.querySelectorAll('.qr-mask').forEach(m=>m.addEventListener('click',()=>showKey(true)));"
+           "document.querySelectorAll('.mask').forEach(m=>{const press=()=>{showKey(true);r.focus();};"
+           "m.addEventListener('click',press);m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){"
+           "if(e.key===' ')e.preventDefault();press();}});});"
            # The theme button (pendiapp.com's assets/theme.js): the choice goes to data-theme and to localStorage,
            # and it is posted to /theme, which keeps it in config.json: the page's port changes on every run, so
            # its localStorage is a new origin each time. The server's value, served as data-theme, wins on the next

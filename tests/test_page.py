@@ -108,9 +108,10 @@ QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 QR_PRESS = {"es": "Pulsa Mostrar el código", "en": "Press Show the code"}
 # The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress).
 REVEAL_BINDING = "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
-MASK_BINDING = ("document.querySelectorAll('.qr-mask,.mask').forEach(m=>{m.addEventListener('click',()=>showKey(true));"
-                "m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.key===' ')e.preventDefault();"
-                "showKey(true);}});});")
+MASK_BINDING = ("document.querySelectorAll('.qr-mask').forEach(m=>m.addEventListener('click',()=>showKey(true)));"
+                "document.querySelectorAll('.mask').forEach(m=>{const press=()=>{showKey(true);r.focus();};"
+                "m.addEventListener('click',press);m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){"
+                "if(e.key===' ')e.preventDefault();press();}});});")
 QR_LEAD = {"es": "ESCANEA ESTE CÓDIGO QR", "en": "SCAN THIS QR CODE"}
 
 
@@ -652,8 +653,12 @@ class PairingPageTest(unittest.TestCase):
         # Lane pfpress (OR-108): «Pulsa Mostrar el código» does what the reveal does. Mutation: the masks left
         # unbound. Red: the binding is not after the reveal's. Mutation: a mask's press bound to the toggle. Red: two
         # toggles and one show. Mutation: Space left to scroll the page. Red: no preventDefault on Space. Mutation:
-        # the pointer rule dropped. Red: the style misses it.
+        # the pointer rule dropped. Red: the style misses it. Mutation: the key mask's press leaves focus where it
+        # was (review MINOR 3). Red: no r.focus() after its showKey(true). Mutation: the QR's mask given the
+        # keydown (review MINOR 2: it is an image, not a control). Red: the binding differs.
         self.assertIn(REVEAL_BINDING + MASK_BINDING, page._SCRIPT)
+        self.assertEqual(page._SCRIPT.count("showKey(true);r.focus();"), 1)
+        self.assertEqual(page._SCRIPT.count("addEventListener('keydown'"), 1)
         self.assertEqual(page._SCRIPT.count("showKey(k.dataset.shown!=='true')"), 1)
         self.assertEqual(page._SCRIPT.count("showKey(true)"), 2)
         shown = self.html("es-CO,es;q=0.9")
@@ -726,7 +731,7 @@ class PairingPageTest(unittest.TestCase):
                 self.assertIn(' aria-labelledby="qr-for"', re.search(r'<svg class="qr"[^>]*>', card).group(0))
                 self.assertEqual(shown.count('id="qr-for"'), 1)
                 self.assertIn('<p class="qr-for" id="qr-for">', card)
-                self.assertIn(f'<g class="qr-mask" role="button" tabindex="0" aria-label="{html.escape(QR_PRESS[lang])}">', card)
+                self.assertIn(f'<g class="qr-mask" role="img" aria-label="{html.escape(QR_PRESS[lang])}">', card)
                 self.assertNotIn(html.escape(QR_MASK[lang]), shown)
                 for gone in ('class="scan"', 'id="scan"', html.escape(SCAN["es"]), html.escape(SCAN["en"])):
                     self.assertNotIn(gone, shown)
@@ -800,7 +805,7 @@ class PairingPageTest(unittest.TestCase):
                     found = mask.findall(drawn[0])
                     self.assertEqual(len(found), 1)
                     words = html.escape(QR_PRESS[lang])
-                    self.assertTrue(found[0].startswith(f'<g class="qr-mask" role="button" tabindex="0" aria-label="{words}">'),
+                    self.assertTrue(found[0].startswith(f'<g class="qr-mask" role="img" aria-label="{words}">'),
                                     found[0][:120])
                     self.assertEqual(re.findall(r'<text class="([^"]*)"[^>]*>([^<]*)</text>', found[0]),
                                      [("qm-say" if name == "bust" else "qm-say qm-board", words)])

@@ -332,10 +332,12 @@ class PageControlsTest(unittest.TestCase):
                                  [page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"],
                                   page.WORDS[language]["autostart_help"], page.WORDS[language]["qr_press"]])
 
-    def test_on_the_pairing_page_both_masks_are_controls_named_by_the_press_words_beside_the_one_reveal(self):
-        # Lane pfpress (OR-108): the QR's mask and the key's are pressable, named by the press words. Mutation: a
-        # mask kept as role img. Red: the census misses it. Mutation: tabindex dropped. Red: the mask is listed with
-        # no tabindex. Mutation: the key's mask named «Clave oculta». Red: its name is not the press words.
+    def test_on_the_pairing_page_the_key_mask_is_a_control_and_the_qr_mask_an_image_beside_the_one_reveal(self):
+        # Lane pfpress (OR-108): the key's mask is a control named by the press words. Mutation: the key's mask
+        # kept as role img. Red: the census misses it. Mutation: tabindex dropped. Red: the mask is listed with no
+        # tabindex. Mutation: the key's mask named «Clave oculta». Red: its name is not the press words. Round 2
+        # (review MINOR 2): the QR's mask inside the svg role img stays an image, clicked but never a control.
+        # Mutation: the QR group made a button again. Red: the census lists two mask controls.
         self.call("POST", "/forget")
         for mask in page.qr.MASKS:
             served = self.serve(mask=mask)
@@ -349,15 +351,18 @@ class PageControlsTest(unittest.TestCase):
                             shown = self.call("GET", "/", language=language, served=served)[2]
                         [card] = re.findall(r'<figure class="key-card">.*?</figure>', shown, re.S)
                         self.assertEqual("data:image/webp;base64," in card, road == "scene")
-                        controls = []
+                        controls, groups = [], []
                         for tag, attributes in re.findall(r"<(\w+)((?:\s[^>]*)?)>", card):
                             named = dict(re.findall(r'([\w-]+)="([^"]*)"', attributes))
+                            if named.get("class") == "qr-mask":
+                                groups.append((tag, named.get("role"), named.get("tabindex"),
+                                               named.get("aria-label")))
                             if tag == "button" or named.get("role") == "button":
                                 controls.append((tag, named.get("class"), named.get("role"), named.get("tabindex"),
                                                  named.get("aria-label")))
                         press = html.escape(page.WORDS[language]["qr_press"])
-                        self.assertEqual(controls, [("g", "qr-mask", "button", "0", press),
-                                                    ("span", "mask", "button", "0", press),
+                        self.assertEqual(groups, [("g", "img", None, press)])
+                        self.assertEqual(controls, [("span", "mask", "button", "0", press),
                                                     ("button", "reveal", None, None, None)])
                         self.assertEqual(card.count('class="reveal"'), 1)
 

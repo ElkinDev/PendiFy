@@ -888,7 +888,10 @@ class MainCommandTest(unittest.TestCase):
 
         stop = threading.Event()
         self.addCleanup(stop.set)  # a red never leaves the run serving
-        with unittest.mock.patch.object(entry, "_restart", return_value=0) as restarting:
+        # The offer «0.1.6» is newer than the running copy whatever pendify is installed on this PC (review
+        # MAJOR 1): the running version is patched, as start_newer does; __main__ reads it when called.
+        with unittest.mock.patch.object(entry, "_restart", return_value=0) as restarting, \
+                unittest.mock.patch.object(update, "RUNNING_VERSION", "0.1.5"):
             thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
                                                 opener=lambda url: True, stop=stop, updater=updater,
                                                 spawn=lambda command, **options: spawned.append(command))
