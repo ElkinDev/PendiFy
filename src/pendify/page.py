@@ -576,6 +576,9 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "function showKey(on){k.dataset.shown=String(on);r.textContent=on?r.dataset.hide:r.dataset.show;"
            "clearTimeout(hide);if(on)hide=setTimeout(()=>showKey(false),60000);}"
            "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
+           # A key held after a mask press repeats on the reveal the focus moved to; its repeats would set it
+           # active or click it and hide the code again, so only a repeat Enter or Space loses its default there.
+           "if(r)r.addEventListener('keydown',e=>{if(e.repeat&&(e.key==='Enter'||e.key===' '))e.preventDefault();});"
            # Both masks do what the reveal does (OR-108), and never hide the code. The QR's mask is an image in
            # the svg that a click shows the code from; the keyboard and the screen reader have the reveal. The
            # key's mask is a button: a click, Enter or Space shows the code, then focus moves to the reveal,

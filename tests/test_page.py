@@ -108,7 +108,10 @@ QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 QR_PRESS = {"es": "Pulsa Mostrar el código", "en": "Press Show the code"}
 # The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress);
 # the key mask prevents the default of Enter and Space alike, so Enter's keypress never reaches the reveal.
-REVEAL_BINDING = "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
+# The reveal also prevents the default of a repeat Enter or Space only, so a key held after a mask press moved the
+# focus to it never toggles the code back, while a fresh press of the reveal keeps its toggle (review fix2 MINOR 1).
+REVEAL_BINDING = ("if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
+                  "if(r)r.addEventListener('keydown',e=>{if(e.repeat&&(e.key==='Enter'||e.key===' '))e.preventDefault();});")
 MASK_BINDING = ("document.querySelectorAll('.qr-mask').forEach(m=>m.addEventListener('click',()=>showKey(true)));"
                 "document.querySelectorAll('.mask').forEach(m=>{const press=()=>{showKey(true);r.focus();};"
                 "m.addEventListener('click',press);m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){"
@@ -661,8 +664,11 @@ class PairingPageTest(unittest.TestCase):
         # keydown (review MINOR 2: it is an image, not a control). Red: the binding differs.
         self.assertIn(REVEAL_BINDING + MASK_BINDING, page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("showKey(true);r.focus();"), 1)
-        self.assertEqual(page._SCRIPT.count("addEventListener('keydown'"), 1)
-        keydown = page._SCRIPT.split("addEventListener('keydown'", 1)[1].split("}});", 1)[0]
+        # Two keydown listeners: the reveal's, which only stops a held key's repeats (review fix2 MINOR 1:
+        # mutations dropping e.repeat or the listener red REVEAL_BINDING), and the key mask's, cut out below.
+        self.assertEqual(page._SCRIPT.count("addEventListener('keydown'"), 2)
+        self.assertEqual(page._SCRIPT.count("e.repeat&&"), 1)
+        keydown = page._SCRIPT.split("addEventListener('keydown'")[2].split("}});", 1)[0]
         self.assertEqual(keydown.count("e.preventDefault();press();"), 1)
         self.assertEqual(keydown.count("preventDefault"), 1)
         self.assertNotIn("if(e.key===' ')e.preventDefault();", page._SCRIPT)
