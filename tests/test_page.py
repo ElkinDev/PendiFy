@@ -1194,7 +1194,7 @@ class PairingPageTest(unittest.TestCase):
                               restart=restart or (lambda: None), clock=lambda seconds: True, log=lambda line: None)
 
     def test_the_state_carries_the_update_and_the_page_draws_its_line_and_its_button_by_state(self):
-        # Mutation: «Actualizar» drawn in auto mode. Red: a button on the page that installs by itself.
+        # Mutation: «Reiniciar ahora» drawn in auto mode only. Red: notify's ready line has no button.
         # Mutation: the kept pip line left out of the title. Red: the failed line carries no title.
         # Mutation: the line drawn above the state line. Red: the state line is not followed by the update line.
         # Mutation: the poll compares no update. Red: the script never reloads on a new state.
