@@ -8,6 +8,7 @@ import re
 import socket
 import threading
 import time
+import types
 import unittest
 import urllib.parse
 from html.parser import HTMLParser
@@ -254,6 +255,7 @@ def held(path):
         finally:
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, size)
+RUN_SECRET = "0123456789abcdef" * 2  # a test vector, never a run file's
 
 
 class PairingPageTest(unittest.TestCase):
@@ -1695,6 +1697,56 @@ class PairingPageTest(unittest.TestCase):
             self.assertIn(f".px:nth-child({n}){{animation:{name} {duration} steps(1,end) infinite}}", inside)
         self.assertIsNone(re.search(r"\.px[^{]*\{[^}]*animation", outside))
         self.assertNotIn("@keyframes px-", outside)
+
+    def replace_page(self, secret, quits=True):
+        """A page beside a run file whose replace secret is `secret` (None before the publish, absent for no run
+        file), its quit recorded in the list returned with it; `quits` False gives it no quit."""
+        stopped = []
+        replaced = page.PairingPage(self.state, on_quit=(lambda: stopped.append("quit")) if quits else None)
+        if secret != "absent":
+            replaced.run = types.SimpleNamespace(secret=secret)
+        replaced.start()
+        self.addCleanup(replaced.close)
+        return replaced, stopped
+
+    def post_replace(self, target, fields, language=None):
+        """POST /replace to `target` as a newer copy sends it: its form only, no page token."""
+        connection = http.client.HTTPConnection("127.0.0.1", target.port, timeout=5)
+        self.addCleanup(connection.close)
+        sent = {"Host": f"127.0.0.1:{target.port}", "Content-Type": "application/x-www-form-urlencoded"}
+        sent.update({"Accept-Language": language} if language else {})
+        connection.request("POST", "/replace", body=urllib.parse.urlencode(fields).encode(), headers=sent)
+        response = connection.getresponse()
+        return response.status, response.read().decode("utf-8")
+
+    def test_replace_with_the_run_secret_closes_the_page_and_answers_202(self):
+        # Mutation: /replace checked against the page token as every other route. Red: the newer copy, which has
+        # no page token, is refused 403 and the older page keeps running.
+        for language, word in ((None, "Cerrando"), ("en", "Closing")):
+            with self.subTest(language=language):
+                replaced, stopped = self.replace_page(RUN_SECRET)
+                self.assertEqual(self.post_replace(replaced, {"secret": RUN_SECRET}, language), (202, word))
+                self.assertEqual(stopped, ["quit"])
+
+    def test_replace_with_a_wrong_secret_answers_403_and_closes_nothing(self):
+        # Mutation: the secret compared only when one is posted. Red: a post with no secret stops the program.
+        replaced, stopped = self.replace_page(RUN_SECRET)
+        for name, fields in (("wrong", {"secret": "f" * 32}), ("missing", {}), ("empty", {"secret": ""}),
+                             ("the page token", {"token": replaced.token})):
+            with self.subTest(fields=name):
+                self.assertEqual(self.post_replace(replaced, fields)[0], 403)
+        self.assertEqual(stopped, [])
+
+    def test_replace_is_no_route_without_a_run_secret(self):
+        # Mutation: /replace listed whenever the page can quit, an absent secret read as empty. Red: an empty secret
+        # stops a page that has no run secret.
+        for name, secret, quits in (("no run file", "absent", True), ("not published yet", None, True),
+                                    ("no quit", RUN_SECRET, False)):
+            with self.subTest(page=name):
+                replaced, stopped = self.replace_page(secret, quits)
+                for fields in ({"secret": ""}, {"secret": RUN_SECRET}):
+                    self.assertEqual(self.post_replace(replaced, fields)[0], 404)
+                self.assertEqual(stopped, [])
 
 
 if __name__ == "__main__":

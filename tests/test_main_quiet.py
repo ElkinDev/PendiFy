@@ -13,6 +13,7 @@ import test_main as main_test
 
 config = support.module("config")
 entry = support.module("__main__")
+update = support.module("update")
 
 PAGE_LINE = r"^page: http://127\.0\.0\.1:\d+/\n$"
 WORKER = "http://127.0.0.1:9"
@@ -41,7 +42,9 @@ class QuietStartTest(unittest.TestCase):
 
     def holder(self, port):
         self.run_file.parent.mkdir(parents=True, exist_ok=True)
-        self.run_file.write_text(json.dumps({"pid": os.getppid(), "port": port}), encoding="utf-8")
+        # A running copy of this version: a second start opens its page, never replaces it.
+        record = {"pid": os.getppid(), "port": port, "version": update.RUNNING_VERSION}
+        self.run_file.write_text(json.dumps(record), encoding="utf-8")
 
     def test_a_quiet_start_against_a_running_instance_opens_nothing_shows_no_box_and_exits_0(self):
         # Mutation: the opener's place at a second start left as it was. Red: the running page is opened.
@@ -67,7 +70,7 @@ class QuietStartTest(unittest.TestCase):
                     def write(held=held):
                         held.seek(0)
                         held.truncate()
-                        json.dump({"pid": os.getppid(), "port": None}, held)
+                        json.dump({"pid": os.getppid(), "port": None, "version": update.RUNNING_VERSION}, held)
                         held.flush()
 
                     clock, opened = main_test.FakeClock(write), []

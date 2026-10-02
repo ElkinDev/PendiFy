@@ -12,7 +12,7 @@ Pulsa Windows + R, pega esta línea completa y pulsa Enter. También sirve en Po
 
     powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pendify-install.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/PendiFy/main/install.ps1 -OutFile ~\pendify-install.ps1; ~\pendify-install.ps1"
 
-La línea guarda el instalador como `pendify-install.ps1` en tu carpeta de usuario y lo ejecuta desde ahí; puedes borrar ese archivo cuando termine.
+La línea guarda el instalador como `pendify-install.ps1` en tu carpeta de usuario y lo ejecuta desde ahí; puedes borrar ese archivo cuando termine. Si PendiFy ya está abierto, la línea instala la versión nueva y la copia nueva reemplaza a la anterior por sí sola.
 
 La ventana queda abierta al terminar para que leas el resultado; ciérrala cuando acabe.
 
@@ -77,7 +77,7 @@ Press Windows + R, paste this whole line and press Enter. It also works in Power
 
     powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "ri ~\pendify-install.ps1 -ea 0; irm https://raw.githubusercontent.com/ElkinDev/PendiFy/main/install.ps1 -OutFile ~\pendify-install.ps1; ~\pendify-install.ps1"
 
-The line saves the installer as `pendify-install.ps1` in your user folder and runs it from there; you can delete that file when it is done.
+The line saves the installer as `pendify-install.ps1` in your user folder and runs it from there; you can delete that file when it is done. If PendiFy is already open, the line installs the new version and the new copy replaces the older one by itself.
 
 The window stays open at the end so you can read the result; close it when it is done.
 
