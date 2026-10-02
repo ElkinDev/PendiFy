@@ -74,9 +74,11 @@ class FakeTray:
     """The icon by the clock in a test run, never a real one: it keeps what main built it with and, in `moments`,
     its start and its close in order, each with what `watched` answered of its url at that moment (None without)."""
 
-    def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, watched=None):
+    def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, update_ready=None,
+                 on_restart=None, watched=None):
         self.url, self.on_open, self.on_pause, self.on_resume = url, on_open, on_pause, on_resume
         self.on_quit, self.paused, self.words, self.icon_path = on_quit, paused, words, icon_path
+        self.update_ready, self.on_restart = update_ready, on_restart
         self.watched, self.moments = watched, []
 
     def start(self):
@@ -87,16 +89,23 @@ class FakeTray:
 
 
 class FakeUpdater:
-    """The update in a test run, never PyPI: keeps what main built it with and, in `moments`, its start and its close
-    in order, each with what `watched` answered at that moment (None without)."""
+    """The update in a test run, never PyPI: keeps what main built it with and, in `moments`, its start, its close
+    and its wait for a running install in order, each with what `watched` answered at that moment (None without);
+    its snapshot answers `seen`."""
 
-    def __init__(self, current_version, mode, restart, watched=None):
-        self.current_version, self.mode, self.restart = current_version, mode, restart
+    def __init__(self, current_version, mode, restart, folder=None, watched=None):
+        self.current_version, self.mode, self.restart, self.folder = current_version, mode, restart, folder
         self.watched, self.moments = watched, []
         self.restart_requested = threading.Event()
+        self.restart_opens_page = True
+        self.seen = {"state": "none", "version": None, "error": None}
 
     def snapshot(self):
-        return {"state": "none", "version": None, "error": None}
+        return dict(self.seen)
+
+    def wait(self, timeout):
+        self.moments.append(("wait", timeout, self.watched and self.watched()))
+        return True
 
     def start(self):
         self.moments.append(("start", self.watched and self.watched()))
@@ -694,8 +703,8 @@ class MainCommandTest(unittest.TestCase):
                 self.store.path.write_text(json.dumps(values), encoding="utf-8")
                 made, ports = [], []
 
-                def updater(version, mode, restart, made=made, ports=ports):
-                    made.append(FakeUpdater(version, mode, restart, watched=lambda: answers(ports[0])))
+                def updater(version, mode, restart, folder=None, made=made, ports=ports):
+                    made.append(FakeUpdater(version, mode, restart, folder, watched=lambda: answers(ports[0])))
                     return made[-1]
 
                 def tray(url, *args, ports=ports, **kwargs):
@@ -713,14 +722,22 @@ class MainCommandTest(unittest.TestCase):
                 self.assertEqual((result["run"][0], result["run"][2]), (0, ""))
                 self.assertEqual(len(made), 1)
                 self.assertEqual((made[0].current_version, made[0].mode), (update.RUNNING_VERSION, mode))
-                self.assertEqual(made[0].moments, ([] if mode == "off" else [("start", True)]) + [("close", False)])
+                self.assertEqual(made[0].moments,
+                                 ([] if mode == "off" else [("start", True)]) + [("close", False), ("wait", 60, False)])
 
-    def test_the_restart_flag_starts_a_new_copy_after_the_run_file_is_released_with_the_same_quiet(self):
+    def test_a_restart_asked_from_the_page_spawns_without_quiet_and_carries_dry_data_dir_worker_and_client_lockfile(
+            self):
         # Mutation: the copy started before the release. Red: the run file still exists at the start of the copy.
-        # Mutation: --quiet dropped from the new copy. Red: the quiet run's copy has no --quiet.
+        # Mutation: --quiet kept on a restart the page asked for. Red: the quiet run's copy carries --quiet.
+        # Mutation: --quiet dropped from a restart the page did not ask for. Red: that copy has no --quiet.
+        # Mutation: --dry, --data-dir, --worker or --client-lockfile left out. Red: the copy's command misses it.
         # Mutation: CREATE_NEW_PROCESS_GROUP left out. Red: the flags read 0x8.
-        for flags, refused in (((), False), (("--quiet",), False), ((), True)):
-            with self.subTest(flags=flags, refused=refused):
+        worker_base = entry._arguments(["--worker", "http://127.0.0.1:9"]).worker
+        carried = ["--data-dir", str(self.data), "--worker", str(worker_base), "--client-lockfile", str(self.no_client)]
+        for flags, asked, refused, kept in (((), True, False, []), (("--quiet",), True, False, []),
+                                            (("--quiet", "--dry"), True, False, ["--dry"]),
+                                            (("--quiet",), False, False, ["--quiet"]), ((), True, True, [])):
+            with self.subTest(flags=flags, asked=asked, refused=refused):
                 made, spawned = [], []
 
                 def spawn(command, refused=refused, spawned=spawned, **options):
@@ -728,8 +745,8 @@ class MainCommandTest(unittest.TestCase):
                     if refused:
                         raise FileNotFoundError(2, "not found")
 
-                def updater(version, mode, restart, made=made):
-                    made.append(FakeUpdater(version, mode, restart))
+                def updater(version, mode, restart, folder=None, made=made):
+                    made.append(FakeUpdater(version, mode, restart, folder))
                     return made[-1]
 
                 stop = threading.Event()
@@ -737,17 +754,56 @@ class MainCommandTest(unittest.TestCase):
                                                     *flags, opener=lambda url: True, stop=stop, updater=updater,
                                                     spawn=spawn)
                 self.assertTrue(self.wait_for_the_page())
-                made[0].restart_requested.set()  # the page's «Reiniciar ahora»: the flag, then main's quit
+                # The page's «Reiniciar ahora» asks for a page; a restart that does not (none today) keeps --quiet.
+                made[0].restart_opens_page = asked
+                made[0].restart_requested.set()  # the flag, then main's quit
                 made[0].restart()
                 thread.join(10)
                 self.assertFalse(thread.is_alive())
-                self.assertEqual(spawned, [([sys.executable, "-m", support.PACKAGE, *flags],
-                                            {"creationflags": 0x00000008 | 0x00000200, "close_fds": True}, False)])
+                command = [sys.executable, "-m", support.PACKAGE, *kept, *carried]
+                self.assertEqual(spawned, [(command, {"creationflags": 0x00000008 | 0x00000200, "close_fds": True},
+                                            False)])
+                again = entry._arguments(command[3:])  # the new copy reads back the values this run was given
+                self.assertEqual((again.data_dir, again.worker, again.client_lockfile, again.dry, again.quiet),
+                                 (self.data, worker_base, self.no_client, "--dry" in kept, "--quiet" in kept))
                 code, out, err = result["run"]
                 self.assertEqual((code, err), (1 if refused else 0, ""))
                 self.assertEqual(out.splitlines()[-1].startswith("page: "), not refused)
                 if refused:
                     self.assertEqual(out.splitlines()[-1], entry.RESTART_FAILED_LINE)
+
+    def test_the_finally_joins_a_running_install_before_the_release(self):
+        # Mutation: the wait left out of the finally. Red: no wait among the moments.
+        # Mutation: the wait made after the release. Red: the run file is gone at the wait.
+        # Mutation: pip's log in another folder. Red: the updater's folder is not the config folder.
+        # Mutation: the icon's item wired to the quit. Red: its restart is not the updater's.
+        made, trays = [], []
+
+        def updater(version, mode, restart, folder=None, made=made):
+            made.append(FakeUpdater(version, mode, restart, folder, watched=self.run_file.exists))
+            return made[-1]
+
+        def tray(*args, trays=trays, **kwargs):
+            trays.append(FakeTray(*args, **kwargs))
+            return trays[-1]
+
+        stop = threading.Event()
+        self.addCleanup(stop.set)  # a red never leaves the run serving
+        thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                            opener=lambda url: True, stop=stop, updater=updater, tray=tray)
+        self.assertTrue(self.wait_for_the_page())
+        # The icon's item reads the updater at each click: no version until it reads ready.
+        self.assertIsNone(trays[0].update_ready())
+        made[0].seen = {"state": "ready", "version": "0.1.6", "error": None}
+        self.assertEqual(trays[0].update_ready(), "0.1.6")
+        self.assertIs(trays[0].on_restart, made[0].restart)
+        stop.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result["run"][0], 0)
+        self.assertEqual(made[0].folder, self.store.path.parent)
+        self.assertEqual(made[0].moments, [("start", True), ("close", True), ("wait", 60, True)])
+        self.assertFalse(self.run_file.exists())
 
     def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):
         # Mutation: the page's quit only sets the stop. Red: the record still reads not closing while the tick

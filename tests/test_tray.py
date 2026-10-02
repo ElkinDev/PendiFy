@@ -192,19 +192,21 @@ class TrayTest(unittest.TestCase):
         self.addCleanup(stack.close)
         stack.enter_context(contextlib.redirect_stderr(self.err))
 
-    def make(self, fake=None):
+    def make(self, fake=None, ready=None):
+        """A tray on the fake; with `ready`, its update_ready, and an on_restart heard as the other callbacks."""
         fake = self.fake if fake is None else fake
 
         def heard(name):
             return lambda: fake.calls.append((name,))
 
+        more = {} if ready is None else {"update_ready": ready, "on_restart": heard("on_restart")}
         return tray.Tray(URL, on_open=heard("on_open"), on_pause=heard("on_pause"), on_resume=heard("on_resume"),
                          on_quit=heard("on_quit"), paused=lambda: self.now["paused"],
-                         words=lambda: self.now["words"], icon_path=ICON_PATH, win32=fake)
+                         words=lambda: self.now["words"], icon_path=ICON_PATH, win32=fake, **more)
 
-    def started(self, fake=None):
+    def started(self, fake=None, ready=None):
         """A tray on the fake with its window open and its loop serving; closed at the end of the case."""
-        icon = self.make(fake)
+        icon = self.make(fake, ready)
         self.addCleanup(icon.close)
         icon.start()
         (self.fake if fake is None else fake).send(WM_NULL)  # dispatched only once the loop runs
@@ -276,6 +278,38 @@ class TrayTest(unittest.TestCase):
         icon.close()  # after the quit, close posts nothing more
         self.assertEqual(self.fake.calls.count(("PostMessageW", WINDOW, WM_CLOSE)), 1)
         self.assertEqual(self.fake.heard(), ["on_open", "on_pause", "on_resume", "on_quit"])
+        self.assertEqual(self.err.getvalue(), "")
+
+    def test_a_ready_update_adds_the_restart_item_before_salir_and_its_callback_restarts(self):
+        # Mutation: the item after «Salir». Red: the restart item is the last one.
+        # Mutation: the item's command calls on_quit. Red: on_restart is never heard.
+        # Mutation: the window left open after the restart. Red: no WM_CLOSE follows on_restart.
+        self.now["ready"] = "0.1.6"
+        self.started(ready=lambda: self.now["ready"])
+        self.fake.send(CALLBACK, 1, WM_RBUTTONUP)
+        self.now["words"] = page.WORDS["en"]
+        self.fake.send(CALLBACK, 1, WM_RBUTTONUP)
+        self.assertEqual([[(flags, text) for flags, _, text in menu] for menu in self.fake.menus], [
+            [(0, "Abrir la página"), (0, "Pausar avisos"), (0x800, None), (0, "Reiniciar para actualizar a 0.1.6"),
+             (0, "Salir")],
+            [(0, "Open the page"), (0, "Pause alerts"), (0x800, None), (0, "Restart to update to 0.1.6"),
+             (0, "Quit")]])
+        self.fake.pick = "Restart to update to 0.1.6"
+        self.fake.send(CALLBACK, 1, WM_RBUTTONUP)
+        self.assertTrue(ended())  # the restart stops this copy as the quit does: the icon's window closes
+        restart_at = self.fake.calls.index(("on_restart",))
+        self.assertEqual(self.fake.calls[restart_at + 1], ("PostMessageW", WINDOW, WM_CLOSE))
+        self.assertEqual(self.fake.heard(), ["on_restart"])
+        self.assertEqual(self.err.getvalue(), "")
+
+    def test_no_item_without_a_ready_update(self):
+        # Mutation: the item drawn whatever update_ready answers. Red: an item «Reiniciar para actualizar a None».
+        self.now["ready"] = None
+        self.started(ready=lambda: self.now["ready"])
+        self.fake.send(CALLBACK, 1, WM_RBUTTONUP)
+        self.assertEqual([[(flags, text) for flags, _, text in menu] for menu in self.fake.menus], [
+            [(0, "Abrir la página"), (0, "Pausar avisos"), (0x800, None), (0, "Salir")]])
+        self.assertEqual(self.fake.heard(), [])
         self.assertEqual(self.err.getvalue(), "")
 
     def test_the_taskbars_rebirth_re_adds_the_icon(self):

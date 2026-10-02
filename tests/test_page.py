@@ -1271,7 +1271,7 @@ class PairingPageTest(unittest.TestCase):
                     for token in (False, "wrong", self.page.token[:-1], self.page.token + "x")]
         self.assertEqual((refused, quits, made.restart_requested.is_set()), ([403] * 16, [], False))
         status, headers, body = self.call("POST", "/restart")
-        self.assertEqual((status, body), (204, ""))
+        self.assertEqual((status, body), (200, page.WORDS["es"]["update_restarting"]))
         for name, value in FENCE.items():
             self.assertEqual(headers.get(name), value)
         deadline = time.monotonic() + 2
@@ -1292,6 +1292,56 @@ class PairingPageTest(unittest.TestCase):
         # A second «Actualizar» finds nothing to install and only shows the page again.
         self.assertEqual(self.call("POST", "/update")[0], 303)
         self.assertEqual(quits, [True])
+
+    def test_restart_answers_restarting_in_both_languages_and_the_page_keeps_the_line_until_the_poll_fails(self):
+        # Mutation: /restart answered 204 with no words. Red: the answer's body is empty.
+        # Mutation: the catch draws the closed sentence after a restart the page asked for. Red: it never reads asked.
+        # Mutation: a poll that answers after the ask draws its state again. Red: the poll does not return on asked.
+        # Mutation: notify's install drawn without the words. Red: its state line carries no data-restarting.
+        restarting = {"es": "Reiniciando. La página nueva se abre en unos segundos.",
+                      "en": "Restarting. The new page opens in a few seconds."}
+        self.assertEqual({lang: page.WORDS[lang]["update_restarting"] for lang in restarting}, restarting)
+        for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+            with self.subTest(lang=lang):
+                quits = []
+                made = self.updater("auto", restart=lambda quits=quits: quits.append(True))
+                made.round()
+                self.with_updater(made)
+                status, headers, body = self.call("POST", "/restart", headers={"Accept-Language": accept})
+                self.assertEqual((status, headers["content-type"], body),
+                                 (200, "text/plain; charset=utf-8", restarting[lang]))
+                deadline = time.monotonic() + 2
+                while not quits and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual((quits, made.restart_requested.is_set()), ([True], True))
+        # The script posts the restart's form itself and draws the answer in place of the state line; once asked,
+        # a poll that answers changes nothing and one that fails keeps the line.
+        script = page._SCRIPT
+        for piece in ("const follows=s.dataset.restarting!==undefined;let asked=false;",
+                      "function restarting(t){asked=true;s.textContent=t;s.dataset.shown='closed';}",
+                      "const rf=document.querySelector('form[action=\"/restart\"]');",
+                      "fetch('/restart',{method:'POST',body:new URLSearchParams(new FormData(rf))})",
+                      ".then(t=>{restarting(t);})",
+                      ".then(j=>{if(asked)return;"
+                      "if(follows&&j.update&&j.update.state==='ready'){restarting(s.dataset.restarting);return;}",
+                      ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:s.dataset.closed;"
+                      "s.dataset.shown='closed';})"):
+            with self.subTest(piece=piece):
+                self.assertEqual(script.count(piece), 1)
+        # «Actualizar» in notify mode: while its install runs the state line carries the words, so the restart that
+        # follows reads the same; auto mode's ready carries none.
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        notify, ready_auto = self.updater("notify", hold=hold), self.updater("auto")
+        notify.round()
+        notify.request_install()
+        ready_auto.round()
+        for made, carried in ((notify, True), (ready_auto, False)):
+            self.with_updater(made)
+            for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+                with self.subTest(mode=made.mode, lang=lang):
+                    found = re.findall(r'<p id="state"[^>]* data-restarting="([^"]*)"', self.html(accept))
+                    self.assertEqual(found, [html.escape(restarting[lang])] if carried else [])
 
     def test_the_figures_move_in_sequence_one_second_apart(self):
         # Mutation: the loop left at 30s. Red: a duration is not 15s. Mutation: the knight's burst moved back onto

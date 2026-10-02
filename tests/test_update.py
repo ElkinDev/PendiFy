@@ -6,6 +6,8 @@ import threading
 import time
 import unittest
 import urllib.error
+from pathlib import Path
+from unittest import mock
 
 import support
 
@@ -54,17 +56,26 @@ class FakeGet:
 
 class FakeRun:
     """subprocess.run as install() calls it: each call answers the next of `results`, (exit code, stderr) or an
-    exception raised; every call is kept with its options and the thread it ran on."""
+    exception raised, its stderr written to the handle install() gave for it, as pip writes it, after the event of
+    a third item when there is one; every call is kept with its options and the thread it ran on, and `files` keeps
+    the names of the files its stdout and its stderr were handles on."""
 
     def __init__(self, *results):
-        self.results, self.calls = list(results), []
+        self.results, self.calls, self.files = list(results), [], []
+        self.entered = threading.Event()  # set once a run holding on an event has begun
 
     def __call__(self, command, **options):
         self.calls.append((command, options, threading.current_thread()))
+        self.files.append(tuple(None if getattr(options.get(name), "name", None) is None else
+                                str(options[name].name) for name in ("stdout", "stderr")))
         result = self.results.pop(0)
         if isinstance(result, BaseException):
             raise result
-        return subprocess.CompletedProcess(command, result[0], "", result[1])
+        if len(result) > 2:
+            self.entered.set()
+            result[2].wait(5)
+        options["stderr"].write(result[1].encode("utf-8"))
+        return subprocess.CompletedProcess(command, result[0])
 
 
 class Waits:
@@ -87,12 +98,17 @@ def wait_until(condition, limit=5.0):
 
 class UpdaterTest(unittest.TestCase):
     def make(self, mode, *answers, current="0.1.5", runs=(), disk="0.1.5", venv=False, waits=None):
-        """An updater whose GET, pip and wait are fakes, its log and its restarts kept on the case."""
+        """An updater whose GET, pip and wait are fakes, its log and its restarts kept on the case; pip's output
+        goes to update-pip.log in a folder of the case."""
         get, run = FakeGet(*answers), FakeRun(*runs)
         self.logs, self.restarts = [], []
+        tmp = support.temp_dir()
+        self.addCleanup(tmp.cleanup)
+        pip_log = self.pip_log = Path(tmp.name) / "update-pip.log"
         made = update.Updater(current, mode, check=lambda: update.check(urlopen=get),
-                              install=lambda version: update.install(version, run=run, installed=lambda: disk,
-                                                                     executable=PYTHONW, in_venv=venv),
+                              install=lambda version: update.install(version, pip_log, run=run,
+                                                                     installed=lambda: disk, executable=PYTHONW,
+                                                                     in_venv=venv),
                               restart=lambda: self.restarts.append(True), clock=waits or Waits(1),
                               log=self.logs.append)
         return made, get, run
@@ -132,8 +148,7 @@ class UpdaterTest(unittest.TestCase):
                 self.assertIsNot(thread, threading.main_thread())
                 self.assertEqual(options["creationflags"] & (CREATE_NO_WINDOW | DETACHED_PROCESS),
                                  CREATE_NO_WINDOW | DETACHED_PROCESS)
-                self.assertEqual((options["timeout"], options["stdin"], options["capture_output"]),
-                                 (600, subprocess.DEVNULL, True))
+                self.assertEqual((options["timeout"], options["stdin"]), (600, subprocess.DEVNULL))
                 # Auto mode installs and waits for the page's «Reiniciar ahora»: it never restarts by itself.
                 self.assertEqual((self.restarts, made.restart_requested.is_set()), ([], False))
 
@@ -216,6 +231,63 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((get.requests, run.calls, made.snapshot()), ([], [], NOTHING))
         with self.assertRaises(ValueError):
             update.Updater("0.1.5", "on")
+
+    def test_pips_output_goes_to_the_update_log_not_to_pipes(self):
+        # Mutation: pip's output captured in pipes of this process. Red: stdout and stderr are no handles on the log.
+        # Mutation: the log opened to append. Red: the line of the install before is still in it.
+        # Mutation: the kept line read from the run's own stderr. Red: the failed line reads "pip ended 1".
+        # Mutation: PYTHONUNBUFFERED left out. Red: the environment misses it, and pip's stdout could land last.
+        made, _, run = self.make("auto", "0.1.6", runs=[(1, f"Collecting pendify==0.1.6\n{PIP_LINE}\n\n")])
+        self.pip_log.write_text("a line of an install before\n", encoding="utf-8")
+        made.round()
+        self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": PIP_LINE})
+        self.assertEqual(run.files, [(str(self.pip_log), str(self.pip_log))])
+        options = run.calls[0][1]
+        self.assertNotIn("capture_output", options)
+        self.assertEqual(options["env"]["PYTHONUNBUFFERED"], "1")
+        self.assertEqual(self.pip_log.read_text(encoding="utf-8"), f"Collecting pendify==0.1.6\n{PIP_LINE}\n\n")
+        # The updater main builds keeps the log in the config folder it is given; none is built without one.
+        folder = self.pip_log.parent
+        seen = []
+        built = update.Updater("0.1.5", "auto", check=lambda: "0.1.6", clock=Waits(1), log=self.logs.append,
+                               folder=folder)
+        self.assertEqual(built.pip_log, folder / "update-pip.log")
+        with mock.patch.object(update, "install", lambda version, log: seen.append((version, log)) or (True, None)):
+            built.round()
+        self.assertEqual((seen, built.snapshot()["state"]), ([("0.1.6", folder / "update-pip.log")], "ready"))
+        with self.assertRaises(ValueError):
+            update.Updater("0.1.5", "auto")
+
+    def test_close_waits_for_a_running_install_up_to_sixty_seconds_and_says_so_on_a_timeout(self):
+        # Mutation: the wait answers at once. Red: it reads True while pip still runs.
+        # Mutation: no line at the bound. Red: the log stays empty.
+        # Mutation: the bound left at the install's 600 s. Red: INSTALL_JOIN_SECONDS is not 60.
+        # Mutation: «Actualizar»'s install marked running only on its thread. Red: the wait reads True before it.
+        self.assertEqual(update.INSTALL_JOIN_SECONDS, 60)
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        made, _, run = self.make("auto", "0.1.6", runs=[(0, "", hold)])
+        self.assertTrue(made.wait(0))  # no install: at once, and no line
+        made.start()
+        self.assertTrue(run.entered.wait(5))
+        made.close()
+        began = time.monotonic()
+        self.assertFalse(made.wait(0.2))
+        self.assertGreaterEqual(time.monotonic() - began, 0.15)
+        self.assertEqual(self.logs, ["the install of 0.1.6 did not end in 0.2 seconds; pip goes on alone"])
+        hold.set()
+        self.assertTrue(made.wait(5))
+        made.thread.join(5)
+        self.assertEqual((made.snapshot()["state"], len(self.logs)), ("ready", 1))
+        # «Actualizar»'s install, on its own thread, is waited for the same way, from the request on.
+        held = threading.Event()
+        self.addCleanup(held.set)
+        notify, _, _ = self.make("notify", "0.1.6", runs=[(0, "", held)])
+        notify.round()
+        self.assertTrue(notify.request_install())
+        self.assertFalse(notify.wait(0.05))
+        held.set()
+        self.assertTrue(notify.wait(5))
 
     def test_the_first_round_waits_a_minute_and_the_next_six_hours(self):
         # Mutation: the first round at once. Red: the first wait is 0.
