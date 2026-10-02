@@ -1,5 +1,5 @@
 """The icon by the clock (lane pftray): an icon in the notification area whose menu opens the page, pauses or
-resumes the alerts and quits the program, so the program can be stopped with the page and the browser closed.
+resumes the alerts, quits the program and, once an update is ready, restarts into it, so the program can be stopped with the page and the browser closed.
 
 Standard library only: user32, shell32 and kernel32 by ctypes, bound for 64-bit Windows. The icon lives on a thread
 of its own, a daemon, with a hidden top-level tool window (never shown, so no taskbar entry and no Alt+Tab slot,
@@ -29,7 +29,7 @@ NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
 IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
 MF_STRING, MF_SEPARATOR = 0x0, 0x800
 TPM_RIGHTBUTTON, TPM_NONOTIFY, TPM_RETURNCMD = 0x2, 0x80, 0x100
-OPEN, PAUSE, RESUME, QUIT = 1, 2, 3, 4  # the menu's commands
+OPEN, PAUSE, RESUME, QUIT, RESTART = 1, 2, 3, 4, 5  # the menu's commands
 
 FAILED_LINE = " [tray] {call} failed (error {code})"
 BROKE_LINE = " [tray] the icon broke: {kind}"
@@ -122,10 +122,13 @@ def _say(line):
 class Tray:
     """The icon by the clock. `paused` answers the watcher's state and `words` the page's table for the language set
     at that moment; both are read at each click. `win32` is the facade of the Win32 functions, built from ctypes on
-    Windows when None; a test passes a fake."""
+    Windows when None; a test passes a fake. `update_ready` answers the version an install made ready, or None, read
+    at each click as well, and `on_restart` is the page's restart: with both, a ready version adds its item."""
 
-    def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, win32=None):
+    def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, win32=None,
+                 update_ready=None, on_restart=None):
         self.url = url
+        self._update_ready, self._on_restart = update_ready, on_restart
         self._on_open, self._on_pause, self._on_resume, self._on_quit = on_open, on_pause, on_resume, on_quit
         self._paused, self._words, self._icon_path = paused, words, str(icon_path)
         self._win32 = win32
@@ -277,12 +280,14 @@ class Tray:
         answers 0 when the menu is dismissed, which is no failure."""
         win32, words = self._win32, self._words()
         middle = (RESUME, words["resume"]) if self._paused() else (PAUSE, words["pause"])
+        ready = self._update_ready() if self._update_ready is not None and self._on_restart is not None else None
+        restart = () if ready is None else ((RESTART, words["update_tray_restart"].format(version=ready)),)
         menu = win32.CreatePopupMenu()
         if not menu:
             self._failed("CreatePopupMenu")
             return
         try:
-            for item in ((OPEN, words["tray_open"]), middle, None, (QUIT, words["quit"])):
+            for item in ((OPEN, words["tray_open"]), middle, None, *restart, (QUIT, words["quit"])):
                 flags, command, text = (MF_SEPARATOR, 0, None) if item is None else (MF_STRING, *item)
                 if not win32.AppendMenuW(menu, flags, command, text):
                     self._failed("AppendMenuW")
@@ -304,7 +309,7 @@ class Tray:
             self._on_pause()
         elif chosen == RESUME:
             self._on_resume()
-        elif chosen == QUIT:
-            self._on_quit()
+        elif chosen in (QUIT, RESTART):  # either ends this copy: its icon goes at once
+            (self._on_quit if chosen == QUIT else self._on_restart)()
             if not win32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
                 self._failed("PostMessageW")

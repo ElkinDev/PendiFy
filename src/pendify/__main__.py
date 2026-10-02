@@ -10,8 +10,9 @@
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break, on the page's quit button and on the quit of
 the icon by the clock, which remove the run file and exit 0. One instance per config folder: a second start
 opens the running page and exits 0, and one made while that program is still closing after its quit waits for
-it to end and starts. A restart the page asks for («Reiniciar ahora», once a newer version is installed) starts a
-new copy, with the --quiet of this one, once the run file is released.
+it to end and starts. A restart the page asks for («Reiniciar ahora», once a newer version is installed, or the
+icon's «Reiniciar para actualizar») starts a new copy once the run file is released: without --quiet, so its page
+opens, and with the --dry, --data-dir, --worker and --client-lockfile of this one.
 Where no console is attached (a pythonw start), the line a start ends on is also shown in a
 message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
@@ -163,15 +164,27 @@ def _ends(line, code, show):
     return code
 
 
-def _restart(args, spawn, show):
-    """The restart the page asked for, once the run file is free: a new copy of this program with this one's
-    --quiet, detached and with no console, which claims the run file as a first start does."""
-    command = [sys.executable, "-m", __package__] + (["--quiet"] if args.quiet else [])
+def _restart(args, spawn, show, opens_page):
+    """The restart asked for, once the run file is free: a new copy of this program, detached and with no console,
+    which claims the run file as a first start does. One that opens its page, as every restart asked today does,
+    goes without --quiet; one that does not keeps this run's --quiet. This run's --dry, --data-dir, --worker and
+    --client-lockfile go with it either way."""
+    command = [sys.executable, "-m", __package__] + (["--quiet"] if args.quiet and not opens_page else [])
+    command += ["--dry"] if args.dry else []
+    for option in ("data_dir", "worker", "client_lockfile"):
+        if hasattr(args, option):  # the parser's SUPPRESS: present only when this run was given it
+            command += ["--" + option.replace("_", "-"), str(getattr(args, option))]
     try:
         spawn(command, creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP, close_fds=True)
     except OSError:
         return _ends(RESTART_FAILED_LINE, 1, show)
     return 0
+
+
+def _ready_version(updater):
+    """The version an install made ready, for the icon's item; None in any other state."""
+    seen = updater.snapshot()
+    return seen["version"] if seen["state"] == update.READY else None
 
 
 def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray, updater,
@@ -220,14 +233,16 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
                                         on_resume=watch.resume, autostart=autostart, events=watch.events)
         url = pairing_page.start()
         # The update's rounds on their own thread (update.py), built once the page serves; its restart is the
-        # page's quit, after the flag read below once the run file is free.
-        updating = updater(update.RUNNING_VERSION, mode, restart=quit_page)
+        # page's quit, after the flag read below once the run file is free; pip's output goes to the config folder.
+        updating = updater(update.RUNNING_VERSION, mode, restart=quit_page, folder=store.path.parent)
         pairing_page.updater = updating
         # The icon by the clock, under --quiet as well: the way to stop a copy the Run key started. Its words are
         # the page's, in the language the page resolves with no browser to ask: the kept choice, else Spanish.
         icon = tray(url, on_open=lambda: opener(url), on_pause=watch.pause, on_resume=watch.resume,
                     on_quit=quit_page, paused=lambda: watch.paused,
-                    words=lambda: page.WORDS[pairing_page.language_of(None)], icon_path=ICON_PATH)
+                    words=lambda: page.WORDS[pairing_page.language_of(None)], icon_path=ICON_PATH,
+                    # «Reiniciar para actualizar a X» once an install is ready, the page's own restart
+                    update_ready=lambda: _ready_version(updating), on_restart=updating.restart)
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
             icon.start()
@@ -258,10 +273,13 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             pairing_page.close()
             icon.close()
             updating.close()
+            # An install under way is waited for before the run file goes, so a quit does not end this copy while
+            # pip swaps the files; past the bound pip goes on alone, its output in a file.
+            updating.wait(update.INSTALL_JOIN_SECONDS)
     finally:
         run.release()
     if updating is not None and updating.restart_requested.is_set():
-        return _restart(args, spawn, show)
+        return _restart(args, spawn, show, updating.restart_opens_page)
     return 0
 
 

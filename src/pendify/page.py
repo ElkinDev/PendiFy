@@ -131,6 +131,8 @@ WORDS = {
         "update_ready": "Actualización lista: {version}. Se aplica al reiniciar.",
         "update_restart": "Reiniciar ahora",
         "update_failed": "No se pudo instalar la versión {version}",
+        "update_restarting": "Reiniciando. La página nueva se abre en unos segundos.",
+        "update_tray_restart": "Reiniciar para actualizar a {version}",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -219,6 +221,8 @@ WORDS = {
         "update_ready": "Update ready: {version}. It applies on restart.",
         "update_restart": "Restart now",
         "update_failed": "Version {version} could not be installed",
+        "update_restarting": "Restarting. The new page opens in a few seconds.",
+        "update_tray_restart": "Restart to update to {version}",
     },
 }
 
@@ -508,7 +512,20 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
            "const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
            "g.setAttribute('tabindex','0');else g.removeAttribute('tabindex');}if(g)tabStop();"
-           "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
+           # The restart (pfupd round 2): «Reiniciar ahora» posted by the script, its answer, the restart's words,
+           # drawn in place of the state line; once asked, a poll that answers changes nothing and one that fails
+           # keeps the line. A page drawn while «Actualizar»'s install runs carries the words (data-restarting), so the
+           # restart that follows reads the same, and a poll that finds it ready draws them at once instead of
+           # reloading a page that is stopping.
+           "const follows=s.dataset.restarting!==undefined;let asked=false;"
+           "function restarting(t){asked=true;s.textContent=t;s.dataset.shown='closed';}"
+           "const rf=document.querySelector('form[action=\"/restart\"]');"
+           "if(rf)rf.addEventListener('submit',e=>{e.preventDefault();"
+           "fetch('/restart',{method:'POST',body:new URLSearchParams(new FormData(rf))})"
+           ".then(r=>r.ok?r.text():Promise.reject(r.status)).then(t=>{restarting(t);}).catch(()=>{});});"
+           "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{if(asked)return;"
+           "if(follows&&j.update&&j.update.state==='ready'){restarting(s.dataset.restarting);return;}"
+           "s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
            "||j.lang!==lang||(upd!==undefined&&j.update&&j.update.state+' '+(j.update.version||'')!==upd)"
@@ -523,7 +540,8 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "const x=document.createElement('span');if(l.warn)x.className='warn';x.textContent=l.text;"
            "li.append(t,x);o.insertBefore(li,o.firstChild);last=l.seq;}g.dataset.seq=String(last);"
            "while(o.children.length>50)o.lastElementChild.remove();tabStop();}})"
-           ".catch(()=>{s.textContent=s.dataset.closed;s.dataset.shown='closed';}),5000);"
+           ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:s.dataset.closed;"
+           "s.dataset.shown='closed';}),5000);"
            # The key shows for a minute: the reveal sets data-shown on the key, which swaps the mask for the code, and
            # flips its own label; 60 s after a show the key is masked again; one timer, cleared on every press, so a
            # hide by hand leaves none running. The sheet's function is named showKey here, since the script's first
@@ -876,13 +894,18 @@ class PairingPage:
         updated = self.updater.snapshot() if self.updater is not None else None
         updating = "" if updated is None else (f' data-update="{updated["state"]} '
                                                 f'{html.escape(updated["version"] or "")}"')
+        # While «Actualizar»'s install runs in notify mode, and once it reads ready, the restart follows by itself:
+        # the state line carries its words, which the script draws once the program is gone.
+        follows = (updated is not None and self.updater.mode == update.NOTIFY
+                   and updated["state"] in (update.INSTALLING, update.READY))
+        restarting = f' data-restarting="{words["update_restarting"]}"' if follows else ""
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in one fold
         # under it; the credit opens the top bar, and the quit sits at the foot, only beside a quit. The title row reads
         # the program's name, its sentence under it.
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
                 f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating} data-closed="{words["state_closed"]}">'
+                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating}{restarting} data-closed="{words["state_closed"]}">'
                 f'{words[_state_word(snapshot, seen)]}</p>']
         link += self._update_line(words, token, updated)
         if snapshot["configFailed"]:
@@ -1175,10 +1198,12 @@ def _handler(page):
                     page.on_quit()
                 return
             if path == "/restart":
-                # «Reiniciar ahora»: answered before the stop, as /quit is, and with no page, so the browser keeps
-                # this one and its poll says the program is gone while the new copy starts; the flag, then the quit.
+                # «Reiniciar ahora», posted by the page's script: answered before the stop, as /quit is, with the
+                # restart's words, which the script draws in place of the state line and keeps once the program is
+                # gone, while the new copy starts and opens its own page; the flag, then the quit.
                 try:
-                    self._send(204, "text/plain; charset=utf-8", "")
+                    self._send(200, "text/plain; charset=utf-8",
+                               WORDS[page.language_of(self.headers.get("Accept-Language"))]["update_restarting"])
                 finally:
                     page.updater.restart()
                 return
