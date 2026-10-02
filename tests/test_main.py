@@ -1060,6 +1060,21 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(opened, [served.group(1)])
         self.assertFalse(self.run_file.exists())  # its own run file, released at its own stop
 
+    @unittest.skipIf(os.name != "nt", READ_ONLY_WINDOWS_ONLY)
+    def test_a_not_ours_holder_on_a_read_only_record_ends_on_the_claim_failed_line(self):
+        # Mutation: evict answers False on the refused remove, as round 3 did. Red: the record read as a live holder
+        # by its pid, the already-running line, exit 0 and the record's dead page opened.
+        self.running_holder(version=OLDER, secret=RUN_SECRET, started=STARTED)
+        before = self.run_file.read_text(encoding="utf-8")
+        os.chmod(self.run_file, stat.S_IREAD)  # the read-only attribute: the move aside passes, the remove is refused
+        self.addCleanup(os.chmod, self.run_file, stat.S_IREAD | stat.S_IWRITE)
+        asked, clock = [], FakeClock()
+        (code, out, err), opened = self.start_newer(clock=clock.clock, sleep=clock.sleep,
+                                                    terminate=lambda *args: asked.append(args) or "not-ours")
+        self.assertEqual((code, out, err), (1, entry.CLAIM_FAILED_LINE.format(path=self.run_file) + "\n", ""))
+        self.assertEqual((asked, opened), ([(os.getppid(), STARTED, self.run_file)], []))
+        self.assertEqual(self.run_file.read_text(encoding="utf-8"), before)  # back under its name, as it was
+
     def test_a_refused_terminate_waits_then_takes_the_file_once_the_holder_is_gone(self):
         # Mutation: a refused terminate ends on the snapshot, as before. Red: the already-running line, the dead page
         # opened.

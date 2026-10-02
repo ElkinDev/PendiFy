@@ -237,12 +237,12 @@ def terminate(pid, started, path, probe=_probe, boot_instant=_boot_instant, end=
     None, as an older record (0.1.5 and before) has it, only when its image is python.exe or pythonw.exe, the run
     file was written more than BOOT_MARGIN_SECONDS after the boot, and the process started before that write, so the
     pid of a holder that died with the system, another process's now, is never ended, also after a Fast Startup
-    shutdown, which keeps GetTickCount64 counting from the last cold boot. NOT_OURS: the pid is not the holder's and its run file is stale. REFUSED:
-    an OSError opening or ending it, kept on the answer. The pid the record names is the one process opened, never a
-    process searched by its name or its command line, and this process is never ended. The seams a test fakes, so no
-    test opens a process to end it: `probe(pid)` gives (creation time, image file name), `boot_instant()` the boot
-    in seconds since the epoch, and `end(pid, created)` ends the pid only while it still names the process created
-    then (False otherwise)."""
+    shutdown, which keeps GetTickCount64 counting from the last cold boot. NOT_OURS: the pid is not the holder's and
+    its run file is stale. REFUSED: an OSError opening or ending it, kept on the answer. The pid the record names is
+    the one process opened, never a process searched by its name or its command line, and this process is never
+    ended. The seams a test fakes, so no test opens a process to end it: `probe(pid)` gives (creation time, image
+    file name), `boot_instant()` the boot in seconds since the epoch, and `end(pid, created)` ends the pid only while
+    it still names the process created then (False otherwise)."""
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
         return Answer(NOT_OURS)
     try:
@@ -422,10 +422,16 @@ class RunFile:
         """Removes the run file `holder` was read from, a record terminate answered NOT_OURS for, so stale: only while
         the file still holds that record, compared and removed in one step (_take_aside). True when it removed it;
         False when the file holds another record by then, put back under its name, or when another start moved it
-        first (FileNotFoundError) or a step stays refused after its retries (PermissionError)."""
+        first (FileNotFoundError) or holds it at the move aside (PermissionError). A remove still refused after its
+        retries (a read-only file) raises its PermissionError with the record back under its name, so the start ends
+        on the line that names the file, never on that stale record read as a live holder."""
         try:
-            return self._take_aside(holder)
+            aside = self._moved_aside()
         except (FileNotFoundError, PermissionError):  # another newcomer won: the claim that follows reads its record
+            return False
+        try:
+            return self._settled(aside, holder)  # a refused remove or put-back raises: the start cannot go on
+        except FileNotFoundError:
             return False
 
     def _take_aside(self, record):
@@ -435,8 +441,17 @@ class RunFile:
         name, False. Each move and the remove under the retries of release; FileNotFoundError when the file is gone
         at the move aside, PermissionError when a step is still refused after its retries, the file moved back under
         its name first when the remove is the step refused (a read-only file), so it stays as it was found."""
+        return self._settled(self._moved_aside(), record)
+
+    def _moved_aside(self):
+        """The run file moved to <path>.evict-<this pid> under the retries of release; that name answered."""
         aside = f"{self.path}.evict-{self._pid}"
         self._retried(os.replace, self.path, aside)
+        return aside
+
+    def _settled(self, aside, record):
+        """The file moved to `aside` removed when it holds `record`, True; moved back under its name when it holds
+        another, False, or when its remove stays refused, the refusal raised."""
         if self._read(aside) != record:
             self._retried(os.replace, aside, self.path)
             return False
