@@ -86,6 +86,25 @@ class FakeTray:
         self.moments.append(("close", self.watched and self.watched(self.url)))
 
 
+class FakeUpdater:
+    """The update in a test run, never PyPI: keeps what main built it with and, in `moments`, its start and its close
+    in order, each with what `watched` answered at that moment (None without)."""
+
+    def __init__(self, current_version, mode, restart, watched=None):
+        self.current_version, self.mode, self.restart = current_version, mode, restart
+        self.watched, self.moments = watched, []
+        self.restart_requested = threading.Event()
+
+    def snapshot(self):
+        return {"state": "none", "version": None, "error": None}
+
+    def start(self):
+        self.moments.append(("start", self.watched and self.watched()))
+
+    def close(self):
+        self.moments.append(("close", self.watched and self.watched()))
+
+
 def deny_new_files(case, folder):
     """The folder refuses a new file while the case runs: a deny entry on Windows, where a read-only attribute
     does not stop a create, and a mode without write elsewhere."""
@@ -128,6 +147,8 @@ class MainCommandTest(unittest.TestCase):
         kwargs.setdefault("autostart", support.silent_autostart())  # never the Run key
         kwargs.setdefault("console", lambda: True)  # a console is attached unless a case says there is none
         kwargs.setdefault("tray", FakeTray)  # never a real icon by the clock
+        kwargs.setdefault("updater", FakeUpdater)  # never PyPI, never pip
+        kwargs.setdefault("spawn", lambda command, **options: self.fail(f"a copy started: {command}"))
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -650,6 +671,83 @@ class MainCommandTest(unittest.TestCase):
                 self.assertTrue(Path(icon.icon_path).is_file())
                 self.assertFalse(self.run_file.exists())
 
+
+    def wait_for_the_page(self):
+        deadline = time.monotonic() + 5
+        while not (self.read_run() or {}).get("port") and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return (self.read_run() or {}).get("port")
+
+    def test_the_updater_starts_after_the_page_closes_in_the_finally_and_off_never_starts_it(self):
+        # Mutation: the updater started before the page. Red: the page does not answer at its start.
+        # Mutation: --no-update ignored. Red: the mode reads auto. Mutation: the close left out of the finally, or
+        # made before the page's. Red: no close, or the page still answers at it.
+        update = support.module("update")
+        for flags, stored, mode in (((), None, "auto"), ((), "notify", "notify"), ((), "off", "off"),
+                                    (("--no-update",), None, "off"), (("--no-update",), "notify", "off"),
+                                    (("--quiet",), "auto", "auto")):
+            with self.subTest(flags=flags, stored=stored):
+                self.store.load()
+                values = json.loads(self.store.path.read_text(encoding="utf-8"))
+                values.pop("update", None)
+                values.update({"update": stored} if stored else {})
+                self.store.path.write_text(json.dumps(values), encoding="utf-8")
+                made, ports = [], []
+
+                def updater(version, mode, restart, made=made, ports=ports):
+                    made.append(FakeUpdater(version, mode, restart, watched=lambda: answers(ports[0])))
+                    return made[-1]
+
+                def tray(url, *args, ports=ports, **kwargs):
+                    ports.append(int(url.split(":")[2].strip("/")))
+                    return FakeTray(url, *args, **kwargs)
+
+                stop = threading.Event()
+                thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                    *flags, opener=lambda url: True, stop=stop, tray=tray,
+                                                    updater=updater)
+                self.assertTrue(self.wait_for_the_page())
+                stop.set()
+                thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual((result["run"][0], result["run"][2]), (0, ""))
+                self.assertEqual(len(made), 1)
+                self.assertEqual((made[0].current_version, made[0].mode), (update.RUNNING_VERSION, mode))
+                self.assertEqual(made[0].moments, ([] if mode == "off" else [("start", True)]) + [("close", False)])
+
+    def test_the_restart_flag_starts_a_new_copy_after_the_run_file_is_released_with_the_same_quiet(self):
+        # Mutation: the copy started before the release. Red: the run file still exists at the start of the copy.
+        # Mutation: --quiet dropped from the new copy. Red: the quiet run's copy has no --quiet.
+        # Mutation: CREATE_NEW_PROCESS_GROUP left out. Red: the flags read 0x8.
+        for flags, refused in (((), False), (("--quiet",), False), ((), True)):
+            with self.subTest(flags=flags, refused=refused):
+                made, spawned = [], []
+
+                def spawn(command, refused=refused, spawned=spawned, **options):
+                    spawned.append((command, options, self.run_file.exists()))
+                    if refused:
+                        raise FileNotFoundError(2, "not found")
+
+                def updater(version, mode, restart, made=made):
+                    made.append(FakeUpdater(version, mode, restart))
+                    return made[-1]
+
+                stop = threading.Event()
+                thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                    *flags, opener=lambda url: True, stop=stop, updater=updater,
+                                                    spawn=spawn)
+                self.assertTrue(self.wait_for_the_page())
+                made[0].restart_requested.set()  # the page's «Reiniciar ahora»: the flag, then main's quit
+                made[0].restart()
+                thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(spawned, [([sys.executable, "-m", support.PACKAGE, *flags],
+                                            {"creationflags": 0x00000008 | 0x00000200, "close_fds": True}, False)])
+                code, out, err = result["run"]
+                self.assertEqual((code, err), (1 if refused else 0, ""))
+                self.assertEqual(out.splitlines()[-1].startswith("page: "), not refused)
+                if refused:
+                    self.assertEqual(out.splitlines()[-1], entry.RESTART_FAILED_LINE)
 
     def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):
         # Mutation: the page's quit only sets the stop. Red: the record still reads not closing while the tick

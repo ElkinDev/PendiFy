@@ -31,6 +31,9 @@ worker = support.module("worker")
 
 GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
 FENCE = {"cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY"}
+# The update's words (lane pfupd), in the order of the brief.
+UPDATE_KEYS = ("update_available", "update_install", "update_installing", "update_ready", "update_restart",
+               "update_failed")
 ROUTES = [("GET", "/"), ("GET", "/state"), ("POST", "/check"), ("POST", "/typed"), ("POST", "/forget"),
           ("POST", "/relink")]
 # A refused POST's body is read up to 64 KiB before the answer (brief lnk5a-fix1, change 1).
@@ -1168,6 +1171,127 @@ class PairingPageTest(unittest.TestCase):
             frames[name] = sorted(float(pct) for selector in re.findall(r"([\d.,% ]+)\{", body)
                                   for pct in selector.replace("%", "").split(","))
         return style, lines, frames
+
+    def with_updater(self, updater):
+        """The page beside an updater and a quit, as main builds it."""
+        self.page = page.PairingPage(self.state, on_quit=lambda: None, updater=updater)
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+
+    @staticmethod
+    def updater(mode, installed=(True, None), hold=None, restart=None):
+        """An updater whose check finds 0.1.6 over 0.1.5 and whose install answers `installed`, once `hold` is set
+        when one is given; its restart is `restart`, else nothing."""
+        update = support.module("update")
+
+        def install(version):
+            if hold is not None:
+                hold.wait(5)
+            return installed
+
+        return update.Updater("0.1.5", mode, check=lambda: "0.1.6", install=install,
+                              restart=restart or (lambda: None), clock=lambda seconds: True, log=lambda line: None)
+
+    def test_the_state_carries_the_update_and_the_page_draws_its_line_and_its_button_by_state(self):
+        # Mutation: «Actualizar» drawn in auto mode. Red: a button on the page that installs by itself.
+        # Mutation: the kept pip line left out of the title. Red: the failed line carries no title.
+        # Mutation: the line drawn above the state line. Red: the state line is not followed by the update line.
+        # Mutation: the poll compares no update. Red: the script never reloads on a new state.
+        self.assertEqual([page.WORDS["es"][key] for key in UPDATE_KEYS], [
+            "Hay una versión nueva: {version}", "Actualizar", "Instalando la versión {version}\u2026",
+            "Actualización lista: {version}. Se aplica al reiniciar.", "Reiniciar ahora",
+            "No se pudo instalar la versión {version}"])
+        self.assertEqual([page.WORDS["en"][key] for key in UPDATE_KEYS], [
+            "A new version is out: {version}", "Update", "Installing version {version}\u2026",
+            "Update ready: {version}. It applies on restart.", "Restart now",
+            "Version {version} could not be installed"])
+        hold, failure = threading.Event(), 'ERROR: No matching distribution found for pendify==0.1.6 "<x>"'
+        self.addCleanup(hold.set)
+        available, installing, ready_notify = self.updater("notify"), self.updater("notify", hold=hold), \
+            self.updater("notify")
+        ready_auto, failed = self.updater("auto"), self.updater("auto", installed=(False, failure))
+        for made in (available, installing, ready_notify, ready_auto, failed):
+            made.round()
+        installing.request_install()
+        ready_notify.request_install()
+        deadline = time.monotonic() + 5
+        while ready_notify.snapshot()["state"] != "ready" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        cases = ((self.updater("auto"), "none", None, None, None), (available, "available", "update_available",
+                                                                    "update", "update_install"),
+                 (installing, "installing", "update_installing", None, None),
+                 (ready_auto, "ready", "update_ready", "restart", "update_restart"),
+                 (ready_notify, "ready", "update_ready", "restart", "update_restart"),
+                 (failed, "failed", "update_failed", None, None))
+        for made, state, line, action, label in cases:
+            self.with_updater(made)
+            version = None if state == "none" else "0.1.6"
+            error = failure if state == "failed" else None
+            for accept, lang in (("es-CO,es;q=0.9", "es"), ("en-US,en;q=0.9", "en")):
+                with self.subTest(state=state, mode=made.mode, lang=lang):
+                    words = page.WORDS[lang]
+                    answer = json.loads(self.call("GET", "/state", headers={"Accept-Language": accept})[2])
+                    self.assertEqual(answer["update"], {"state": state, "version": version, "error": error})
+                    shown = self.html(accept)
+                    self.assertEqual(shown.count(f' data-update="{state} {version or ""}"'), 1)
+                    lines = re.findall(r'<p id="update" class="note( warn)?"( title="[^"]*")?>([^<]*)</p>', shown)
+                    self.assertEqual(lines, [] if line is None else [(
+                        " warn" if error else "", f' title="{html.escape(error)}"' if error else "",
+                        html.escape(words[line].format(version="0.1.6")))])
+                    if line is not None:
+                        self.assertRegex(shown, r'<p id="state"[^>]*>[^<]*</p><p id="update"')
+                    forms = re.findall(r'<form method="post" action="/(update|restart)"><input type="hidden" '
+                                       r'name="token" value="[^"]+"><button type="submit">([^<]*)</button></form>',
+                                       shown)
+                    self.assertEqual(forms, [] if action is None else [(action, html.escape(words[label]))])
+        self.assertIn("const upd=s.dataset.update;", page._SCRIPT)
+        poll = page._SCRIPT[:page._SCRIPT.index("location.reload();")]
+        self.assertIn("||(upd!==undefined&&j.update&&j.update.state+' '+(j.update.version||'')!==upd)", poll)
+        # Without an updater neither the state nor the page says anything of one.
+        self.page = page.PairingPage(self.state)
+        self.page.start()
+        self.addCleanup(self.page.close)
+        self.port, self.host = self.page.port, f"127.0.0.1:{self.page.port}"
+        self.assertNotIn("update", json.loads(self.call("GET", "/state")[2]))
+        self.assertNotIn("data-update", self.html())
+        self.assertNotIn('id="update"', self.html())
+
+    def test_restart_and_update_are_fenced_like_quit_and_restart_sets_the_flag_then_quits(self):
+        # Mutation: /restart answered before the token check. Red: a POST with no token restarts the program.
+        # Mutation: the quit called before the flag is set. Red: the quit sees no restart asked.
+        self.assertEqual([self.call("POST", path)[0] for path in ("/restart", "/update")], [404, 404])
+        quits = []
+        made = self.updater("auto", restart=lambda: quits.append(made.restart_requested.is_set()))
+        made.round()
+        self.with_updater(made)
+        hosts = ["evil.example", f"127.0.0.1:{self.port + 1}", f"localhost.evil.example:{self.port}", ""]
+        refused = [self.call("POST", path, host=host)[0] for path in ("/restart", "/update") for host in hosts]
+        refused += [self.call("POST", path, token=token)[0] for path in ("/restart", "/update")
+                    for token in (False, "wrong", self.page.token[:-1], self.page.token + "x")]
+        self.assertEqual((refused, quits, made.restart_requested.is_set()), ([403] * 16, [], False))
+        status, headers, body = self.call("POST", "/restart")
+        self.assertEqual((status, body), (204, ""))
+        for name, value in FENCE.items():
+            self.assertEqual(headers.get(name), value)
+        deadline = time.monotonic() + 2
+        while not quits and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(quits, [True])
+        # Notify mode: «Actualizar» installs, then restarts the same way.
+        installs, quits = [], []
+        notify = self.updater("notify", restart=lambda: quits.append(notify.restart_requested.is_set()))
+        notify.round()
+        self.with_updater(notify)
+        status, headers, _ = self.call("POST", "/update")
+        self.assertEqual((status, headers["location"]), (303, "/"))
+        deadline = time.monotonic() + 5
+        while not quits and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual((quits, notify.snapshot()["state"]), ([True], "ready"))
+        # A second «Actualizar» finds nothing to install and only shows the page again.
+        self.assertEqual(self.call("POST", "/update")[0], 303)
+        self.assertEqual(quits, [True])
 
     def test_the_figures_move_in_sequence_one_second_apart(self):
         # Mutation: the loop left at 30s. Red: a duration is not 15s. Mutation: the knight's burst moved back onto

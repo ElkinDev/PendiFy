@@ -196,6 +196,34 @@ class ConfigStoreTest(unittest.TestCase):
                 read()
             self.assertEqual(str(raised.exception), config.UNAVAILABLE.format(path=self.store.path))
 
+    def test_the_update_mode_is_its_key_auto_by_default_and_every_write_keeps_it(self):
+        # Mutation: _write drops the update key. Red: the off written by hand is gone after a link id is stored.
+        # Mutation: a foreign value read as itself. Red: "OFF" reads as a mode.
+        self.assertEqual((config.UPDATE_MODES, config.DEFAULT_UPDATE), (("auto", "notify", "off"), "auto"))
+        self.assertEqual(self.store.read_update(), "auto")  # no file
+        self.store.load()
+        self.assertEqual(self.store.read_update(), "auto")  # no key
+        for mode in ("auto", "notify", "off"):
+            with self.subTest(mode=mode):
+                self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "update": mode}))
+                self.assertEqual(self.store.read_update(), mode)
+        for foreign in ("OFF", "never", "", None, 0, ["off"]):
+            with self.subTest(foreign=foreign):
+                self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "update": foreign}))
+                self.assertEqual(self.store.read_update(), "auto")
+        self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "update": "off"}))
+        self.store.set_link_id(LINK_ID)
+        self.store.set_theme("dark")
+        self.store.set_lang("en")
+        self.store.clear_link_id()
+        forgotten = self.store.forget()
+        self.assertEqual(self.on_disk(), {"secret": forgotten.secret, "linkId": None, "theme": "dark", "lang": "en",
+                                          "update": "off"})
+        self.assertEqual(self.store.read_update(), "off")
+        self.write_raw(json.dumps({"secret": SECRET, "linkId": None, "update": "never"}))
+        self.store.set_link_id(LINK_ID)
+        self.assertEqual(self.on_disk(), {"secret": SECRET, "linkId": LINK_ID})
+
     def test_forget_mints_a_new_secret_and_clears_the_link_id(self):
         # Mutation: forget keeps the secret and only clears the link id. Red: the secret is unchanged.
         self.store.set_typed(LINK_ID, SECRET)
