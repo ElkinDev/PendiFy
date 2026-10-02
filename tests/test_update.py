@@ -286,13 +286,14 @@ class UpdaterTest(unittest.TestCase):
         made.thread.join(5)
         self.assertEqual((made.snapshot()["state"], len(self.logs)), ("ready", 1))
         # «Actualizar»'s install, on its own thread, is waited for the same way, from the request on.
-        held = threading.Event()
-        self.addCleanup(held.set)
-        notify, _, _ = self.make("notify", "0.1.6", runs=[(0, "", held)])
+        notify, _, _ = self.make("notify", "0.1.6", runs=[(0, "")])
         notify.round()
+        gate, original = threading.Event(), notify._install_then_restart
+        self.addCleanup(gate.set)
+        notify._install_then_restart = lambda version: (gate.wait(5), original(version))  # its thread held first
         self.assertTrue(notify.request_install())
-        self.assertFalse(notify.wait(0.05))
-        held.set()
+        self.assertFalse(notify.wait(0.05))  # marked running by the request, before its thread reaches pip
+        gate.set()
         self.assertTrue(notify.wait(5))
 
     def test_the_first_round_waits_a_minute_and_the_next_six_hours(self):

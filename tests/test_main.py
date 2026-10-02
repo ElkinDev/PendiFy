@@ -781,6 +781,7 @@ class MainCommandTest(unittest.TestCase):
 
         def updater(version, mode, restart, folder=None, made=made):
             made.append(FakeUpdater(version, mode, restart, folder, watched=self.run_file.exists))
+            made[-1].restart = lambda: None  # the updater's own restart, apart from main's quit
             return made[-1]
 
         def tray(*args, trays=trays, **kwargs):
