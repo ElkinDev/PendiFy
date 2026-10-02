@@ -2,6 +2,7 @@
 import contextlib
 import html
 import http.client
+import http.server
 import io
 import json
 import os
@@ -26,6 +27,7 @@ config = support.module("config")
 entry = support.module("__main__")
 page = support.module("page")
 runfile = support.module("runfile")
+update = support.module("update")
 watcher = support.module("watcher")
 worker = support.module("worker")
 
@@ -44,6 +46,9 @@ QUIT_TOKEN = re.compile(r'<form method="post" action="/quit"><input type="hidden
 CLOSING_PORT = 1023
 CLOSING_BOUND = 15.0  # how long a start waits for a closing copy to let its run file go
 PAGE_LINE = re.compile(r"page: (http://127\.0\.0\.1:\d+/)\n")
+# Test vectors: the version a newer copy runs, an older and a newer holder's, and a run file's replace secret.
+NEWER, OLDER, NEWEST = "0.2.0", "0.1.9", "0.10.0"
+RUN_SECRET = "0123456789abcdef" * 2
 
 
 def answers(port):
@@ -132,6 +137,35 @@ def deny_new_files(case, folder):
         open(folder / "a probe of the case", "x").close()
 
 
+class FakeHolderPage:
+    """An older copy's page in a test run: answers every POST with `status` and keeps its path and form; `release`,
+    when given, runs before the answer, as the holder lets its run file go."""
+
+    def __init__(self, status, release=None):
+        self.posts, fake = [], self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8")
+                fake.posts.append((self.path, urllib.parse.parse_qs(body)))
+                if release is not None:
+                    release()
+                self.send_response(status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *args):  # nothing on the test run's output
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
 class MainCommandTest(unittest.TestCase):
     def setUp(self):
         tmp = support.temp_dir()
@@ -159,6 +193,7 @@ class MainCommandTest(unittest.TestCase):
         kwargs.setdefault("tray", FakeTray)  # never a real icon by the clock
         kwargs.setdefault("updater", FakeUpdater)  # never PyPI, never pip
         kwargs.setdefault("spawn", lambda command, **options: self.fail(f"a copy started: {command}"))
+        kwargs.setdefault("terminate", lambda pid: self.fail(f"a process ended: {pid}"))  # never a real one
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -886,6 +921,94 @@ class MainCommandTest(unittest.TestCase):
                                                                  "closing": True}))
         self.assertEqual(result["run"][0], 0)
         self.assertFalse(self.run_file.exists())  # released at the end, as before
+
+    def running_holder(self, **fields):
+        """A copy running beside this start, not closing: alive (the process that started this test) unless `pid`
+        says another, its page on CLOSING_PORT unless `port` says another, with the record's other `fields`."""
+        self.run_file.parent.mkdir(parents=True, exist_ok=True)
+        record = {"pid": os.getppid(), "port": CLOSING_PORT, **fields}
+        self.run_file.write_text(json.dumps(record), encoding="utf-8")
+        return record
+
+    def holder_page(self, status, release=None):
+        holder_page = FakeHolderPage(status, release)
+        self.addCleanup(holder_page.close)
+        return holder_page
+
+    def start_newer(self, **kwargs):
+        """A start of a copy running NEWER that ends at its first tick; its code, output and error, and the pages
+        it opened."""
+        opened, stop = [], threading.Event()
+        stop.set()
+        with unittest.mock.patch.object(update, "RUNNING_VERSION", NEWER):
+            result = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                   opener=lambda url: opened.append(url) or True, stop=stop, **kwargs)
+        return result, opened
+
+    def test_a_newer_copy_replaces_a_running_older_one_through_its_replace_route_and_opens_its_own_page(self):
+        # Mutation: the version compare turned, an older holder kept. Red: no replace posted, the holder's page
+        # opened with the already-running line.
+        holder_page = self.holder_page(202, release=self.run_file.unlink)
+        self.running_holder(port=holder_page.port, version=OLDER, secret=RUN_SECRET)
+        (code, out, err), opened = self.start_newer()
+        self.assertEqual(holder_page.posts, [("/replace", {"secret": [RUN_SECRET]})])
+        served = PAGE_LINE.search(out)
+        self.assertEqual((code, err, served is not None), (0, "", True), out)
+        self.assertEqual(out, f"Se reemplazó la copia anterior ({OLDER}) por esta ({NEWER}).\n" + served.group(0))
+        self.assertEqual(opened, [served.group(1)])
+        self.assertFalse(self.run_file.exists())  # its own run file, released at its own stop
+
+    def test_a_newer_copy_terminates_an_older_holder_that_has_no_secret_and_takes_the_file(self):
+        # Mutation: a holder with no secret kept, as before. Red: nothing ended, the holder's page opened.
+        # The holder: a child that ends by itself once its input closes, so no process is terminated by the test.
+        holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+        self.addCleanup(holder.wait, 30)
+        self.addCleanup(holder.stdin.close)
+        self.running_holder(pid=holder.pid)  # an older copy's record: no version, no secret
+        ended = []
+
+        def terminate(pid):  # the seam: the holder's input closed, it ends, and its run file turns stale
+            ended.append(pid)
+            holder.stdin.close()
+            holder.wait(30)
+
+        (code, out, err), opened = self.start_newer(terminate=terminate)
+        self.assertEqual(ended, [holder.pid])
+        served = PAGE_LINE.search(out)
+        self.assertEqual((code, err, served is not None), (0, "", True), out)
+        self.assertEqual(out, f"Se reemplazó la copia anterior (desconocida) por esta ({NEWER}).\n" + served.group(0))
+        self.assertEqual(opened, [served.group(1)])
+        self.assertFalse(self.run_file.exists())
+
+    def test_a_same_version_second_start_opens_the_holders_page_as_before(self):
+        # Mutation: the compare as at least as new. Red: the same version's replace route posted.
+        for name, version in (("the same version", NEWER), ("a newer holder", NEWEST)):
+            with self.subTest(holder=name):
+                holder_page = self.holder_page(202)
+                record = self.running_holder(port=holder_page.port, version=version, secret=RUN_SECRET)
+                clock = FakeClock()
+                result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep)
+                self.assertEqual((result, opened), ((0, entry.ALREADY_RUNNING_LINE + "\n", ""),
+                                                    [f"http://127.0.0.1:{holder_page.port}/"]))
+                self.assertEqual((holder_page.posts, self.read_run()), ([], record))
+
+    def test_a_replace_that_leaves_the_holder_alive_ends_on_the_already_running_line(self):
+        # Mutation: the claim taken again whatever the wait answered. Red: the holder's live file read as this
+        # start's, or a page of its own started beside the holder.
+        for road in ("its page answered", "ended by its pid"):
+            with self.subTest(road=road):
+                holder_page = self.holder_page(202)  # answers, and never lets its file go
+                fields = {"port": holder_page.port, "version": OLDER, "secret": RUN_SECRET}
+                record = self.running_holder(**(fields if road == "its page answered" else {}))
+                clock, ended = FakeClock(), []
+                result, opened = self.start_newer(clock=clock.clock, sleep=clock.sleep, terminate=ended.append)
+                self.assertEqual((result, opened), ((0, entry.ALREADY_RUNNING_LINE + "\n", ""),
+                                                    [f"http://127.0.0.1:{record['port']}/"]))
+                posted = [("/replace", {"secret": [RUN_SECRET]})] if road == "its page answered" else []
+                self.assertEqual((holder_page.posts, ended), (posted, [] if posted else [os.getppid()]))
+                self.assertGreaterEqual(clock.now, CLOSING_BOUND)
+                self.assertLess(clock.now, CLOSING_BOUND + 2 * runfile.REREAD_STEP)
+                self.assertEqual(self.read_run(), record)
 
 
 if __name__ == "__main__":

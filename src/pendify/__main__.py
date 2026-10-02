@@ -292,7 +292,7 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen):
+         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=None):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
     line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the

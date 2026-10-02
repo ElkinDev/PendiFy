@@ -9,9 +9,11 @@ from unittest import mock
 import support
 
 runfile = support.module("runfile")
+update = support.module("update")
 
 HOLDER, OTHER = 4242, 4343  # two pids the alive seam answers for: no process is asked
 PORT = 54321
+HOLDER_VERSION = "1.2.3"  # a test vector, the version the holder runs
 
 
 class RunFileTest(unittest.TestCase):
@@ -144,6 +146,36 @@ class RunFileTest(unittest.TestCase):
         self.assertEqual((self.record()["pid"], now[0]), (HOLDER, runfile.REREAD_STEP))  # ended by the pid alone
         self.assertIsNone(start.claim())  # taken over
         self.assertEqual(self.record(), {"pid": OTHER, "port": None})
+
+    def test_publish_writes_the_version_and_a_secret_and_claim_hands_them_back(self):
+        # Mutation: publish writes {pid, port} as before. Red: the record carries no version and no secret.
+        # Mutation: mark_closing writes {pid, port, closing} as before. Red: the closing record loses both.
+        with mock.patch.object(update, "RUNNING_VERSION", HOLDER_VERSION):
+            held = self.start(HOLDER)
+            self.assertIsNone(held.claim())
+            held.publish(PORT)
+            record = self.record()
+            secret = record.get("secret")
+            self.assertRegex(str(secret), r"\A[0-9a-f]{32}\Z")
+            self.assertEqual(getattr(held, "secret", None), secret)  # the secret the page's /replace answers to
+            self.assertEqual(record, {"pid": HOLDER, "port": PORT, "version": HOLDER_VERSION, "secret": secret})
+            claimed = {"pid": HOLDER, "port": PORT, "closing": False, "version": HOLDER_VERSION, "secret": secret}
+            self.assertEqual(self.start(OTHER).claim(), claimed)
+            held.mark_closing()
+            self.assertEqual(self.record(), {**record, "closing": True})
+            self.assertEqual(self.start(OTHER).claim(), {**claimed, "closing": True})
+
+    def test_an_older_record_without_them_reads_version_none_and_secret_none(self):
+        # Mutation: the record's version and secret handed back unchecked. Red: a number or an empty text comes
+        # back as the holder's version or secret.
+        self.folder.mkdir(parents=True)
+        for name, record in (("an older copy's", {"pid": HOLDER, "port": PORT}),
+                             ("neither a text", {"pid": HOLDER, "port": PORT, "version": 2, "secret": ["x"]}),
+                             ("both empty", {"pid": HOLDER, "port": PORT, "version": "", "secret": ""})):
+            with self.subTest(record=name):
+                self.path.write_text(json.dumps(record), encoding="utf-8")
+                self.assertEqual(self.start(OTHER).claim(),
+                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None})
 
 
 if __name__ == "__main__":
