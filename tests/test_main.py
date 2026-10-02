@@ -70,6 +70,22 @@ class FakeClock:
         self.now += seconds
 
 
+class FakeTray:
+    """The icon by the clock in a test run, never a real one: it keeps what main built it with and, in `moments`,
+    its start and its close in order, each with what `watched` answered of its url at that moment (None without)."""
+
+    def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, watched=None):
+        self.url, self.on_open, self.on_pause, self.on_resume = url, on_open, on_pause, on_resume
+        self.on_quit, self.paused, self.words, self.icon_path = on_quit, paused, words, icon_path
+        self.watched, self.moments = watched, []
+
+    def start(self):
+        self.moments.append(("start", self.watched and self.watched(self.url)))
+
+    def close(self):
+        self.moments.append(("close", self.watched and self.watched(self.url)))
+
+
 def deny_new_files(case, folder):
     """The folder refuses a new file while the case runs: a deny entry on Windows, where a read-only attribute
     does not stop a create, and a mode without write elsewhere."""
@@ -111,6 +127,7 @@ class MainCommandTest(unittest.TestCase):
         kwargs.setdefault("box", self.boxes.append)
         kwargs.setdefault("autostart", support.silent_autostart())  # never the Run key
         kwargs.setdefault("console", lambda: True)  # a console is attached unless a case says there is none
+        kwargs.setdefault("tray", FakeTray)  # never a real icon by the clock
         if "--client-lockfile" not in argv:
             argv = ("--client-lockfile", str(self.no_client)) + argv
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -567,6 +584,71 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(result["run"], (0, f"page: {opened[0]}\n", ""))
         for key in ("stopped", "start_again"):
             self.assertIn(html.escape(page.WORDS["en"][key]), body)
+
+    def test_the_icon_by_the_clock_starts_after_the_page_and_closes_after_it_with_its_url_and_its_quit(self):
+        # Mutation: on_quit=stop.set. Red: the record does not read closing when the icon's quit sets the stop.
+        # Mutation: the icon closed before the page. Red: the page still answers at the icon's close.
+        # Mutation: the words of one table. Red: the same words after the language switch on the page.
+        # Mutation: no icon under --quiet. Red: the quiet start builds none.
+        def page_answers(url):
+            return answers(int(url.split(":")[2].strip("/")))
+
+        def request(port, method, path, body=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                headers = {"Host": f"127.0.0.1:{port}"}
+                if body is not None:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                return response.status, response.read().decode("utf-8")
+            finally:
+                connection.close()
+
+        # The language is kept across the two starts: none at first, so Spanish, then the one chosen in between.
+        for flags, languages in (((), ("es", "en")), (("--quiet",), ("en", "es"))):
+            with self.subTest(flags=flags):
+                made, opened, seen, read_run = [], [], [], self.read_run
+
+                class Stop(threading.Event):  # keeps the record as it reads when the stop is first set
+                    def set(self):
+                        if not self.is_set():
+                            seen.append(read_run())
+                        super().set()
+
+                def tray(*args, made=made, **kwargs):
+                    made.append(FakeTray(*args, watched=page_answers, **kwargs))
+                    return made[-1]
+
+                stop, opener = Stop(), (lambda url, opened=opened: opened.append(url) or True)
+                thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                    *flags, opener=opener, stop=stop, tray=tray)
+                deadline = time.monotonic() + 5
+                while not (made and made[0].moments) and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                icon = made[0]
+                port = int(icon.url.split(":")[2].strip("/"))
+                words = [icon.words()]
+                token = QUIT_TOKEN.search(request(port, "GET", "/")[1]).group(1)
+                request(port, "POST", "/lang", urllib.parse.urlencode({"token": token, "lang": languages[1]}))
+                words.append(icon.words())
+                icon.on_open()
+                icon.on_pause()
+                paused = [icon.paused()]
+                icon.on_resume()
+                paused.append(icon.paused())
+                icon.on_quit()
+                thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(result["run"], (0, f"page: {icon.url}\n", ""))
+                self.assertEqual((len(made), icon.moments), (1, [("start", True), ("close", False)]))
+                self.assertEqual(seen[0], {"pid": os.getpid(), "port": port, "closing": True})
+                self.assertEqual(opened, [icon.url] * (1 if flags else 2))  # a person's start opens it as well
+                self.assertEqual(paused, [True, False])
+                self.assertEqual(words, [page.WORDS[languages[0]], page.WORDS[languages[1]]])
+                self.assertEqual(Path(icon.icon_path), support.package_dir() / "pendify.ico")
+                self.assertTrue(Path(icon.icon_path).is_file())
+                self.assertFalse(self.run_file.exists())
 
 
     def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):

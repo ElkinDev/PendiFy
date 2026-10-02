@@ -94,6 +94,8 @@ class PackageShapeTest(unittest.TestCase):
     def test_the_package_lists_its_icon_and_the_pyproject_ships_it(self):
         # Mutation: the package-data table dropped. Red: setuptools would leave pendify.ico out of the wheel.
         self.assertTrue((support.package_dir() / "pendify.ico").is_file(), "no pendify.ico beside the modules")
+        # Mutation: tray.py renamed or moved out of the package. Red: no icon by the clock beside the modules.
+        self.assertIn("tray.py", [path.name for path in package_files()])
         pyproject = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(pyproject["tool"]["setuptools"]["package-data"], {support.PACKAGE: ["*.ico"]})
 
@@ -198,7 +200,7 @@ class PackageShapeTest(unittest.TestCase):
     def test_pyproject_points_its_urls_at_the_repository_and_keeps_its_version(self):
         # Mutation: Source pointed at a fork. Red: the urls are not the repository's.
         project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-        self.assertEqual((project["name"], project["version"]), (support.PACKAGE, "0.1.3"))
+        self.assertEqual((project["name"], project["version"]), (support.PACKAGE, "0.1.4"))
         self.assertEqual(project.get("urls"), {"Homepage": REPOSITORY, "Source": REPOSITORY})
         self.assertIn("Operating System :: Microsoft :: Windows", project.get("classifiers", []))
         # The license is the SPDX expression; a License classifier beside it is refused by setuptools.
@@ -276,6 +278,8 @@ class PackageShapeTest(unittest.TestCase):
         # Mutation: the package-data table dropped. Red: the wheel carries the modules and no pendify.ico.
         self.assertEqual({name.split("/")[-1] for name in names if name.startswith(support.PACKAGE + "/")},
                          {path.name for path in package_files()} | {"pendify.ico"})
+        # Mutation: tray.py left out of the package. Red: the icon by the clock is not in the wheel.
+        self.assertIn(support.PACKAGE + "/tray.py", names)
 
 
 if __name__ == "__main__":
