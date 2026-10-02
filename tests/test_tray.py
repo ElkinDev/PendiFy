@@ -63,7 +63,7 @@ class FakeWin32:
         return self.note("UnregisterClassW", name, instance)
 
     def CreateWindowExW(self, ex_style, class_name, title, style, x, y, width, height, parent, menu, instance, param):
-        return self.note("CreateWindowExW", class_name, parent, instance, answer=WINDOW)
+        return self.note("CreateWindowExW", ex_style, class_name, style, parent, instance, answer=WINDOW)
 
     def DestroyWindow(self, hwnd):
         answer = self.note("DestroyWindow", hwnd)
@@ -141,6 +141,24 @@ class FakeWin32:
         return ERROR
 
 
+class StuckWin32(FakeWin32):
+    """GetMessageW never returns while the case runs, as a thread held in TrackPopupMenu's modal loop; it answers
+    WM_QUIT once the case lets it go. Each Shell_NotifyIconW keeps its action and the name of the calling thread."""
+
+    def __init__(self):
+        super().__init__()
+        self.waiting, self.release, self.notified_by = threading.Event(), threading.Event(), []
+
+    def GetMessageW(self, message, hwnd, low, high):
+        self.waiting.set()
+        self.release.wait(10)
+        return 0
+
+    def Shell_NotifyIconW(self, action, data):
+        self.notified_by.append((action, threading.current_thread().name))
+        return super().Shell_NotifyIconW(action, data)
+
+
 def tray_threads():
     return [thread for thread in threading.enumerate() if thread.name == tray.THREAD_NAME]
 
@@ -185,12 +203,13 @@ class TrayTest(unittest.TestCase):
 
     def test_start_adds_the_icon(self):
         # Mutation: uCallbackMessage left 0. Red: a click would never reach the window.
-        # Mutation: the parent None. Red: a top-level window in place of a message-only one.
+        # Mutation: the parent HWND_MESSAGE. Red: a message-only window, which never hears TaskbarCreated.
+        # Mutation: WS_EX_TOOLWINDOW dropped. Red: the hidden window may take a taskbar entry or an Alt+Tab slot.
         self.started()
         self.assertEqual(self.fake.calls[:6], [
             ("GetModuleHandleW", None),
             ("RegisterClassW", tray.CLASS_NAME, INSTANCE),
-            ("CreateWindowExW", tray.CLASS_NAME, -3, INSTANCE),  # HWND_MESSAGE
+            ("CreateWindowExW", 0x80, tray.CLASS_NAME, 0, None, INSTANCE),  # WS_EX_TOOLWINDOW, WS_OVERLAPPED, top-level
             ("LoadImageW", None, str(ICON_PATH), 1, 0, 0, 0x50),  # IMAGE_ICON; LR_LOADFROMFILE, LR_DEFAULTSIZE
             ("RegisterWindowMessageW", "TaskbarCreated"),
             self.added()])
@@ -270,6 +289,25 @@ class TrayTest(unittest.TestCase):
             ("DestroyIcon", ICON),
             ("UnregisterClassW", tray.CLASS_NAME, INSTANCE)])
         self.assertEqual(self.err.getvalue(), "")
+
+    def test_close_deletes_the_icon_itself_when_the_thread_does_not_end(self):
+        # Mutation: close only joins. Red: no NIM_DELETE from close, a dead icon stays by the clock.
+        # Mutation: the thread not a daemon. Red: a held thread keeps the process alive after main returns.
+        stuck = StuckWin32()
+        icon = self.make(stuck)
+        self.addCleanup(lambda: self.assertTrue(ended()))  # last: the thread let go ends by itself
+        self.addCleanup(stuck.release.set)
+        self.addCleanup(setattr, tray, "CLOSE_SECONDS", tray.CLOSE_SECONDS)
+        tray.CLOSE_SECONDS = 0.2
+        icon.start()
+        self.assertTrue(stuck.waiting.wait(5))
+        icon.close()
+        self.assertEqual(len(tray_threads()), 1)  # still held when close returns
+        self.assertEqual(stuck.notified_by, [(0, tray.THREAD_NAME), (2, threading.current_thread().name)])
+        self.assertEqual(stuck.calls[-1], ("Shell_NotifyIconW", 2, NOTIFY_SIZE, WINDOW, 1, 0, 0, None, ""))
+        self.assertEqual(self.err.getvalue(),
+                         " [tray] the icon's thread did not end in 0.2 seconds: its icon deleted from close\n")
+        self.assertTrue(all(thread.daemon for thread in tray_threads()))
 
     def test_a_failed_shell_call_is_logged_and_does_not_raise(self):
         # Mutation: a zero return raised. Red: the thread dies with a traceback on stderr and serves no menu.

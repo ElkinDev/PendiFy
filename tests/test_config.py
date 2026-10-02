@@ -299,7 +299,7 @@ class ConfigStoreTest(unittest.TestCase):
                         code = entry.main(["--data-dir", str(self.base), "--worker", "http://127.0.0.1:9",
                                            "--client-lockfile", self.no_client, *argv],
                                           **kwargs, beep=support.silent_beep, box=support.silent_box,
-                                          autostart=support.silent_autostart())
+                                          autostart=support.silent_autostart(), tray=support.silent_tray)
                     except Exception as failure:  # the red: what leaves main in place of the exit code
                         code = type(failure).__name__
                 self.assertEqual((code, out.getvalue(), err.getvalue()), (1, self.unavailable() + "\n", ""))
@@ -361,7 +361,8 @@ class ConfigStoreTest(unittest.TestCase):
             try:
                 code = entry.main(["--data-dir", str(self.base), "--worker", fake.base, "--client-lockfile",
                                    self.no_client], opener=opener, stop=stop, beep=support.silent_beep,
-                                  box=support.silent_box, autostart=support.silent_autostart())
+                                  box=support.silent_box, autostart=support.silent_autostart(),
+                                  tray=support.silent_tray)
             except Exception as failure:  # the red: what leaves main in place of the exit code
                 code = type(failure).__name__
         self.assertEqual((code, out.getvalue(), err.getvalue()),

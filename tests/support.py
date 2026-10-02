@@ -88,6 +88,21 @@ def silent_autostart():
     return module("autostart").Autostart(registry=MemoryRegistry())
 
 
+class silent_tray:
+    """The icon by the clock a test run of the entry point outside test_main passes in place of the real one: it
+    takes what main builds it with, and its start and its close do nothing and record nothing, so no real icon shows
+    during the suite and no tray line reaches a captured stderr on another platform."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def start(self):
+        pass
+
+    def close(self):
+        pass
+
+
 def temp_dir():
     """A TemporaryDirectory under build/tmp, so no test writes outside the repository."""
     base = BUILD / "tmp"

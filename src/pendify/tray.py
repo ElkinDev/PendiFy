@@ -2,10 +2,11 @@
 resumes the alerts and quits the program, so the program can be stopped with the page and the browser closed.
 
 Standard library only: user32, shell32 and kernel32 by ctypes, bound for 64-bit Windows. The icon lives on a thread
-of its own, with a message-only window and its message loop; a left or right click on it shows the menu in the
-page's language of that moment. A Win32 call that fails is said in one fixed stderr line, as the page says a failed
-request, and never raises out of the thread: the program runs without an icon rather than dying under pythonw. On a
-platform other than Windows, start() says so in one line and does nothing.
+of its own, a daemon, with a hidden top-level tool window (never shown, so no taskbar entry and no Alt+Tab slot,
+yet the shell's TaskbarCreated broadcast reaches it) and its message loop; a left or right click on it shows the menu
+in the page's language of that moment. A Win32 call that fails is said in one fixed stderr line, as the page says a
+failed request, and never raises out of the thread: the program runs without an icon rather than dying under
+pythonw. On a platform other than Windows, start() says so in one line and does nothing.
 """
 import ctypes
 import os
@@ -22,7 +23,7 @@ WM_NULL, WM_DESTROY, WM_CLOSE, WM_CONTEXTMENU = 0x0000, 0x0002, 0x0010, 0x007B
 WM_LBUTTONUP, WM_RBUTTONUP, WM_APP = 0x0202, 0x0205, 0x8000
 CALLBACK_MESSAGE = WM_APP + 1
 CLICKS = (WM_LBUTTONUP, WM_RBUTTONUP, WM_CONTEXTMENU)
-HWND_MESSAGE = -3  # the parent of a message-only window: no taskbar entry, never shown
+WS_OVERLAPPED, WS_EX_TOOLWINDOW = 0x0, 0x80  # the window's style; a tool window takes no taskbar entry
 NIM_ADD, NIM_DELETE = 0, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
 IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
@@ -32,6 +33,7 @@ OPEN, PAUSE, RESUME, QUIT = 1, 2, 3, 4  # the menu's commands
 
 FAILED_LINE = " [tray] {call} failed (error {code})"
 BROKE_LINE = " [tray] the icon broke: {kind}"
+HELD_LINE = " [tray] the icon's thread did not end in {seconds:g} seconds: its icon deleted from close"
 OTHER_PLATFORM_LINE = " [tray] no icon by the clock: this platform is not Windows"
 
 # The Win32 types for 64-bit Windows: handles as c_void_p, WPARAM as c_size_t, LPARAM and LRESULT as c_ssize_t.
@@ -133,7 +135,7 @@ class Tray:
         self._registered, self._taskbar_created = False, 0
 
     def start(self):
-        """The icon on its own thread, not a daemon: close() ends it."""
+        """The icon on its own thread, a daemon, so a thread held past close() never keeps the process alive."""
         if self._win32 is None:
             if not _windows():
                 _say(OTHER_PLATFORM_LINE)
@@ -143,11 +145,12 @@ class Tray:
             except (OSError, AttributeError) as failure:
                 _say(BROKE_LINE.format(kind=type(failure).__name__))
                 return
-        self._thread = threading.Thread(target=self._run, name=THREAD_NAME)
+        self._thread = threading.Thread(target=self._run, name=THREAD_NAME, daemon=True)
         self._thread.start()
 
     def close(self):
-        """Posts WM_CLOSE to the window when it exists, then waits a few seconds for the thread."""
+        """Posts WM_CLOSE to the window when it exists, then waits a few seconds for the thread. A thread still held
+        then (in TrackPopupMenu's modal loop, say) leaves no dead icon: close deletes it from the calling thread."""
         if self._thread is None:
             return
         self._ready.wait(CLOSE_SECONDS)
@@ -155,6 +158,9 @@ class Tray:
         if hwnd is not None and self._thread.is_alive() and not self._win32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
             self._failed("PostMessageW")
         self._thread.join(CLOSE_SECONDS)
+        if self._thread.is_alive():
+            self._notify(NIM_DELETE, hwnd)
+            _say(HELD_LINE.format(seconds=CLOSE_SECONDS))
 
     def _failed(self, call):
         _say(FAILED_LINE.format(call=call, code=self._win32.last_error()))
@@ -170,8 +176,8 @@ class Tray:
             self._release()
 
     def _open(self):
-        """The window class, the message-only window, the icon's picture and the TaskbarCreated message; then the
-        icon. False when there is no window to serve."""
+        """The window class, the hidden top-level tool window, the icon's picture and the TaskbarCreated message;
+        then the icon. False when there is no window to serve."""
         win32 = self._win32
         self._instance = win32.GetModuleHandleW(None)
         if not self._instance:
@@ -181,7 +187,8 @@ class Tray:
         if not self._registered:
             self._failed("RegisterClassW")
             return False
-        hwnd = win32.CreateWindowExW(0, CLASS_NAME, TIP, 0, 0, 0, 0, 0, HWND_MESSAGE, None, self._instance, None)
+        hwnd = win32.CreateWindowExW(WS_EX_TOOLWINDOW, CLASS_NAME, TIP, WS_OVERLAPPED, 0, 0, 0, 0, None, None,
+                                     self._instance, None)  # top-level, never shown: TaskbarCreated reaches it
         if not hwnd:
             self._failed("CreateWindowExW")
             return False
@@ -223,8 +230,10 @@ class Tray:
             self._failed("UnregisterClassW")
         self._registered = False
 
-    def _notify(self, action):
-        data = NOTIFYICONDATAW(cbSize=ctypes.sizeof(NOTIFYICONDATAW), hWnd=self._hwnd, uID=ICON_ID)
+    def _notify(self, action, hwnd=None):
+        """The icon added or deleted; `hwnd` names the window when the caller holds it (close, off the thread)."""
+        data = NOTIFYICONDATAW(cbSize=ctypes.sizeof(NOTIFYICONDATAW), hWnd=self._hwnd if hwnd is None else hwnd,
+                               uID=ICON_ID)
         if action == NIM_ADD:
             data.uFlags, data.uCallbackMessage = NIF_MESSAGE | NIF_ICON | NIF_TIP, CALLBACK_MESSAGE
             data.hIcon, data.szTip = self._icon, TIP
