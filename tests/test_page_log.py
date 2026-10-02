@@ -237,8 +237,8 @@ class PageLogTest(unittest.TestCase):
                                  without[:without.index(relink(bare.token))].replace(bare.token, "TOKEN"))
 
     def test_on_the_page_that_still_shows_the_code_the_card_ends_the_first_column_and_the_code_does_not_move(self):
-        # Mutation: the card drawn right after the card «Este PC» on this page too. Red: the scan sentence and the
-        # code card under it, frame A6.
+        # Mutation: the card drawn right after the card «Este PC» on this page too. Red: the code card under it,
+        # frame A6.
         tmp = support.temp_dir()
         self.addCleanup(tmp.cleanup)
         fresh = pairing.PairingState(config.ConfigStore(Path(tmp.name)), lambda secret: worker.Refused(),
@@ -253,10 +253,9 @@ class PageLogTest(unittest.TestCase):
                 check = (f'<form method="post" action="/check"><input type="hidden" name="token" '
                          f'value="{served.token}"><button type="submit">{html.escape(words["check"])}</button></form>')
                 self.assertTrue(link.endswith(check + card))
-                # The scan sentence and the code card follow the card «Este PC» as they did before the log.
+                # The code card follows the card «Este PC» as it did before the log.
                 pc_card = PC_CARD.search(link)
-                self.assertTrue(link[pc_card.end():].startswith(
-                    f'<p class="scan" id="scan">{html.escape(words["scan"])}</p><figure class="key-card">'))
+                self.assertTrue(link[pc_card.end():].startswith('<figure class="key-card">'))
                 self.assertEqual(card.count("<li>"), len(SESSION))
 
     def test_a_page_without_the_events_draws_no_card_and_one_with_none_yet_draws_an_empty_list(self):

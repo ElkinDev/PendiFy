@@ -223,7 +223,42 @@ def penalty(modules):
             + 10 * (abs(dark * 2 - total) * 10 // total))
 
 
-def svg(modules, labelledby=None):
+# The mask over the pairing QR's modules (owner 2026-10-02 10:3x): one pixelated figure, the same for every key and
+# drawn from no module of any, a 7 by 7 mosaic laid over the symbol. F is a finder's corner (svg() draws the finder
+# there as the real one is; the scene's plate holds its own), # a dark block, + a mid block, . a light block, each in
+# the drawing's own colours.
+_MASK_ART = ("FF.#+FF",
+             "FF#.#FF",
+             "+#..##.",
+             "#.#+..#",
+             ".#.#+#.",
+             "FF+..#.",
+             "FF.#+.#")
+
+
+def _mask_blocks():
+    """The mosaic's blocks as (column, row, tone), the finders' corners left out."""
+    return [(c, r, tone) for r, line in enumerate(_MASK_ART) for c, tone in enumerate(line) if tone != "F"]
+
+
+def _finder(x, y):
+    """A finder as svg() draws it: a violet 7 by 7 ring, a white 5 by 5 separator and a 3 by 3 eye."""
+    return (f'<rect x="{x}" y="{y}" width="7" height="7" rx="1.5" fill="{_QR_RING}"/>'
+            f'<rect x="{x + 1}" y="{y + 1}" width="5" height="5" rx="1.4" fill="{_QR_TILE}"/>'
+            f'<rect x="{x + 2}" y="{y + 2}" width="3" height="3" rx="1" fill="{_QR_INK}"/>')
+
+
+def _flat_mask(n, q, name):
+    """svg()'s mask: the three finders and the mosaic's blocks over the n by n symbol, named for a screen reader."""
+    step = n / len(_MASK_ART)
+    fill = {"#": _QR_INK, "+": _QR_RING, ".": _QR_TILE}
+    blocks = "".join(f'<rect x="{q + c * step:.2f}" y="{q + r * step:.2f}" width="{step:.2f}" height="{step:.2f}" '
+                     f'fill="{fill[tone]}"/>' for c, r, tone in _mask_blocks())
+    finders = "".join(_finder(left + q, top + q) for top, left in ((0, 0), (0, n - 7), (n - 7, 0)))
+    return f'<g class="qr-mask" role="img" aria-label="{name}" shape-rendering="crispEdges">{finders}{blocks}</g>'
+
+
+def svg(modules, labelledby=None, mask=None):
     """An inline SVG of the symbol on a white tile that keeps a four-module quiet zone, one unit per module.
 
     The grid is the encoder's; only how a module is painted changes. A dark data module is a 0.88 dot with
@@ -231,6 +266,10 @@ def svg(modules, labelledby=None):
     eye; each alignment pattern a 5 by 5 ring, its 3 by 3 gap and its centre. Every rounded corner is small
     enough that each module's centre, where a reader samples, keeps the module's colour: a 7 by 7 ring keeps its
     corner centre inside the arc only while its radius is under 0.5*sqrt(2)/(sqrt(2)-1), about 1.707.
+
+    Every module, finders and alignment patterns included, is drawn in one group, class "modules", over the tile.
+    Given `mask`, the escaped name of the mask for a screen reader, a second group, class "qr-mask", draws the
+    constant pixelated figure in the same place and size (_flat_mask); the page's rules show one of the two.
     """
     n, q = len(modules), QUIET_ZONE
     side = n + 2 * q
@@ -251,17 +290,17 @@ def svg(modules, labelledby=None):
     label = f' aria-labelledby="{labelledby}"' if labelledby else ""
     out = [f'<svg class="qr" viewBox="0 0 {side} {side}" role="img"{label}>',
            f'<rect width="{side}" height="{side}" rx="1.5" fill="{_QR_TILE}"/>',
-           f'<g fill="{_QR_INK}">{dots}</g>']
+           f'<g class="modules"><g fill="{_QR_INK}">{dots}</g>']
     for top, left in finders:
-        x, y = left + q, top + q
-        out.append(f'<rect x="{x}" y="{y}" width="7" height="7" rx="1.5" fill="{_QR_RING}"/>'
-                   f'<rect x="{x + 1}" y="{y + 1}" width="5" height="5" rx="1.4" fill="{_QR_TILE}"/>'
-                   f'<rect x="{x + 2}" y="{y + 2}" width="3" height="3" rx="1" fill="{_QR_INK}"/>')
+        out.append(_finder(left + q, top + q))
     for a, b in alignments:
         x, y = b - 2 + q, a - 2 + q
         out.append(f'<rect x="{x}" y="{y}" width="5" height="5" rx="1.5" fill="{_QR_INK}"/>'
                    f'<rect x="{x + 1}" y="{y + 1}" width="3" height="3" rx=".9" fill="{_QR_TILE}"/>'
                    f'<rect x="{x + 2}" y="{y + 2}" width="1" height="1" rx=".3" fill="{_QR_INK}"/>')
+    out.append("</g>")
+    if mask is not None:
+        out.append(_flat_mask(n, q, mask))
     out.append("</svg>")
     return "".join(out)
 
@@ -362,7 +401,7 @@ def _runs(cells):
     return out
 
 
-def scene_svg(modules, plate_data_uri, labelledby=None, uid="q"):
+def scene_svg(modules, plate_data_uri, labelledby=None, uid="q", mask=None):
     """The pairing QR as the scene: the plate image under a group of polygons. None when the symbol is not version 3,
     and the caller draws svg() instead.
 
@@ -371,7 +410,11 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q"):
     light modules that have a dark module in front, then the light modules' tops (the plate lifted by the relief,
     clipped to the light modules) and their ground dots. A light module's floor is always covered by its top,
     its faces or its near neighbours' tops, so only the dark floors stay darkened and dotted, as in the renderer. The
-    near kerb clips it all."""
+    near kerb clips it all.
+
+    All that a key changes is one group, class "modules"; the plate is drawn before it and outside it. Given `mask`,
+    the escaped name of the mask for a screen reader, a second group, class "qr-mask", lays the constant pixelated
+    figure flat on the symbol under the same kerb: its blocks only, since the plate holds the finders."""
     n = len(modules)
     if n != MODULES:
         return None
@@ -415,6 +458,14 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q"):
     faces = "".join(f'<path fill="{fill}" d="{"".join(d)}"/>' for fill, d in
                     ((FACE_V_LIP, lips_v), (FACE_V, face_v), (FACE_U_LIP, lips_u), (FACE_U, face_u)) if d)
 
+    veil = ""
+    if mask is not None:
+        step = n / len(_MASK_ART)
+        fill = {"#": INK, "+": FACE_U, ".": GROUND}
+        blocks = {tone: "".join(area(c * step, r * step, (c + 1) * step, (r + 1) * step, 0.0)
+                                for c, r, t in _mask_blocks() if t == tone) for tone in fill}
+        veil = (f'<g class="qr-mask" role="img" aria-label="{mask}" clip-path="url(#{uid}k)">'
+                + "".join(f'<path fill="{fill[tone]}" d="{blocks[tone]}"/>' for tone in fill if blocks[tone]) + "</g>")
     dot = _poly([((du - dv) * AX, (du + dv) * AY) for du, dv in _OCTAGON])   # one dot, centred on 0 0
     dots = {True: [], False: []}
     for r in range(n):
@@ -426,8 +477,8 @@ def scene_svg(modules, plate_data_uri, labelledby=None, uid="q"):
             f'<defs><image id="{uid}p" width="{VIEW}" height="{VIEW}" href="{plate_data_uri}"/>'
             f'<clipPath id="{uid}t"><path d="{"".join(tops)}"/></clipPath>'
             f'<clipPath id="{uid}k"><path d="{kerb}"/></clipPath><path id="{uid}d" d="{dot}"/></defs>'
-            f'<use href="#{uid}p"/><g clip-path="url(#{uid}k)">'
+            f'<use href="#{uid}p"/><g class="modules" clip-path="url(#{uid}k)">'
             f'<g fill="{INK}">{"".join(dots[True])}</g>'
             f'<path fill-opacity="{1 - BED_DARK:.2f}" d="{area(0, 0, n, n, 0.0)}"/>{faces}'
             f'<g clip-path="url(#{uid}t)"><use href="#{uid}p" y="{-drop:.2f}"/></g>'
-            f'<g fill="{GROUND}">{"".join(dots[False])}</g></g></svg>')
+            f'<g fill="{GROUND}">{"".join(dots[False])}</g></g>{veil}</svg>')
