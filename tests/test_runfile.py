@@ -370,6 +370,22 @@ class RunFileTest(unittest.TestCase):
             self.assertEqual((start.evict(holder), len(calls)), (False, runfile.REFUSED_TRIES))
         self.assertEqual((self.record(), self.temps()), (stale, []))
 
+    def test_a_refused_remove_puts_the_record_back_and_evict_answers_false(self):
+        # Mutation: the put-back on a refused remove removed. Red: the record is left under the aside name, the run
+        # file gone, and claim's refused road finds no file and claims where the start was refused.
+        start, holder = self.evicting()
+        before, aside, real, calls = self.path.read_text(encoding="utf-8"), f"{self.path}.evict-{OTHER}", os.remove, []
+
+        def read_only(path):  # a read-only file: moved aside, its remove refused to the end of the retries
+            calls.append(os.fspath(path))
+            if os.fspath(path) == aside:
+                raise PermissionError(13, "the file is read-only", os.fspath(path))
+            return real(path)
+
+        with mock.patch.object(runfile.os, "remove", read_only):
+            self.assertEqual((start.evict(holder), self.path.exists(), self.temps()), (False, True, []))
+        self.assertEqual((self.path.read_text(encoding="utf-8"), calls), (before, [aside] * runfile.REFUSED_TRIES))
+
     def test_claim_takes_a_dead_holders_file_over_only_while_it_still_holds_the_record_read(self):
         # Mutation: the take-over without the compare. Red: another start's fresh claim, written between this start's
         # read and its move aside, is removed and both starts hold the file.

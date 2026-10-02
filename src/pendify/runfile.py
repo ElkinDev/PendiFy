@@ -433,13 +433,18 @@ class RunFile:
         other start's file can take its place between the compare and the remove, then read there. `record`: the
         moved file removed, True. Another record, a claim written since `record` was read: moved back under its
         name, False. Each move and the remove under the retries of release; FileNotFoundError when the file is gone
-        at the move aside, PermissionError when a step is still refused after its retries."""
+        at the move aside, PermissionError when a step is still refused after its retries, the file moved back under
+        its name first when the remove is the step refused (a read-only file), so it stays as it was found."""
         aside = f"{self.path}.evict-{self._pid}"
         self._retried(os.replace, self.path, aside)
         if self._read(aside) != record:
             self._retried(os.replace, aside, self.path)
             return False
-        self._retried(os.remove, aside)
+        try:
+            self._retried(os.remove, aside)
+        except PermissionError:  # a file this user cannot remove (read-only): put back as it was, the refusal raised
+            self._retried(os.replace, aside, self.path)
+            raise
         return True
 
     def _retried(self, move, *args):
