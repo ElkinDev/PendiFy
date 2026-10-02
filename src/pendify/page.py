@@ -49,8 +49,8 @@ WORDS = {
         "intro": "Este programa envía sus avisos a tu cuenta de Pendi. Para eso, este PC tiene que quedar enlazado "
                  "con tu cuenta.",
         "code_label": "Clave de este PC:",
-        "qr_for": "Escanea este código con Pendi para recibir en el teléfono las notificaciones de este PC: cuando "
-                  "empieza la partida o cuando se acepta la cola.",
+        "qr_for": "ESCANEA ESTE CÓDIGO QR con tu teléfono para recibir notificaciones cuando empiece la partida y "
+                  "se acepte la cola.",
         "qr_mask": "Código oculto",
         "show_code": "Mostrar el código",
         "hide_code": "Ocultar el código",
@@ -141,8 +141,8 @@ WORDS = {
         "intro": "This program sends its alerts to your Pendi account. For that, this PC has to be linked to your "
                  "account.",
         "code_label": "This PC's key:",
-        "qr_for": "Scan this code with Pendi to get this PC's notifications on your phone: when the match starts or "
-                  "the queue is accepted.",
+        "qr_for": "SCAN THIS QR CODE with your phone to get notifications when the match starts and the queue is "
+                  "accepted.",
         "qr_mask": "Hidden code",
         "show_code": "Show the code",
         "hide_code": "Hide the code",
@@ -383,6 +383,9 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           # candidate B's rules): a list of 224 px that scrolls inside the card, each line its time in tabular figures
           # beside its text, a failure's text in the danger colour, the focus ring of the page's buttons.
           ".log-card{max-width:40rem;margin:16px 0 0}\n"
+          # The form under the QR keeps the card «Actividad»'s rhythm (OR-106): from 880 px the key's card leaves
+          # for its column, and form{margin:0} alone left the form flush under the card «Este PC».
+          "form[action='/check']{margin-top:16px}\n"
           ".log-card h2{margin:0 0 4px}\n"
           ".log{max-height:224px;overflow-y:auto;overscroll-behavior:contain;border-radius:12px}\n"
           ".log:focus-visible{outline:2px solid var(--brand);outline-offset:2px}\n"

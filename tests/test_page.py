@@ -88,10 +88,10 @@ SHOW = {"es": "Mostrar el código", "en": "Show the code"}
 HIDE = {"es": "Ocultar el código", "en": "Hide the code"}
 MASK_LABEL = {"es": "Clave oculta", "en": "Key hidden"}
 # The label over the reveal (owner 2026-10-02 09:5x, his words): what the pairing QR is for, no game and no maker.
-QR_FOR = {"es": "Escanea este código con Pendi para recibir en el teléfono las notificaciones de este PC: cuando "
-                "empieza la partida o cuando se acepta la cola.",
-          "en": "Scan this code with Pendi to get this PC's notifications on your phone: when the match starts or the "
-                "queue is accepted."}
+QR_FOR = {"es": "ESCANEA ESTE CÓDIGO QR con tu teléfono para recibir notificaciones cuando empiece la partida y "
+                "se acepte la cola.",
+          "en": "SCAN THIS QR CODE with your phone to get notifications when the match starts and the queue is "
+                "accepted."}
 FOLD = {"es": "Más opciones: escribir los valores del enlace u olvidar este PC",
         "en": "More options: type the link values, or forget this PC"}
 # The scan sentence the card held before the label became the QR's one sentence (owner 2026-10-02 10:3x, his B):
@@ -729,6 +729,28 @@ class PairingPageTest(unittest.TestCase):
                 linked = self.html(accept)
                 self.assertEqual([marker for marker in ('class="qr-for"', html.escape(QR_FOR[lang]))
                                   if marker in linked], [])
+
+    def test_the_check_now_form_keeps_the_panels_spacing(self):
+        # Lane pfui (OR-106): from 880 px the key's card leaves for its own column with margin:0, and the form that
+        # carries «Check now» sat flush under the card «Este PC», since only form{margin:0} named it. Mutation: the
+        # rule left out. Red: no rule gives the form a top margin. Mutation: a margin other than the card
+        # «Actividad»'s, the panel that follows a panel. Red: the two differ. Mutation: the rule put inside a width
+        # query. Red: the rule sits inside a block, so the phone width misses it.
+        style = page._STYLE
+        found = [(selectors.strip(), body) for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", style)]
+        check = [body for selectors, body in found if "form[action='/check']" in
+                 [selector.strip() for selector in selectors.split(",")] and "margin" in body]
+        self.assertEqual(check, ["margin-top:16px"])
+        log_card = [body for selectors, body in found if selectors == ".log-card"]
+        self.assertEqual(len(log_card), 1)
+        self.assertEqual(re.search(r"(?:^|;)margin-top:([^;]+)", check[0]).group(1),
+                         re.search(r"(?:^|;)margin:([^ ;]+)", log_card[0]).group(1))
+        rule = "\nform[action='/check']{margin-top:16px}\n"
+        self.assertEqual(style.count(rule), 1)
+        before = style[:style.index(rule)]
+        self.assertEqual(before.count("{"), before.count("}"))
+        # The form is still the link's own child right after the key's card, the place the rule spaces.
+        self.assertEqual(self.html().count('</figure><form method="post" action="/check">'), 1)
 
     def test_the_linked_page_keeps_the_pendiapp_com_qr_visible(self):
         # Mutation: the sponsored QR put under the key's data-shown or any hiding rule. Red: a rule names it, or the
