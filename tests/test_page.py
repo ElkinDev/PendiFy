@@ -106,12 +106,13 @@ QR_MASK = {"es": "Código oculto", "en": "Hidden code"}
 # The instruction on both masks of the pairing QR (owner 2026-10-02 12:4x, his correction: both carry option C's
 # words), and the label's leading capitals, its lead line (OR-105); the label's words are QR_FOR, unchanged.
 QR_PRESS = {"es": "Pulsa Mostrar el código", "en": "Press Show the code"}
-# The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress).
+# The reveal's binding, its toggle, and the masks' after it: a press on either mask only shows (lane pfpress);
+# the key mask prevents the default of Enter and Space alike, so Enter's keypress never reaches the reveal.
 REVEAL_BINDING = "if(r)r.addEventListener('click',()=>showKey(k.dataset.shown!=='true'));"
 MASK_BINDING = ("document.querySelectorAll('.qr-mask').forEach(m=>m.addEventListener('click',()=>showKey(true)));"
                 "document.querySelectorAll('.mask').forEach(m=>{const press=()=>{showKey(true);r.focus();};"
                 "m.addEventListener('click',press);m.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){"
-                "if(e.key===' ')e.preventDefault();press();}});});")
+                "e.preventDefault();press();}});});")
 QR_LEAD = {"es": "ESCANEA ESTE CÓDIGO QR", "en": "SCAN THIS QR CODE"}
 
 
@@ -652,13 +653,19 @@ class PairingPageTest(unittest.TestCase):
     def test_a_press_on_either_mask_shows_the_code_and_the_reveal_keeps_its_toggle(self):
         # Lane pfpress (OR-108): «Pulsa Mostrar el código» does what the reveal does. Mutation: the masks left
         # unbound. Red: the binding is not after the reveal's. Mutation: a mask's press bound to the toggle. Red: two
-        # toggles and one show. Mutation: Space left to scroll the page. Red: no preventDefault on Space. Mutation:
+        # toggles and one show. Mutation: Space left to scroll the page, or the Space-only guard back (review fix1
+        # MAJOR 1: Enter's keypress goes to the focused reveal and hides the code). Red: the binding differs, the
+        # guard is present, and the keydown's preventDefault is not the one before press(). Mutation:
         # the pointer rule dropped. Red: the style misses it. Mutation: the key mask's press leaves focus where it
         # was (review MINOR 3). Red: no r.focus() after its showKey(true). Mutation: the QR's mask given the
         # keydown (review MINOR 2: it is an image, not a control). Red: the binding differs.
         self.assertIn(REVEAL_BINDING + MASK_BINDING, page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("showKey(true);r.focus();"), 1)
         self.assertEqual(page._SCRIPT.count("addEventListener('keydown'"), 1)
+        keydown = page._SCRIPT.split("addEventListener('keydown'", 1)[1].split("}});", 1)[0]
+        self.assertEqual(keydown.count("e.preventDefault();press();"), 1)
+        self.assertEqual(keydown.count("preventDefault"), 1)
+        self.assertNotIn("if(e.key===' ')e.preventDefault();", page._SCRIPT)
         self.assertEqual(page._SCRIPT.count("showKey(k.dataset.shown!=='true')"), 1)
         self.assertEqual(page._SCRIPT.count("showKey(true)"), 2)
         shown = self.html("es-CO,es;q=0.9")
