@@ -48,8 +48,10 @@ WORDS = {
         "title": "Avisos de este PC",
         "intro": "Este programa envía sus avisos a tu cuenta de Pendi. Para eso, este PC tiene que quedar enlazado "
                  "con tu cuenta.",
-        "scan": "Escanea este código con la cámara del teléfono donde tienes tu cuenta y confirma el enlace.",
         "code_label": "Clave de este PC:",
+        "qr_for": "Escanea este código con Pendi para recibir en el teléfono las notificaciones de este PC: cuando "
+                  "empieza la partida o cuando se acepta la cola.",
+        "qr_mask": "Código oculto",
         "show_code": "Mostrar el código",
         "hide_code": "Ocultar el código",
         "mask": "Clave oculta",
@@ -138,8 +140,10 @@ WORDS = {
         "title": "Alerts from this PC",
         "intro": "This program sends its alerts to your Pendi account. For that, this PC has to be linked to your "
                  "account.",
-        "scan": "Scan this code with the camera of the phone that holds your account and confirm the link.",
         "code_label": "This PC's key:",
+        "qr_for": "Scan this code with Pendi to get this PC's notifications on your phone: when the match starts or "
+                  "the queue is accepted.",
+        "qr_mask": "Hidden code",
         "show_code": "Show the code",
         "hide_code": "Hide the code",
         "mask": "Key hidden",
@@ -280,10 +284,9 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           '#state[data-shown="falsetrue"]{background:var(--danger-bg);color:var(--on-danger-bg)}\n'
           '#state[data-shown="falsetrue"]::before{background:none;border:2px solid currentColor}\n'
           "#watch{margin:12px 0 0;max-width:40rem;font-size:14px;line-height:20px;color:var(--ink2)}\n"
-          ".scan{margin:24px 0 16px;max-width:40ch}\n"
           ".note{margin:12px 0 0;font-size:14px;line-height:20px;color:var(--ink2)}\n"
           ".note.warn{color:var(--danger)}\n"
-          ".key-card{display:grid;justify-items:center;gap:16px;margin:0 0 16px;padding:20px;border-radius:16px;"
+          ".key-card{display:grid;justify-items:center;gap:16px;margin:24px 0 16px;padding:20px;border-radius:16px;"
           "background:var(--card);border:1px solid var(--hair);box-shadow:var(--shadow)}\n"
           ".qr{display:block;width:100%;max-width:288px;height:auto;border-radius:12px;"
           "box-shadow:0 0 0 1px var(--hair)}\n"
@@ -394,7 +397,7 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
 # keyframes inside the reduced-motion guard with the rules that run them.
 # Width: 85 % of the window at every desktop width, never narrower than 1040 px, no upper cap; the code's column grows
 # with the window and the code with it, up to 480 px. Column 1 is one measure: two tracks and a 24 px gutter, every
-# block spans both and the boxes lose their 40rem cap, while the two paragraphs keep theirs (.intro 46ch, .scan 40ch).
+# block spans both and the boxes lose their 40rem cap, while the intro keeps its own (.intro 46ch).
 # From a 1600 px window «Este PC» and «Actividad» share one row, a track each, as the two panels of the fold do; dense
 # placement draws the log card beside «Este PC» while the markup keeps its order, so the narrow page is unchanged.
 _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
@@ -408,12 +411,19 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
            ".key-card .qr{max-width:480px}}\n"
            "@media (min-width:1600px){.link:has(>.pc):has(>.log-card)>.pc{grid-column:1;align-content:start}\n"
            ".link:has(>.pc):has(>.log-card)>.log-card{grid-column:3;margin-top:24px}}\n"
-           # The code is shown; the key sits under the mask until «Mostrar el código» (the script sets data-shown).
+           # The code is hidden until asked (owner 2026-10-02, after his 2026-10-01 ruling to show it): the key and
+           # the QR's modules stay hidden until «Mostrar el código», the modules masked by a pixelated figure as the
+           # key is by its heads (the script sets data-shown on the key; the card's rules swap both from it); the
+           # drawings, the plate and the party with their moves, are always visible (owner 2026-10-02 10:3x). The
+           # label over the reveal is the QR's one sentence and its accessible name.
            ".key{justify-items:center;text-align:center}\n"
            ".key-val{display:grid;place-items:center;min-height:32px}\n"
            ".key-val>*{grid-area:1/1}\n"
            '.key[data-shown="false"] .code{visibility:hidden}\n'
            '.key[data-shown="true"] .mask{visibility:hidden}\n'
+           '.key-card:has(.key[data-shown="false"]) .modules{visibility:hidden}\n'
+           '.key-card:has(.key[data-shown="true"]) .qr-mask{visibility:hidden}\n'
+           ".qr-for{margin:0}\n"
            ".mask{display:flex;align-items:flex-end;gap:10px}\n"
            ".mask .grp{display:flex;align-items:flex-end;gap:2px}\n"
            ".mask svg{display:block;flex:none}\n"
@@ -653,9 +663,11 @@ _MASK_GROUP = ('<span class="grp">' + "".join('<svg class="mx" viewBox="0 0 8 8"
                                               for rows in _HEADS) + "</span>")
 
 
-# With scripts blocked the reveal does nothing, so the key reads as it did before the mask: the code shown, the mask
-# and the reveal gone. The code's rule repeats the mask's own selector and comes later, so it wins.
-_NOSCRIPT_STYLE = '.key[data-shown="false"] .code{visibility:visible}.mask,.reveal{display:none}'
+# With scripts blocked the reveal does nothing, so the key reads as it did before the mask: the code and the QR's
+# modules shown, the key's mask, the QR's mask and the reveal gone. Each rule repeats its hiding rule's own selector
+# and comes later, so it wins.
+_NOSCRIPT_STYLE = ('.key[data-shown="false"] .code,.key-card:has(.key[data-shown="false"]) .modules'
+                   '{visibility:visible}.mask,.qr-mask,.reveal{display:none}')
 
 
 def _mask(words):
@@ -925,16 +937,17 @@ class PairingPage:
             link.append(log_card)
         if secret is not None:
             modules = qr.encode(qr.pairing_address(secret).encode("ascii")).modules
-            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="scan")
+            drawn = qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, labelledby="qr-for", mask=words["qr_mask"])
             if drawn is None:  # the scene is drawn for version 3 only
-                drawn = qr.svg(modules, labelledby="scan")
-            link += [f'<p class="scan" id="scan">{words["scan"]}</p>',
-                     # The code is shown (owner 2026-10-01); the key's text sits under the mask until its person
-                     # presses the reveal, a real button whose label says what a press does; _SCRIPT masks the key
-                     # again 60 s after a show.
+                drawn = qr.svg(modules, labelledby="qr-for", mask=words["qr_mask"])
+            link += [# The code is hidden until asked (owner 2026-10-02): the QR's modules under their pixelated
+                     # mask and the key's text under its heads until its person presses the reveal, a real button
+                     # whose label says what a press does, with the label of what the QR is for over it, the QR's
+                     # one sentence and its name; _SCRIPT hides both again 60 s after a show. The drawings stay.
                      f'<figure class="key-card">{drawn}<p class="key" data-shown="false"><span class="key-label">'
                      f'{words["code_label"]}</span> <span class="key-val">{_mask(words)}<span class="code" id="code">'
-                     f'{codes.display(secret)}</span></span></p><button type="button" class="reveal" '
+                     f'{codes.display(secret)}</span></span></p><p class="qr-for" id="qr-for">{words["qr_for"]}</p>'
+                     f'<button type="button" class="reveal" '
                      f'aria-controls="code" data-show="{words["show_code"]}" data-hide="{words["hide_code"]}">'
                      f'{words["show_code"]}</button>{_PARTY}</figure>',
                      _form("check", token, f'<button type="submit">{words["check"]}</button>')]

@@ -21,7 +21,8 @@ INSTALL = ROOT / "install.ps1"
 UNINSTALL = ROOT / "uninstall.ps1"
 README = ROOT / "README.md"
 
-DEFAULT_SOURCE = "https://github.com/ElkinDev/PendiFy/archive/refs/heads/main.zip"
+# The paste installs the released version: the package name, which pip resolves on PyPI.
+DEFAULT_SOURCE = "pendify"
 RAW = "https://raw.githubusercontent.com/ElkinDev/PendiFy/main/"
 # The second road, for a PC that has Python or refuses scripts: pip alone, no shortcut, no script.
 PIP_INSTALL = "python -m pip install --upgrade pendify"
@@ -288,7 +289,7 @@ class InstallScriptTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         pip = _plan(_lines(done))[0]
         self.assertIn(source, pip)
-        self.assertNotIn(DEFAULT_SOURCE, pip)
+        self.assertFalse(pip.endswith(" " + DEFAULT_SOURCE), pip)
 
         done = _file_form(self.env(PENDIFY_NOSTART="1"))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)

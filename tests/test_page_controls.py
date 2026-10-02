@@ -308,7 +308,7 @@ class PageControlsTest(unittest.TestCase):
                     self.assertNotIn(text, texts)
 
     def test_the_card_sits_after_the_watcher_line_and_before_the_key_block_in_both_languages(self):
-        # Mutation: the card after the key block. Red: the scan sentence and the key card before it.
+        # Mutation: the card after the key block. Red: the key card before it.
         after_watch = re.compile(r'<p id="watch" role="status">[^<]*</p>' + re.escape(CARD_OPEN))
         for language in ("es", "en"):
             with self.subTest(language=language, linked=True):
@@ -321,11 +321,12 @@ class PageControlsTest(unittest.TestCase):
                 shown = self.call("GET", "/", language=language)[2]
                 self.assertIsNotNone(after_watch.search(shown))
                 places = [shown.index(marker) for marker in ('<section class="link">', '<p id="watch"', CARD_OPEN,
-                                                             '<p class="scan"', '<figure class="key-card"',
+                                                             '<figure class="key-card"',
                                                              'action="/check"', '</section><details class="fold"')]
                 self.assertEqual(places, sorted(places))
                 texts = PageText(shown).texts
-                self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:texts.index(page.WORDS[language]["scan"])],
+                key = texts.index(page.WORDS[language]["code_label"])
+                self.assertEqual(texts[texts.index(THIS_PC[language]) + 1:key],
                                  [page.WORDS[language]["pause"], page.WORDS[language]["autostart_label"],
                                   page.WORDS[language]["autostart_help"]])
 

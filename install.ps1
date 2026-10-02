@@ -1,7 +1,7 @@
 # PendiFy installer for Windows. No administrator, nothing machine-wide, no policy change.
 # It runs as a file and as text fetched from the repository and piped into PowerShell, so it takes
 # no parameters; its options are environment variables:
-#   PENDIFY_SOURCE    what pip installs (default: the repository's main branch as a zip)
+#   PENDIFY_SOURCE    what pip installs (default: the released version on PyPI; a path or a zip also works)
 #   PENDIFY_DRYRUN=1  print every step as a [plan] line and change nothing
 #   PENDIFY_NOSTART=1 leave the program stopped at the end
 #   PENDIFY_RUN_KEY   the key path under HKCU of the start with Windows, for test runs
@@ -10,8 +10,9 @@
 # system code page, so the messages are Spanish written without accented letters.
 
 & {
-    $Repo = 'ElkinDev/PendiFy'
-    $DefaultSource = "https://github.com/$Repo/archive/refs/heads/main.zip"
+    # The paste installs the released version from PyPI: pip resolves the package name there. A path or a zip can
+    # still be passed as the source, in PENDIFY_SOURCE.
+    $DefaultSource = 'pendify'
     $PythonDownloads = 'https://www.python.org/downloads/'
     $WingetArgs = @('install', '--id', 'Python.Python.3.13', '-e', '--scope', 'user', '--silent',
         '--accept-package-agreements', '--accept-source-agreements')
