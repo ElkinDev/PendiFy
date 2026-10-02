@@ -126,6 +126,20 @@ class QrDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 
+    def test_the_masked_drawing_does_not_decode(self):
+        # The hidden state: the modules group cut out, the pixelated mask over the tile. Mutation: the mask drawn
+        # from the symbol's modules. Red: ZXing reads the pairing address.
+        for secret in (SECRET, LINK_ID):
+            with self.subTest(secret=secret):
+                address = qr.pairing_address(secret)
+                drawing = qr.svg(qr.encode(address.encode("ascii")).modules, mask="Hidden code")
+                head, rest = drawing.split('<g class="modules">')
+                hidden = head + rest[rest.index('<g class="qr-mask"'):]
+                self.assertNotIn('class="modules"', hidden)
+                status, decoded, errors = zxing_decode([[[sample is not False for sample in row]
+                                                         for row in support.svg_samples(hidden, 4)]])
+                self.assertNotIn(address, decoded, errors[-1500:])
+
     def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_6_7_8_and_10_px_a_module(self):
         # Mutation: the runs drawn from another text. Red: ZXing reads that text. Mutation: the quiet zone drawn 2
         # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules. The sizes are
