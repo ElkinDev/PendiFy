@@ -68,8 +68,9 @@ CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
 # The words of a waiting page with a watcher and a quit button, in the order the page shows them; an entry that is not
 # a key of WORDS is printed as it is, and None is the key as codes.display prints it. The card «Este PC» sits right
 # after the watcher line (brief pcctl-r2, placement A); the page given no start with Windows draws no switch in it.
-# The code is shown, its key under the mask and the reveal after it; the lower part is one fold; the top bar names the
-# creator and the repository before the language switch, and «Salir» closes the page.
+# The code is hidden until asked, its key under the mask, then the label of what the QR is for and the reveal; the
+# lower part is one fold; the top bar names the creator and the repository before the language switch, and «Salir»
+# closes the page.
 PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", NAME, "title", "intro", "state_waiting",
               "watch_waiting", "this_pc", "pause", "scan", "code_label", None, "qr_for", "show_code", "check", "log_title",
               "log_help", "fold", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence",
