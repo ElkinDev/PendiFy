@@ -905,7 +905,8 @@ class PairingPage:
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
                 f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating}{restarting} data-closed="{words["state_closed"]}">'
+                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating}{restarting} '
+                f'data-closed="{words["state_closed"]}">'
                 f'{words[_state_word(snapshot, seen)]}</p>']
         link += self._update_line(words, token, updated)
         if snapshot["configFailed"]:

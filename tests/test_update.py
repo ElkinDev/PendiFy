@@ -296,6 +296,23 @@ class UpdaterTest(unittest.TestCase):
         gate.set()
         self.assertTrue(notify.wait(5))
 
+    def test_a_close_during_a_notify_install_leaves_the_restart_unrequested(self):
+        # Mutation: the restart after «Actualizar»'s install blind to the close. Red: the flag is set after the quit.
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        made, _, run = self.make("notify", "0.1.6", runs=[(0, "", hold)])
+        made.round()
+        self.assertTrue(made.request_install())
+        self.assertTrue(run.entered.wait(5))
+        made.close()
+        hold.set()  # the install ends after the close
+        self.assertTrue(made.wait(5))
+        for thread in [thread for thread in threading.enumerate() if thread.name == "update-install"]:
+            thread.join(5)
+        self.assertEqual(made.snapshot()["state"], "ready")  # installed: it applies at the next start
+        self.assertFalse(made.restart_requested.is_set())
+        self.assertEqual(self.restarts, [])
+
     def test_the_first_round_waits_a_minute_and_the_next_six_hours(self):
         # Mutation: the first round at once. Red: the first wait is 0.
         waits = Waits(3)

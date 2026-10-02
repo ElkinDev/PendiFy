@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import unittest
+import unittest.mock
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -805,6 +806,46 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(made[0].folder, self.store.path.parent)
         self.assertEqual(made[0].moments, [("start", True), ("close", True), ("wait", 60, True)])
         self.assertFalse(self.run_file.exists())
+
+    def test_main_spawns_nothing_when_the_install_ends_inside_the_join_after_a_quit(self):
+        # Mutation: the restart after «Actualizar»'s install blind to the close. Red: main restarts after the quit.
+        update = support.module("update")
+        made, spawned, hold = [], [], threading.Event()
+        self.addCleanup(hold.set)
+
+        class Held(update.Updater):
+            def wait(self, timeout):  # «Actualizar»'s install ends inside main's join
+                hold.set()
+                done = super().wait(timeout)
+                for thread in [thread for thread in threading.enumerate() if thread.name == "update-install"]:
+                    thread.join(5)
+                return done
+
+        def install(version):
+            hold.wait(10)
+            return True, ""
+
+        def updater(version, mode, restart, folder=None, made=made):
+            made.append(Held(version, "notify", check=lambda: "0.1.6", install=install, restart=restart,
+                             clock=lambda seconds: True, log=lambda line: None, folder=folder))
+            return made[-1]
+
+        stop = threading.Event()
+        self.addCleanup(stop.set)  # a red never leaves the run serving
+        with unittest.mock.patch.object(entry, "_restart", return_value=0) as restarting:
+            thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                opener=lambda url: True, stop=stop, updater=updater,
+                                                spawn=lambda command, **options: spawned.append(command))
+            self.assertTrue(self.wait_for_the_page())
+            made[0].round()
+            self.assertTrue(made[0].request_install())  # «Actualizar», then the quit while pip runs
+            stop.set()
+            thread.join(15)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result["run"][0], 0)
+        self.assertEqual(made[0].snapshot()["state"], "ready")  # installed: it applies at the next start
+        restarting.assert_not_called()
+        self.assertEqual(spawned, [])
 
     def test_a_quit_while_the_tick_is_held_in_a_check_marks_the_run_file_before_the_tick_returns(self):
         # Mutation: the page's quit only sets the stop. Red: the record still reads not closing while the tick

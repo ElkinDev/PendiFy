@@ -1,5 +1,6 @@
 """The icon by the clock (lane pftray): an icon in the notification area whose menu opens the page, pauses or
-resumes the alerts, quits the program and, once an update is ready, restarts into it, so the program can be stopped with the page and the browser closed.
+resumes the alerts, quits the program and, once an update is ready, restarts into it, so the program can be stopped
+with the page and the browser closed.
 
 Standard library only: user32, shell32 and kernel32 by ctypes, bound for 64-bit Windows. The icon lives on a thread
 of its own, a daemon, with a hidden top-level tool window (never shown, so no taskbar entry and no Alt+Tab slot,

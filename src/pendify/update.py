@@ -6,7 +6,8 @@ the page offers «Actualizar», which installs and then restarts; `off` never ch
 pair: one GET to pypi.org with the program's User-Agent. pip runs with python.exe beside this interpreter, since the
 output of pythonw goes nowhere, with the arguments of the paste (install.ps1:184) and the version pinned, and never
 with a console over a game; its output goes to update-pip.log in the config folder, never to pipes of this copy, and
-main's stop waits for it a minute before the run file goes. The running copy is never touched: every module was imported at its start, so the new
+main's stop waits for it a minute before the run file goes. The running copy is never touched: every module was
+imported at its start, so the new
 files take effect at the next start, the one «Reiniciar ahora» asks for.
 """
 import importlib.metadata
@@ -232,7 +233,7 @@ class Updater:
         return install(version, self.pip_log)
 
     def _install_then_restart(self, version):
-        if self._apply(version):
+        if self._apply(version) and not self._closed.is_set():
             self.restart()
 
     def _apply(self, version):
