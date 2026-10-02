@@ -97,21 +97,22 @@ SPONSOR = {"es": {"by": "Patrocinado por Pendiapp.com", "cap": "Escanéalo para 
 MASK = re.compile(r'<span class="mask" role="img" aria-label="([^"]*)">(<span class="grp">((?:<svg class="mx" '
                   r'viewBox="0 0 8 8" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true">'
                   r'(?:(?!</?svg).)*</svg>){4})</span>)\2\2</span>')
-# Each figure's own move, once every 30 s, only while the system asks for no less motion; the hop is gone.
+# Each figure's own move, one after another, one second apart, once every 15 s, only while the system asks for no
+# less motion; the hop is gone.
 MOVES = ("@media (prefers-reduced-motion:no-preference){\n"
          ".px{transform-origin:50% 100%}\n"
-         ".px:nth-child(1){animation:px-archer 30s steps(1,end) infinite}\n"
-         ".px:nth-child(2){animation:px-knight 30s steps(1,end) infinite}\n"
-         ".px:nth-child(3){animation:px-mage 30s steps(1,end) infinite}\n"
-         ".px:nth-child(4){animation:px-creature 30s steps(1,end) infinite}\n"
-         "@keyframes px-archer{0%{transform:none}2%{transform:scaleX(-1)}5%,100%{transform:none}}\n"
-         "@keyframes px-knight{0%{transform:none}5%{transform:translateX(3px)}6.5%{transform:translateX(6px)}"
-         "8%{transform:translateX(3px)}9.5%,100%{transform:none}}\n"
-         "@keyframes px-mage{0%{transform:none}10%{transform:translateY(-3px)}11.5%{transform:translateY(-6px)}"
-         "16%{transform:translateY(-3px)}17.5%,100%{transform:none}}\n"
-         "@keyframes px-creature{0%{transform:none}18%{transform:translate(3px,-6px)}19%{transform:translate(3px,-3px)}"
-         "20%{transform:translate(0,-6px)}21%{transform:translate(0,-3px)}22%{transform:translate(-3px,-6px)}"
-         "23%{transform:translate(-3px,-3px)}24%,100%{transform:none}}}\n")
+         ".px:nth-child(1){animation:px-archer 15s steps(1,end) infinite}\n"
+         ".px:nth-child(2){animation:px-knight 15s steps(1,end) infinite}\n"
+         ".px:nth-child(3){animation:px-mage 15s steps(1,end) infinite}\n"
+         ".px:nth-child(4){animation:px-creature 15s steps(1,end) infinite}\n"
+         "@keyframes px-archer{0%{transform:none}4%{transform:scaleX(-1)}10%,100%{transform:none}}\n"
+         "@keyframes px-knight{0%{transform:none}16.67%{transform:translateX(3px)}19.67%{transform:translateX(6px)}"
+         "22.67%{transform:translateX(3px)}25.67%,100%{transform:none}}\n"
+         "@keyframes px-mage{0%{transform:none}32.33%{transform:translateY(-3px)}35.33%{transform:translateY(-6px)}"
+         "44.33%{transform:translateY(-3px)}47.33%,100%{transform:none}}\n"
+         "@keyframes px-creature{0%{transform:none}54%{transform:translate(3px,-6px)}"
+         "56%{transform:translate(3px,-3px)}58%{transform:translate(0,-6px)}60%{transform:translate(0,-3px)}"
+         "62%{transform:translate(-3px,-6px)}64%{transform:translate(-3px,-3px)}66%,100%{transform:none}}}\n")
 
 
 class PageText(HTMLParser):
@@ -1156,6 +1157,60 @@ class PairingPageTest(unittest.TestCase):
             self.call("POST", "/quit")  # the handler closes the socket with no answer
         self.assertEqual((quits, failures), ([True], []))
         self.assertEqual(err.getvalue(), " [page] a request failed: OSError\n")  # its type, no traceback
+
+
+    def figure_motion(self):
+        # The served style's four figure animations and their keyframes, in the order the figures stand.
+        style = self.html().split("<style>")[1].split("</style>")[0]
+        lines = re.findall(r"\.px:nth-child\((\d)\)\{animation:(px-[a-z]+) (\S+) steps\(1,end\) infinite\}", style)
+        frames = {}
+        for name, body in re.findall(r"@keyframes (px-[a-z]+)\{(.*?\})\}", style):
+            frames[name] = sorted(float(pct) for selector in re.findall(r"([\d.,% ]+)\{", body)
+                                  for pct in selector.replace("%", "").split(","))
+        return style, lines, frames
+
+    def test_the_figures_move_in_sequence_one_second_apart(self):
+        # Mutation: the loop left at 30s. Red: a duration is not 15s. Mutation: the knight's burst moved back onto
+        # the archer's end. Red: the gap between them is not 1.00 s.
+        _, lines, frames = self.figure_motion()
+        self.assertEqual([(n, name) for n, name, _ in lines],
+                         [("1", "px-archer"), ("2", "px-knight"), ("3", "px-mage"), ("4", "px-creature")])
+        self.assertEqual([duration for _, _, duration in lines], ["15s"] * 4)
+        bursts = []
+        for index, (_, name, duration) in enumerate(lines):
+            seconds = [round(pct / 100 * float(duration[:-1]), 2) for pct in frames[name] if pct < 100]
+            # The archer's burst opens the loop on its 0% frame; every other burst opens on its first frame past
+            # the 0% rest.
+            bursts.append(seconds if index == 0 else [s for s in seconds if s > 0])
+        lengths = [[round(s - burst[0], 2) for s in burst] for burst in bursts]
+        self.assertEqual(lengths, [[0, 0.6, 1.5], [0, 0.45, 0.9, 1.35], [0, 0.45, 1.8, 2.25],
+                                   [0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8]])  # each burst keeps its own shape in seconds
+        self.assertAlmostEqual(bursts[0][0], 0.0, delta=0.005)
+        for previous, following in zip(bursts, bursts[1:]):
+            with self.subTest(previous_end=previous[-1], next_start=following[0]):
+                self.assertAlmostEqual(following[0] - previous[-1], 1.0, delta=0.05)
+        self.assertLess(bursts[-1][-1], 15)
+
+    def test_reduced_motion_keeps_the_figures_still(self):
+        # Mutation: an animation declared on .px outside the no-preference block. Red: the style outside holds it.
+        style, lines, _ = self.figure_motion()
+        opening = "@media (prefers-reduced-motion:no-preference){"
+        blocks = []
+        for found in re.finditer(re.escape(opening), style):
+            depth, end = 1, found.end()
+            while depth:
+                depth += {"{": 1, "}": -1}.get(style[end], 0)
+                end += 1
+            blocks.append((found.start(), found.end(), end))
+        holding = [block for block in blocks if ".px:nth-child(" in style[block[1]:block[2]]]
+        self.assertEqual(len(holding), 1)
+        head, start, end = holding[0]
+        inside, outside = style[start:end - 1], style[:head] + style[end:]
+        self.assertEqual(len(lines), 4)
+        for n, name, duration in lines:
+            self.assertIn(f".px:nth-child({n}){{animation:{name} {duration} steps(1,end) infinite}}", inside)
+        self.assertIsNone(re.search(r"\.px[^{]*\{[^}]*animation", outside))
+        self.assertNotIn("@keyframes px-", outside)
 
 
 if __name__ == "__main__":
