@@ -15,7 +15,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, config, icon, plate_almena, qr
+from . import codes, config, icon, plate_almena, qr, update
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
@@ -125,6 +125,12 @@ WORDS = {
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
                        "pythonw -m pendify (o python -m pendify para verlo en una consola).",
+        "update_available": "Hay una versión nueva: {version}",
+        "update_install": "Actualizar",
+        "update_installing": "Instalando la versión {version}…",
+        "update_ready": "Actualización lista: {version}. Se aplica al reiniciar.",
+        "update_restart": "Reiniciar ahora",
+        "update_failed": "No se pudo instalar la versión {version}",
     },
     "en": {
         "title": "Alerts from this PC",
@@ -207,6 +213,12 @@ WORDS = {
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
                        "(or python -m pendify to see it in a console).",
+        "update_available": "A new version is out: {version}",
+        "update_install": "Update",
+        "update_installing": "Installing version {version}…",
+        "update_ready": "Update ready: {version}. It applies on restart.",
+        "update_restart": "Restart now",
+        "update_failed": "Version {version} could not be installed",
     },
 }
 
@@ -483,11 +495,14 @@ _STYLE += ("@media (min-width:880px){.page{max-width:max(1040px,85vw)}\n"
 # a page that draws the switch only, against the switch as it was rendered (defaultChecked, from enabled(), the read
 # /state answers, so a reload cannot loop, and a poll landing between a change and its post's answer cannot reload
 # the page under the post); the language too, against the one the page was drawn in (<html lang>), so a second tab
-# or another browser turns to a language chosen with the switch; says so when the program is gone.
+# or another browser turns to a language chosen with the switch; and the update's state and version, against the
+# ones the page was drawn with (data-update, served only beside an updater), so the update's line is drawn again
+# as it moves; says so when the program is gone.
 # While the program is gone the state line's data-shown is a value no style rule names, so the look of what the page
 # showed (the linked page's check mark) never sits beside the closed sentence; an answer puts the load value back.
 _SCRIPT = ("const s=document.getElementById('state');const w=document.getElementById('watch');"
-           "const shown=s.dataset.shown;const paused=s.dataset.paused;const lang=document.documentElement.lang;"
+           "const shown=s.dataset.shown;const paused=s.dataset.paused;const upd=s.dataset.update;"
+           "const lang=document.documentElement.lang;"
            "const sw=document.querySelector('input[name=autostart]');"
            # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
            # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
@@ -496,7 +511,8 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "setInterval(()=>fetch('/state').then(r=>r.json()).then(j=>{s.textContent=j.text;s.dataset.shown=shown;"
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
-           "||j.lang!==lang||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
+           "||j.lang!==lang||(upd!==undefined&&j.update&&j.update.state+' '+(j.update.version||'')!==upd)"
+           "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
            "location.reload();"
            # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
            # first, built as elements with their text (never as markup); the card keeps the last 50, as the ring
@@ -718,7 +734,8 @@ def _switch(words, token, lang):
 
 
 class PairingPage:
-    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None):
+    def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None,
+                 updater=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
@@ -726,13 +743,16 @@ class PairingPage:
         it. Beside a watcher the page draws the card «Este PC» after the watcher line: the pause, or the resume while
         paused, and the switch of the start with Windows where it is available. `events` answers the watcher's
         events, oldest first; with it /state carries the log's lines and the page draws them in the card «Actividad»,
-        without it no log key and no card."""
+        without it no log key and no card. `updater` is the update (update.py), set by main once the page serves;
+        with it /state carries its state, the page draws its line under the state line, and /update and /restart
+        are routes; without it none of them."""
         self.state = state
         self.watch = watch
         self.on_quit = on_quit
         self.on_pause, self.on_resume = on_pause, on_resume
         self.autostart = autostart if autostart is not None and autostart.available else None
         self.events = events
+        self.updater = updater
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -840,6 +860,8 @@ class PairingPage:
             answer["autostart"] = self.autostart.enabled()
         if self.events is not None:
             answer["log"] = self._log_lines(self.events(), lang)
+        if self.updater is not None:
+            answer["update"] = self.updater.snapshot()
         return answer
 
     def render(self, lang):
@@ -850,14 +872,19 @@ class PairingPage:
         token = html.escape(self.token)
         # Beside a watcher the state line carries the pause it was rendered with, which the poll compares.
         paused = "" if seen is None else f' data-paused="{str(_paused(seen)).lower()}"'
+        # Beside an updater it carries the update's state and version as well, read once for the line below.
+        updated = self.updater.snapshot() if self.updater is not None else None
+        updating = "" if updated is None else (f' data-update="{updated["state"]} '
+                                                f'{html.escape(updated["version"] or "")}"')
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in one fold
         # under it; the credit opens the top bar, and the quit sits at the foot, only beside a quit. The title row reads
         # the program's name, its sentence under it.
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
                 f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                f'{str(snapshot["relinkOffered"]).lower()}"{paused} data-closed="{words["state_closed"]}">'
+                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating} data-closed="{words["state_closed"]}">'
                 f'{words[_state_word(snapshot, seen)]}</p>']
+        link += self._update_line(words, token, updated)
         if snapshot["configFailed"]:
             link.append(f'<p class="note warn">{words["config_failed"]}</p>')
         if seen is not None:
@@ -929,6 +956,33 @@ class PairingPage:
                 f'content="width=device-width, initial-scale=1"><title>{NAME}</title>{_TAB_ICON}<style>{_STYLE}'
                 f"</style><noscript><style>{_NOSCRIPT_STYLE}</style></noscript><script>{_THEME_READ}</script></head>"
                 f"<body>{body}<script>{_SCRIPT}</script></body></html>")
+
+    def _update_line(self, words, token, seen):
+        """The update's line under the state line and its one button, by state: a version seen in notify mode with
+        «Actualizar», a version ready in either mode with «Reiniciar ahora», an install under way alone, a failed one
+        with pip's last line in its title; nothing for none, nor for a version auto mode is about to install.
+        `words` are escaped already."""
+        if seen is None:
+            return []
+        state, version = seen["state"], html.escape(seen["version"] or "")
+        if state == update.AVAILABLE and self.updater.mode == update.NOTIFY:
+            key, button = "update_available", ("update", "update_install")
+        elif state == update.READY:
+            key, button = "update_ready", ("restart", "update_restart")
+        elif state == update.INSTALLING:
+            key, button = "update_installing", None
+        elif state == update.FAILED:
+            key, button = "update_failed", None
+        else:
+            return []
+        failed = state == update.FAILED
+        title = f' title="{html.escape(seen["error"] or "")}"' if failed else ""
+        drawn = [f'<p id="update" class="note{" warn" if failed else ""}"{title}>'
+                 f'{words[key].format(version=version)}</p>']
+        if button is not None:
+            action, label = button
+            drawn.append(_form(action, token, f'<button type="submit">{words[label]}</button>'))
+        return drawn
 
     def _card(self, words, token, paused):
         """The card «Este PC» (placement A, frames A1 to A6): the pause form, or the resume form while paused, then,
@@ -1096,6 +1150,7 @@ def _handler(page):
             routes += ("/pause",) if page.on_pause is not None else ()
             routes += ("/resume",) if page.on_resume is not None else ()
             routes += ("/autostart",) if page.autostart is not None else ()
+            routes += ("/update", "/restart") if page.updater is not None else ()
             if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
@@ -1119,6 +1174,17 @@ def _handler(page):
                 finally:
                     page.on_quit()
                 return
+            if path == "/restart":
+                # «Reiniciar ahora»: answered before the stop, as /quit is, and with no page, so the browser keeps
+                # this one and its poll says the program is gone while the new copy starts; the flag, then the quit.
+                try:
+                    self._send(204, "text/plain; charset=utf-8", "")
+                finally:
+                    page.updater.restart()
+                return
+            if path == "/update":  # «Actualizar» in notify mode; in any other mode or state nothing is installed
+                page.updater.request_install()
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/theme":  # the page's script posts it and reads no page back
                 outcome = page.set_theme(form.get("theme", ""))
                 if outcome == "refused":

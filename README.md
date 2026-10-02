@@ -33,6 +33,8 @@ Si Windows responde que no encuentra `python`, usa `py` en su lugar: `py -m pip 
 
 Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y el inicio con Windows queda en el interruptor de la página. Para actualizar, pulsa «Salir» en la página, ejecuta otra vez la misma línea de pip y vuelve a iniciarlo. Para quitarlo, apaga primero el interruptor «Iniciar con Windows» en la página, pulsa «Salir» y después ejecuta `python -m pip uninstall pendify`. La configuración en `%APPDATA%\pendify`, con el enlace con el teléfono, se queda; puedes borrar esa carpeta a mano.
 
+El programa revisa PyPI cada seis horas y, cuando hay una versión más nueva, la instala en segundo plano. La página ofrece entonces «Reiniciar ahora» para empezar a usarla. Para apagarlo, inícialo con `--no-update` o escribe `"update": "off"` en `%APPDATA%\pendify\config.json`.
+
 ### Enlazar
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
@@ -95,6 +97,8 @@ Another way, with no script at all: on a PC that already has Python 3.10 or newe
 If Windows answers that `python` was not found, use `py` in its place: `py -m pip install --upgrade pendify` and `py -m pendify`.
 
 This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, press «Quit» on the page, run the same pip line again and start it again. To remove it, first turn off the «Start with Windows» switch on the page, press «Quit», then run `python -m pip uninstall pendify`. The configuration in `%APPDATA%\pendify`, with the link to the phone, stays; you can delete that folder by hand.
+
+The program checks PyPI every six hours and, when a newer version exists, installs it in the background. The page then offers «Restart now» to start using it. To turn this off, start it with `--no-update` or write `"update": "off"` in `%APPDATA%\pendify\config.json`.
 
 ### Link
 

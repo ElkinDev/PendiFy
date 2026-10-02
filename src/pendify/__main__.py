@@ -4,12 +4,14 @@
     python -m <package> --dry        the same, but the watcher never accepts: it alerts at the queue pop
     python -m <package> --quiet      the same, started by the system at logon: no browser, and no message box
                                      unless the start fails
+    python -m <package> --no-update  the same, with no check of PyPI for a newer version (update.py)
     python -m <package> ping <kind>  one alert with the stored pair, one fixed line per answer
 
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break, on the page's quit button and on the quit of
 the icon by the clock, which remove the run file and exit 0. One instance per config folder: a second start
 opens the running page and exits 0, and one made while that program is still closing after its quit waits for
-it to end and starts.
+it to end and starts. A restart the page asks for («Reiniciar ahora», once a newer version is installed) starts a
+new copy, with the --quiet of this one, once the run file is released.
 Where no console is attached (a pythonw start), the line a start ends on is also shown in a
 message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
@@ -17,13 +19,14 @@ test overrides, loopback only, so a test run reads neither the profile, the Work
 import argparse
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
 import webbrowser
 from pathlib import Path
 
-from . import alert, client, config, page, pairing, runfile, watcher, worker
+from . import alert, client, config, page, pairing, runfile, update, watcher, worker
 from .autostart import Autostart
 from .tray import Tray
 
@@ -41,8 +44,12 @@ PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is no
                        "moment to open it")
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
 FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
+RESTART_FAILED_LINE = "cannot restart: the new copy did not start; start the program again"
 _MB_ICONINFORMATION = 0x40
 _MB_SETFOREGROUND = 0x10000
+# The restart's new copy: no console, its own process group, out of this one's.
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
 # The icon by the clock's picture: pendify.ico beside the modules, the file install.ps1 points the shortcuts at.
 ICON_PATH = Path(__file__).with_name("pendify.ico")
 
@@ -82,6 +89,8 @@ def _arguments(argv):
     parser.add_argument("--dry", action="store_true", help="watch and alert, but never accept")
     parser.add_argument("--quiet", action="store_true",
                         help="a start by the system: no browser, and no message box for a start that ends well")
+    parser.add_argument("--no-update", action="store_true",
+                        help="no check of PyPI for a newer version in this run")
     commands = parser.add_subparsers(dest="command")
     ping = commands.add_parser("ping", parents=[common], help="send one alert with the stored pair")
     ping.add_argument("kind", choices=worker.KINDS)
@@ -154,7 +163,19 @@ def _ends(line, code, show):
     return code
 
 
-def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray):
+def _restart(args, spawn, show):
+    """The restart the page asked for, once the run file is free: a new copy of this program with this one's
+    --quiet, detached and with no console, which claims the run file as a first start does."""
+    command = [sys.executable, "-m", __package__] + (["--quiet"] if args.quiet else [])
+    try:
+        spawn(command, creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP, close_fds=True)
+    except OSError:
+        return _ends(RESTART_FAILED_LINE, 1, show)
+    return 0
+
+
+def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray, updater,
+           spawn):
     # A quiet start is the system's, at logon: it never opens the browser, and a start that ends well shows no box.
     calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
@@ -179,7 +200,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         opener(f"http://{page.ADDRESS}:{port}/")
         show(ALREADY_RUNNING_LINE)
         return 0
+    updating = None
     try:
+        mode = update.OFF if args.no_update else store.read_update()
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
         watch, alerter = _watcher(args, store, state, base, timeout, stop, delay, beep)
 
@@ -196,6 +219,10 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events)
         url = pairing_page.start()
+        # The update's rounds on their own thread (update.py), built once the page serves; its restart is the
+        # page's quit, after the flag read below once the run file is free.
+        updating = updater(update.RUNNING_VERSION, mode, restart=quit_page)
+        pairing_page.updater = updating
         # The icon by the clock, under --quiet as well: the way to stop a copy the Run key started. Its words are
         # the page's, in the language the page resolves with no browser to ask: the kept choice, else Spanish.
         icon = tray(url, on_open=lambda: opener(url), on_pause=watch.pause, on_resume=watch.resume,
@@ -204,6 +231,8 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         watching = threading.Thread(target=watch.run, daemon=True)
         try:
             icon.start()
+            if mode != update.OFF:
+                updating.start()
             run.publish(pairing_page.port)
             print(f"page: {url}", flush=True)
             if not args.quiet and not opener(url):  # a start by a person opens the page, linked or not
@@ -228,8 +257,11 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             alerter.flush(STOP_SECONDS)
             pairing_page.close()
             icon.close()
+            updating.close()
     finally:
         run.release()
+    if updating is not None and updating.restart_requested.is_set():
+        return _restart(args, spawn, show)
     return 0
 
 
@@ -242,11 +274,13 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep, tray=Tray):
+         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
     line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the
-    seam a test run fills with a fake, so no test shows a real icon."""
+    seam a test run fills with a fake, so no test shows a real icon. `updater` makes the update and `spawn` starts
+    the restart's new copy, the seams a test run fills with fakes, so no test reaches PyPI, runs pip or starts a
+    copy."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -262,7 +296,7 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
                           delay or watcher.accept_delay, beep, show, clock, sleep,
-                          autostart if autostart is not None else Autostart(), tray)
+                          autostart if autostart is not None else Autostart(), tray, updater, spawn)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)

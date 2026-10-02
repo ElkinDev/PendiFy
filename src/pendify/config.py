@@ -1,6 +1,7 @@
 """The config file: the secret and the link id, under the user's profile (design P1, P6), and the page's theme
 choice when there is one (light or dark; the system's choice is no key), and its language choice when there is one
-(es or en; with none the page follows the browser).
+(es or en; with none the page follows the browser), and the update's mode when one is written there by hand
+(auto, notify or off; with none, auto).
 
 The file is `<base>/<folder>/config.json`, where the base is %APPDATA% in a real run and is injected
 everywhere else, so no test touches the real profile. A write goes to a temp file in the same folder
@@ -30,6 +31,10 @@ THEMES = ("light", "dark")
 SYSTEM_THEME = "system"
 # The language switch's choices; with no key the page follows the browser's language.
 LANGS = ("es", "en")
+# The update's modes (update.py), written by hand as the key "update": auto checks PyPI and installs in the
+# background, notify checks only, off never checks. With no key, or a foreign value, auto.
+UPDATE_MODES = ("auto", "notify", "off")
+DEFAULT_UPDATE = "auto"
 # _write's default: the stored theme and language choices are kept.
 _KEEP = object()
 
@@ -91,6 +96,11 @@ class ConfigStore:
         """The stored language choice, es or en, or None when there is none (the browser's). A file that is there
         and cannot be read raises ConfigError, as read_theme() does; a missing, corrupt or foreign value is None."""
         return _choice(self._stored(), "lang", LANGS)
+
+    def read_update(self):
+        """The update's mode, auto, notify or off; auto when the file holds none or a foreign one. A file that is
+        there and cannot be read raises ConfigError, as read_theme() does."""
+        return _choice(self._stored(), "update", UPDATE_MODES) or DEFAULT_UPDATE
 
     def set_theme(self, choice):
         """The theme button's choice written beside the pair: light or dark kept, system kept as no key. Any
@@ -176,17 +186,19 @@ class ConfigStore:
 
     def _write(self, pairing, theme=_KEEP, lang=_KEEP):
         """The pair, and the theme and language choices: each stored one kept unless set_theme or set_lang passes
-        its own."""
+        its own. The update's mode, written by hand, is kept as it is stored."""
         folder = self.path.parent
-        if theme is _KEEP or lang is _KEEP:
-            stored = self._stored()
-            theme = _choice(stored, "theme", THEMES) if theme is _KEEP else theme
-            lang = _choice(stored, "lang", LANGS) if lang is _KEEP else lang
+        stored = self._stored()
+        theme = _choice(stored, "theme", THEMES) if theme is _KEEP else theme
+        lang = _choice(stored, "lang", LANGS) if lang is _KEEP else lang
+        update = _choice(stored, "update", UPDATE_MODES)
         values = {"secret": pairing.secret, "linkId": pairing.link_id}
         if theme is not None:
             values["theme"] = theme
         if lang is not None:
             values["lang"] = lang
+        if update is not None:
+            values["update"] = update
         data = json.dumps(values).encode("utf-8")
         try:
             folder.mkdir(parents=True, exist_ok=True)
