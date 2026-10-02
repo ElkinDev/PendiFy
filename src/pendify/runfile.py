@@ -10,14 +10,21 @@ stops this start; only a live holder's record read within the window is that oth
 At its stop the holder marks its record closing, beside its pid and port, until it removes the file: a start that
 meets a closing holder waits for the file to go instead of opening a page that is closing. A record with no mark,
 as an older copy writes it, reads as not closing.
+
+The record also carries the holder's version and a replace secret, written at the publish and kept by the mark: a
+newer copy started over it posts the secret to the holder's page, POST /replace, and the holder stops as its quit
+does (__main__.py). A record with neither, as an older copy writes it, reads version None and secret None.
 """
 import errno
 import json
 import os
 import secrets
+import signal
 import tempfile
 import time
 from pathlib import Path
+
+from . import update
 
 FILE_NAME = "run.json"
 # How long a start re-reads the other start's record: the winner of a race writes its pid right after its
@@ -31,6 +38,7 @@ REFUSED_STEP = 0.01
 _STILL_ACTIVE = 259
 _ERROR_ACCESS_DENIED = 5
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_PROCESS_TERMINATE = 0x0001
 
 
 class FolderNotWritable(PermissionError):
@@ -73,6 +81,34 @@ def _windows_alive(pid):
         kernel32.CloseHandle(handle)
 
 
+def terminate(pid):
+    """Ends the process `pid`, named by its pid alone, never by its name or its command line: TerminateProcess
+    through ctypes on Windows, opened as pid_alive opens it, and SIGTERM elsewhere. OSError when it cannot be ended;
+    this process is never ended."""
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        raise ProcessLookupError(errno.ESRCH, "no other process has this pid", str(pid))
+    if os.name != "nt":
+        os.kill(pid, signal.SIGTERM)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel32.OpenProcess(_PROCESS_TERMINATE, False, pid)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel32.TerminateProcess(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 class RunFile:
     def __init__(self, folder, pid=None, alive=pid_alive, clock=time.monotonic, sleep=time.sleep):
         self.path = Path(folder) / FILE_NAME
@@ -82,11 +118,13 @@ class RunFile:
         self._sleep = sleep
         self._held = False
         self._port = None
+        # The replace secret, made at the publish: the page's /replace answers only a post that carries it.
+        self.secret = None
 
     def claim(self):
-        """None when this process now holds the file; the live holder's record, {pid, port, closing}, when
-        another does. A refused remove or create (PermissionError on Windows: the file held open, or pending its
-        removal, by another start) is that other start only when its live record shows within
+        """None when this process now holds the file; the live holder's record, {pid, port, closing, version,
+        secret}, when another does. A refused remove or create (PermissionError on Windows: the file held open, or
+        pending its removal, by another start) is that other start only when its live record shows within
         REREAD_SECONDS. FolderNotWritable when the config folder takes no new file; OSError when the file
         can neither be created nor taken over."""
         try:
@@ -117,7 +155,9 @@ class RunFile:
                     return holder
                 continue
             with os.fdopen(handle, "w", encoding="utf-8") as out:
-                json.dump({"pid": self._pid, "port": None}, out)
+                # The version from the claim on: a start of the same version that meets this one before its publish
+                # reads it as the same version, never as an older copy to replace.
+                json.dump({"pid": self._pid, "port": None, "version": update.RUNNING_VERSION}, out)
             self._held = True
             return None
         raise FileExistsError("the run file came back after every take-over")
@@ -178,16 +218,22 @@ class RunFile:
             self._sleep(REREAD_STEP)
 
     def publish(self, port):
-        """This process's pid and its page's port, written over the claim in one move; PermissionError when the
-        move is still refused after its retries."""
-        self._write({"pid": self._pid, "port": port})
+        """This process's pid, its page's port, its version and the replace secret, written over the claim in one
+        move; PermissionError when the move is still refused after its retries. The secret is never logged or
+        shown."""
+        if self.secret is None:
+            self.secret = secrets.token_hex(16)
+        self._write(self._record(port))
         self._port = port
 
     def mark_closing(self):
         """This process's record marked closing, in the same one move: a start that meets it waits for the
         file to go. Nothing when this process does not hold the file."""
         if self._held:
-            self._write({"pid": self._pid, "port": self._port, "closing": True})
+            self._write({**self._record(self._port), "closing": True})
+
+    def _record(self, port):
+        return {"pid": self._pid, "port": port, "version": update.RUNNING_VERSION, "secret": self.secret}
 
     def _write(self, record):
         handle, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".run-", suffix=".tmp")
@@ -243,4 +289,7 @@ class RunFile:
             return None
         port = data.get("port")
         valid = isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536
-        return {"pid": pid, "port": port if valid else None, "closing": data.get("closing") is True}
+        version, secret = data.get("version"), data.get("secret")
+        return {"pid": pid, "port": port if valid else None, "closing": data.get("closing") is True,
+                "version": version if isinstance(version, str) and version else None,
+                "secret": secret if isinstance(secret, str) and secret else None}

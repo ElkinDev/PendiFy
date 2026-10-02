@@ -10,7 +10,10 @@
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break, on the page's quit button and on the quit of
 the icon by the clock, which remove the run file and exit 0. One instance per config folder: a second start
 opens the running page and exits 0, and one made while that program is still closing after its quit waits for
-it to end and starts. A restart the page asks for («Reiniciar ahora», once a newer version is installed, or the
+it to end and starts. A start of a newer version over a running older copy replaces it: the older copy is asked to
+stop through its page's /replace with the run file's secret, or ended by its pid when it has no secret or its page
+does not answer, and this start then claims the run file as a first one does. A restart the page asks for
+(«Reiniciar ahora», once a newer version is installed, or the
 icon's «Reiniciar para actualizar») starts a new copy once the run file is released: without --quiet, so its page
 opens, and with the --dry, --data-dir, --worker and --client-lockfile of this one.
 Where no console is attached (a pythonw start), the line a start ends on is also shown in a
@@ -18,12 +21,15 @@ message box. `--data-dir`, `--worker` and `--client-lockfile` are the
 test overrides, loopback only, so a test run reads neither the profile, the Worker nor the client's files.
 """
 import argparse
+import http.client
 import os
 import signal
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -46,6 +52,12 @@ PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is no
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
 FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
 RESTART_FAILED_LINE = "cannot restart: the new copy did not start; start the program again"
+# The line a start that replaced an older copy shows, in the page's language: the older copy's version, «desconocida»
+# or "unknown" for a record with none, then this one's.
+REPLACED_LINES = {"es": "Se reemplazó la copia anterior ({old}) por esta ({new}).",
+                  "en": "The older copy ({old}) was replaced by this one ({new})."}
+UNKNOWN_VERSION = {"es": "desconocida", "en": "unknown"}
+REPLACE_TIMEOUT_SECONDS = 5.0  # the replace post to the older copy's page
 _MB_ICONINFORMATION = 0x40
 _MB_SETFOREGROUND = 0x10000
 # The restart's new copy: no console, its own process group, out of this one's.
@@ -181,6 +193,43 @@ def _restart(args, spawn, show, opens_page):
     return 0
 
 
+def _replaces(holder):
+    """True when this copy is newer than `holder`, a live holder that is not closing: X.Y.Z compared as tuples of
+    ints, and a holder with no version, as an older copy writes its record, older than any. A copy whose own version
+    is not X.Y.Z replaces nothing."""
+    if update._parts(update.RUNNING_VERSION) is None:
+        return False
+    return holder["version"] is None or update.newer(update.RUNNING_VERSION, holder["version"])
+
+
+def _ask_replace(holder):
+    """True when the holder's page answered 202 to POST /replace with the run file's secret; False for any other
+    answer, none, or no port."""
+    if holder["port"] is None:
+        return False
+    request = urllib.request.Request(f"http://{page.ADDRESS}:{holder['port']}/replace", method="POST",
+                                     data=urllib.parse.urlencode({"secret": holder["secret"]}).encode())
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # a loopback address never goes through one
+    try:
+        with opener.open(request, timeout=REPLACE_TIMEOUT_SECONDS) as answer:
+            return answer.status == 202
+    except (OSError, http.client.HTTPException):  # a refusal (urllib.error.HTTPError), no answer in time, a broken one
+        return False
+
+
+def _replace(run, holder, terminate):
+    """The older `holder` stopped: asked through its page's /replace, else, with no secret in its record or no 202
+    from its page, ended by its pid alone through `terminate`. True once the run file no longer names it as a live
+    process within CLOSING_WAIT_SECONDS: its file gone, or left stale by its death, which claim() takes over; False
+    when it is still alive then, or cannot be ended."""
+    if holder["secret"] is None or not _ask_replace(holder):
+        try:
+            terminate(holder["pid"])
+        except OSError:
+            return False
+    return run.wait_released(holder, CLOSING_WAIT_SECONDS)
+
+
 def _ready_version(updater):
     """The version an install made ready, for the icon's item; None in any other state."""
     seen = updater.snapshot()
@@ -188,14 +237,18 @@ def _ready_version(updater):
 
 
 def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray, updater,
-           spawn):
+           spawn, terminate):
     # A quiet start is the system's, at logon: it never opens the browser, and a start that ends well shows no box.
     calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
+    replaced = None  # the record of the older copy this start replaced
     try:
         holder = run.claim()
         if holder is not None and holder["closing"] and run.wait_released(holder, CLOSING_WAIT_SECONDS):
             holder = run.claim()  # the closing copy let its file go: this start claims it as a first one does
+        # A running older copy is replaced; one still alive after the wait keeps the road below, its page opened.
+        if holder is not None and not holder["closing"] and _replaces(holder) and _replace(run, holder, terminate):
+            replaced, holder = holder, run.claim()  # its file gone or stale: claimed as a first one does
     except runfile.FolderNotWritable as refused:
         return _ends(FOLDER_FAILED_LINE.format(path=refused.filename), 1, show)
     except OSError:
@@ -231,6 +284,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
 
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events)
+        pairing_page.run = run  # its /replace answers the secret the publish below writes
         url = pairing_page.start()
         # The update's rounds on their own thread (update.py), built once the page serves; its restart is the
         # page's quit, after the flag read below once the run file is free; pip's output goes to the config folder.
@@ -249,6 +303,12 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             if mode != update.OFF:
                 updating.start()
             run.publish(pairing_page.port)
+            if replaced is not None:  # in the page's language, as the icon's words; a box never holds the start
+                lang = pairing_page.language_of(None)
+                line = REPLACED_LINES[lang].format(old=replaced["version"] or UNKNOWN_VERSION[lang],
+                                                   new=update.RUNNING_VERSION)
+                print(line, flush=True)
+                threading.Thread(target=calm, args=(line,), daemon=True).start()
             print(f"page: {url}", flush=True)
             if not args.quiet and not opener(url):  # a start by a person opens the page, linked or not
                 print("open the address above in a browser", flush=True)
@@ -292,13 +352,14 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=None):
+         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=runfile.terminate):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
     line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the
     seam a test run fills with a fake, so no test shows a real icon. `updater` makes the update and `spawn` starts
     the restart's new copy, the seams a test run fills with fakes, so no test reaches PyPI, runs pip or starts a
-    copy."""
+    copy. `terminate` ends an older copy by its pid when it cannot be asked to stop, the seam every test run fakes, so
+    no test ends a process."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -314,7 +375,7 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
                           delay or watcher.accept_delay, beep, show, clock, sleep,
-                          autostart if autostart is not None else Autostart(), tray, updater, spawn)
+                          autostart if autostart is not None else Autostart(), tray, updater, spawn, terminate)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)

@@ -51,6 +51,16 @@ NEWER, OLDER, NEWEST = "0.2.0", "0.1.9", "0.10.0"
 RUN_SECRET = "0123456789abcdef" * 2
 
 
+def published(record):
+    """`record`, a record this start wrote, with its replace secret checked, 32 hex digits, and left out: a secret is
+    never compared by value. Anything else as it is."""
+    if not isinstance(record, dict) or "secret" not in record:
+        return record
+    if re.fullmatch(r"[0-9a-f]{32}", str(record["secret"])) is None:
+        raise AssertionError(f"not a replace secret: {record['secret']!r}")
+    return {key: value for key, value in record.items() if key != "secret"}
+
+
 def answers(port):
     """True when something accepts a connection on 127.0.0.1:port."""
     try:
@@ -320,7 +330,8 @@ class MainCommandTest(unittest.TestCase):
     def test_a_second_start_against_a_live_holder_exits_0_with_one_line_and_starts_no_server(self):
         # Mutation: the liveness check removed (every holder read as gone). Red: a second page starts.
         self.run_file.parent.mkdir(parents=True)
-        holder = {"pid": os.getppid(), "port": 54321}  # the process that started this test: alive
+        # The process that started this test, alive, running this version: a second start, not a newer copy.
+        holder = {"pid": os.getppid(), "port": 54321, "version": update.RUNNING_VERSION}
         self.run_file.write_text(json.dumps(holder), encoding="utf-8")
         opened, stop = [], threading.Event()
         thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
@@ -352,7 +363,8 @@ class MainCommandTest(unittest.TestCase):
                 code, out, err = self.run_main("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
                                                opener=opener, stop=stop)
                 self.assertEqual((code, out, err), (0, f"page: {seen.get('url')}\n", ""))
-                self.assertEqual(seen["run"], {"pid": os.getpid(), "port": int(seen["url"].split(":")[2].strip("/"))})
+                self.assertEqual(published(seen["run"]), {"pid": os.getpid(), "version": update.RUNNING_VERSION,
+                                                          "port": int(seen["url"].split(":")[2].strip("/"))})
                 self.assertFalse(self.run_file.exists())
 
     def closing_holder(self):
@@ -386,7 +398,8 @@ class MainCommandTest(unittest.TestCase):
                                        "--client-lockfile", str(lockfile),
                                        opener=lambda url: opened.append(url) or True, stop=stop, delay=delay)
         port = int(opened[0].split(":")[2].strip("/"))
-        self.assertEqual((code, err, seen.get("record")), (0, "", {"pid": os.getpid(), "port": port, "closing": True}))
+        record = {"pid": os.getpid(), "port": port, "version": update.RUNNING_VERSION, "closing": True}
+        self.assertEqual((code, err, published(seen.get("record"))), (0, "", record))
         self.assertFalse(self.run_file.exists())  # released after the joins, as before
 
     def test_a_start_against_a_closing_holder_waits_for_its_release_then_starts_its_own_page(self):
@@ -485,11 +498,13 @@ class MainCommandTest(unittest.TestCase):
         winner, port = os.getppid(), 54321  # the process that started this test: alive, and not this start
         url, stop = f"http://127.0.0.1:{port}/", threading.Event()
         stop.set()  # a start that wrongly goes on ends at its first tick
-        roads = (("its record shows with its port", [{"pid": winner, "port": port}], entry.ALREADY_RUNNING_LINE,
+        # The winner runs this version, as its claim writes it: a start of the same program, never replaced.
+        winner_record = {"pid": winner, "version": update.RUNNING_VERSION}
+        roads = (("its record shows with its port", [{**winner_record, "port": port}], entry.ALREADY_RUNNING_LINE,
                   [url]),
-                 ("its port comes after the claim", [{"pid": winner, "port": None}, {"pid": winner, "port": port}],
+                 ("its port comes after the claim", [{**winner_record, "port": None}, {**winner_record, "port": port}],
                   entry.ALREADY_RUNNING_LINE, [url]),
-                 ("its port never comes", [{"pid": winner, "port": None}], entry.PAGE_NOT_KNOWN_LINE, []))
+                 ("its port never comes", [{**winner_record, "port": None}], entry.PAGE_NOT_KNOWN_LINE, []))
         for road, records, line, pages in roads:
             with self.subTest(road=road):
                 with open(self.run_file, "w", encoding="utf-8") as held:  # the winner's handle, no record yet
@@ -563,7 +578,8 @@ class MainCommandTest(unittest.TestCase):
         stop.set()
 
         def already_running():
-            self.run_file.write_text(json.dumps({"pid": os.getppid(), "port": 54321}), encoding="utf-8")
+            record = {"pid": os.getppid(), "port": 54321, "version": update.RUNNING_VERSION}  # this version's copy
+            self.run_file.write_text(json.dumps(record), encoding="utf-8")
             return entry.ALREADY_RUNNING_LINE, 0
 
         def cannot_start():
@@ -708,7 +724,8 @@ class MainCommandTest(unittest.TestCase):
                 self.assertFalse(thread.is_alive())
                 self.assertEqual(result["run"], (0, f"page: {icon.url}\n", ""))
                 self.assertEqual((len(made), icon.moments), (1, [("start", True), ("close", False)]))
-                self.assertEqual(seen[0], {"pid": os.getpid(), "port": port, "closing": True})
+                self.assertEqual(published(seen[0]),
+                                 {"pid": os.getpid(), "port": port, "version": update.RUNNING_VERSION, "closing": True})
                 self.assertEqual(opened, [icon.url] * (1 if flags else 2))  # a person's start opens it as well
                 self.assertEqual(paused, [True, False])
                 self.assertEqual(words, [page.WORDS[languages[0]], page.WORDS[languages[1]]])
@@ -917,8 +934,9 @@ class MainCommandTest(unittest.TestCase):
         release.set()
         thread.join(10)
         self.assertFalse(thread.is_alive())
-        self.assertEqual((status, stopped, record), (200, True, {"pid": os.getpid(), "port": seen["port"],
-                                                                 "closing": True}))
+        self.assertEqual((status, stopped, published(record)), (200, True, {"pid": os.getpid(), "port": seen["port"],
+                                                                            "version": update.RUNNING_VERSION,
+                                                                            "closing": True}))
         self.assertEqual(result["run"][0], 0)
         self.assertFalse(self.run_file.exists())  # released at the end, as before
 
@@ -993,8 +1011,8 @@ class MainCommandTest(unittest.TestCase):
                 self.assertEqual((holder_page.posts, self.read_run()), ([], record))
 
     def test_a_replace_that_leaves_the_holder_alive_ends_on_the_already_running_line(self):
-        # Mutation: the claim taken again whatever the wait answered. Red: the holder's live file read as this
-        # start's, or a page of its own started beside the holder.
+        # Mutation: the wait bounded by REREAD_SECONDS. Red: the already-running line before CLOSING_BOUND.
+        # Mutation: the holder ended by its pid after its page's 202 as well. Red: a pid ended on that road.
         for road in ("its page answered", "ended by its pid"):
             with self.subTest(road=road):
                 holder_page = self.holder_page(202)  # answers, and never lets its file go

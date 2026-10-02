@@ -783,6 +783,7 @@ class PairingPage:
         self.autostart = autostart if autostart is not None and autostart.available else None
         self.events = events
         self.updater = updater
+        self.run = None  # the RunFile main hands the page: /replace answers its secret once published
         self.token = secrets.token_urlsafe(32)
         self.server = None
         self.port = None
@@ -1188,6 +1189,8 @@ def _handler(page):
             routes += ("/resume",) if page.on_resume is not None else ()
             routes += ("/autostart",) if page.autostart is not None else ()
             routes += ("/update", "/restart") if page.updater is not None else ()
+            replace_secret = page.run.secret if page.run is not None else None
+            routes += ("/replace",) if page.on_quit is not None and replace_secret is not None else ()
             if path not in routes:
                 return self._refuse(404)
             if length is None:  # chunked or absent is 411, anything but plain digits 400
@@ -1200,6 +1203,17 @@ def _handler(page):
             except ValueError:  # more fields than any form of the page has
                 return self._refuse(400)
             form = {key: values[0] for key, values in fields.items()}
+            if path == "/replace":
+                # A newer copy started over this one (__main__.py): it has no page token, so the run file's secret is
+                # its check; then the stop of «Salir», answered first as /quit is.
+                if not hmac.compare_digest(form.get("secret", "").encode(), replace_secret.encode()):
+                    return self._refuse(403)
+                try:
+                    closing = "Cerrando" if page.language_of(self.headers.get("Accept-Language")) == "es" else "Closing"
+                    self._send(202, "text/plain; charset=utf-8", closing)
+                finally:
+                    page.on_quit()
+                return
             if not hmac.compare_digest(form.get("token", "").encode(), page.token.encode()):
                 return self._refuse(403)
             if path == "/quit":

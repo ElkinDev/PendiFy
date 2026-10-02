@@ -58,10 +58,11 @@ class RunFileTest(unittest.TestCase):
         held = self.start(HOLDER)
         self.assertIsNone(held.claim())
         held.publish(PORT)
-        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT})  # a running holder's record, as before
+        published = {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION, "secret": held.secret}
+        self.assertEqual(self.record(), published)  # a running holder's record
         held.mark_closing()
-        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "closing": True})
-        self.assertEqual(self.start(OTHER).claim(), {"pid": HOLDER, "port": PORT, "closing": True})
+        self.assertEqual(self.record(), {**published, "closing": True})
+        self.assertEqual(self.start(OTHER).claim(), {**published, "closing": True})
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), [runfile.FILE_NAME])  # no temp left
 
     def test_a_record_without_the_mark_reads_as_not_closing(self):
@@ -71,7 +72,8 @@ class RunFileTest(unittest.TestCase):
                              ("marked false", {"pid": HOLDER, "port": PORT, "closing": False})):
             with self.subTest(record=name):
                 self.path.write_text(json.dumps(record), encoding="utf-8")
-                self.assertEqual(self.start(OTHER).claim(), {"pid": HOLDER, "port": PORT, "closing": False})
+                self.assertEqual(self.start(OTHER).claim(),
+                                 {"pid": HOLDER, "port": PORT, "closing": False, "version": None, "secret": None})
                 self.assertEqual(self.record(), record)  # read, never rewritten
 
     def test_release_after_the_mark_removes_the_file_as_before(self):
@@ -101,7 +103,8 @@ class RunFileTest(unittest.TestCase):
         refusal, calls = self.refused("remove", runfile.REFUSED_TRIES)
         with refusal:
             held.release()
-        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT})
+        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION,
+                                         "secret": held.secret})
         self.assertEqual((len(calls), sleeps),
                          (runfile.REFUSED_TRIES, [runfile.REFUSED_STEP] * (runfile.REFUSED_TRIES - 1)))
         self.assertLess(runfile.REFUSED_STEP * (runfile.REFUSED_TRIES - 1), 1.0)  # well under a second in all
@@ -112,7 +115,8 @@ class RunFileTest(unittest.TestCase):
         refusal, calls = self.refused("replace", 2)
         with refusal:
             held.mark_closing()
-        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "closing": True})
+        self.assertEqual(self.record(), {"pid": HOLDER, "port": PORT, "version": update.RUNNING_VERSION,
+                                         "secret": held.secret, "closing": True})
         self.assertEqual((len(calls), sleeps, self.temps()), (3, [runfile.REFUSED_STEP] * 2, []))
 
     def test_a_publish_refused_to_the_end_raises_and_leaves_no_temp(self):
@@ -123,7 +127,8 @@ class RunFileTest(unittest.TestCase):
         refusal, calls = self.refused("replace", runfile.REFUSED_TRIES)
         with refusal, self.assertRaises(PermissionError):
             start.publish(PORT)
-        self.assertEqual(self.record(), {"pid": HOLDER, "port": None})  # the claim's record, untouched
+        # the claim's record, untouched
+        self.assertEqual(self.record(), {"pid": HOLDER, "port": None, "version": update.RUNNING_VERSION})
         self.assertEqual((len(calls), sleeps, self.temps()),
                          (runfile.REFUSED_TRIES, [runfile.REFUSED_STEP] * (runfile.REFUSED_TRIES - 1), []))
 
@@ -141,11 +146,11 @@ class RunFileTest(unittest.TestCase):
         start = runfile.RunFile(self.folder, pid=OTHER, alive=lambda pid: pid in alive, clock=lambda: now[0],
                                 sleep=sleep)
         holder = start.claim()
-        self.assertEqual(holder, {"pid": HOLDER, "port": PORT, "closing": True})
+        self.assertEqual(holder, {"pid": HOLDER, "port": PORT, "closing": True, "version": None, "secret": None})
         self.assertTrue(start.wait_released(holder, 15.0))
         self.assertEqual((self.record()["pid"], now[0]), (HOLDER, runfile.REREAD_STEP))  # ended by the pid alone
         self.assertIsNone(start.claim())  # taken over
-        self.assertEqual(self.record(), {"pid": OTHER, "port": None})
+        self.assertEqual(self.record(), {"pid": OTHER, "port": None, "version": update.RUNNING_VERSION})
 
     def test_publish_writes_the_version_and_a_secret_and_claim_hands_them_back(self):
         # Mutation: publish writes {pid, port} as before. Red: the record carries no version and no secret.
