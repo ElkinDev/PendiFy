@@ -126,20 +126,6 @@ class QrDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 
-    def test_the_masked_drawing_does_not_decode(self):
-        # The hidden state: the modules group cut out, the pixelated mask over the tile. Mutation: the mask drawn
-        # from the symbol's modules. Red: ZXing reads the pairing address.
-        for secret in (SECRET, LINK_ID):
-            with self.subTest(secret=secret):
-                address = qr.pairing_address(secret)
-                drawing = qr.svg(qr.encode(address.encode("ascii")).modules, mask="Hidden code")
-                head, rest = drawing.split('<g class="modules">')
-                hidden = head + rest[rest.index('<g class="qr-mask"'):]
-                self.assertNotIn('class="modules"', hidden)
-                status, decoded, errors = zxing_decode([[[sample is not False for sample in row]
-                                                         for row in support.svg_samples(hidden, 4)]])
-                self.assertNotIn(address, decoded, errors[-1500:])
-
     def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_6_7_8_and_10_px_a_module(self):
         # Mutation: the runs drawn from another text. Red: ZXing reads that text. Mutation: the quiet zone drawn 2
         # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules. The sizes are
@@ -232,6 +218,54 @@ class SceneDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(len(requests), 48)
         self.assertEqual(dict(zip(where, decoded)), dict(zip(where, wanted)))
+
+    def test_both_masks_decode_to_nothing_and_the_revealed_qr_decodes(self):
+        # Lane pfmaskimpl (OR-104): the owner tried to scan the 0.1.5 mask. Both masks, the bust and the board, over
+        # real payloads, in the scene and in the flat drawing, rasterised by Edge under the page's own style (the
+        # outline and the board's tokens are its rules), the modules group cut out as the hidden state hides it: ZXing
+        # reads nothing. The same drawings with the mask cut out, as the shown state hides it, read the address.
+        # Mutation: the mask drawn from the symbol's modules. Red: a hidden crop reads the address. Mutation: the mask
+        # left over the shown state. Red: a shown crop reads nothing.
+        words = "Press Show the code"
+        crops = []
+        for secret in (SECRET, LINK_ID):
+            address = qr.pairing_address(secret)
+            modules = qr.encode(address.encode("ascii")).modules
+            for mask in qr.MASKS:
+                for kind in ("scene", "svg"):
+                    for state in ("hidden", "shown"):
+                        uid = f"m{len(crops)}"
+                        drawing = (qr.scene_svg(modules, plate_almena.PLATE_DATA_URI, uid=uid, mask=mask,
+                                                mask_words=words) if kind == "scene" else
+                                   qr.svg(modules, mask=mask, mask_words=words))
+                        if state == "hidden":
+                            head, rest = drawing.split('<g class="modules"', 1)
+                            drawing = head + rest[rest.index('<g class="qr-mask"'):]
+                            self.assertNotIn('class="modules"', drawing)
+                        else:
+                            drawing = drawing[:drawing.index('<g class="qr-mask"')] + "</svg>"
+                            self.assertNotIn("qr-mask", drawing)
+                        crops.append((drawing, address if state == "shown" else "NO READ",
+                                      f"{secret} {mask} {kind} {state}"))
+        cell = BOX + 2 * PAD
+        body = "".join(f'<div style="position:absolute;left:{(i % 4) * cell}px;top:{(i // 4) * cell}px;'
+                       f'padding:{PAD}px;background:{CARDS[0]}"><div style="width:{BOX}px;height:{BOX}px">'
+                       f'{drawing.replace("<svg ", f"<svg width={BOX} height={BOX} ", 1)}</div></div>'
+                       for i, (drawing, _, _) in enumerate(crops))
+        width, height = 4 * cell, (len(crops) + 3) // 4 * cell
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
+            sheet = Path(work) / "masks.html"
+            sheet.write_text('<!doctype html><html><head><meta charset="utf-8"><style>' + page._STYLE
+                             + "html,body{margin:0;padding:0;background:#888}svg{display:block}</style></head><body>"
+                             + body + "</body></html>", encoding="utf-8")
+            png = edge_screenshot(work, sheet, width, height, 1)
+            self.assertEqual(png_size(png), (width, height))
+            status, decoded, errors = zxing_read_crops([(png, (i % 4) * cell, (i // 4) * cell, cell, cell, False)
+                                                        for i in range(len(crops))])
+        self.assertEqual(len(crops), 16)
+        self.assertEqual(len(decoded), len(crops), errors[-1500:])
+        self.assertEqual({where: read if wanted != "NO READ" else read[:7] for (_, wanted, where), read
+                          in zip(crops, decoded)}, {where: wanted for _, wanted, where in crops})
 
     def test_the_plate_is_the_design_lane_webp_and_every_other_version_falls_back(self):
         # Mutation: scene_svg drawn for any size. Red: a version 4 symbol gets the version 3 plate.
