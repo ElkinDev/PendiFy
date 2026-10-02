@@ -754,15 +754,27 @@ class PairingPageTest(unittest.TestCase):
         self.assertEqual(before.count("{"), before.count("}"))
         # The form is still the link's own child right after the key's card, the place the rule spaces.
         self.assertEqual(self.html().count('</figure><form method="post" action="/check">'), 1)
-        # The relink form is the link's own child on the linked page that offers it, never inside a card: here, with
-        # no watcher reading, right after the state line; in use the card «Este PC» sits between the two.
+        # The relink form on the linked page that offers it, rendered as the program builds the page (__main__.py:
+        # a watcher whose snapshot is always a dict, and the events): the card «Este PC», then the form as the
+        # link's own child, then the card «Actividad», each once. Mutation: the form put inside «Este PC» or after
+        # «Actividad». Red: the order or the closed card before the form.
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         for _ in range(3):
             self.state.record_ping(worker.Refused())
-        offered = self.html()
-        self.assertEqual(offered.count('<form method="post" action="/relink">'), 1)
-        self.assertEqual(len(re.findall(r'<p id="state"[^>]*>[^<]*</p><form method="post" action="/relink">',
-                                        offered)), 1)
+        seen = {"client": "waiting", "phase": None, "alert": None, "at": None, "pingResult": None, "pingAt": None,
+                "paused": False}
+        used = page.PairingPage(self.state, watch=lambda: dict(seen), on_quit=lambda: None, on_pause=lambda: None,
+                                on_resume=lambda: None, events=lambda: [])
+        for lang in ("es", "en"):
+            with self.subTest(page="relink", lang=lang):
+                offered = used.render(lang)
+                marks = ('<div class="panel pc" role="group"', '<form method="post" action="/relink">',
+                         '<div class="panel log-card">')
+                self.assertEqual([offered.count(mark) for mark in marks], [1, 1, 1])
+                at = [offered.index(mark) for mark in marks]
+                self.assertEqual(at, sorted(at))
+                card = offered[at[0]:at[1]]
+                self.assertEqual((card.count("<div"), card.endswith("</div>")), (card.count("</div>"), True))
 
     def test_the_linked_page_keeps_the_pendiapp_com_qr_visible(self):
         # Mutation: the sponsored QR put under the key's data-shown or any hiding rule. Red: a rule names it, or the
