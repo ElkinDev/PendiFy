@@ -113,6 +113,12 @@ class UpdaterTest(unittest.TestCase):
                               log=self.logs.append)
         return made, get, run
 
+    def folder(self):
+        """A config folder of the case, for an updater that never installs."""
+        tmp = support.temp_dir()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name)
+
     def test_a_newer_version_on_pypi_is_seen_and_an_equal_or_older_one_is_not(self):
         # Mutation: the versions compared as strings. Red: 0.1.10 reads older than 0.1.9.
         # Mutation: a version that is not X.Y.Z parsed by its digits. Red: 0.1.6rc1 reads newer.
@@ -216,7 +222,7 @@ class UpdaterTest(unittest.TestCase):
                 self.assertEqual(self.logs, [f"the check failed: {type(failure).__name__}"])
         # An answer that is not PyPI's shape fails the same way.
         made = update.Updater("0.1.5", "notify", check=lambda: update.check(urlopen=lambda request, timeout: Answer(
-            b"[]")), clock=Waits(1), log=self.logs.append)
+            b"[]")), clock=Waits(1), log=self.logs.append, folder=self.folder())
         made.round()
         self.assertEqual(made.snapshot(), NOTHING)
 
@@ -298,7 +304,8 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(len(get.requests), 3)
         # With no clock given the wait is the close's: a copy that stops before the minute never checks.
         get = FakeGet("0.1.6")
-        made = update.Updater("0.1.5", "auto", check=lambda: update.check(urlopen=get), log=self.logs.append)
+        made = update.Updater("0.1.5", "auto", check=lambda: update.check(urlopen=get), log=self.logs.append,
+                              folder=self.folder())
         made.start()
         self.assertTrue(made.thread.daemon)
         made.close()
