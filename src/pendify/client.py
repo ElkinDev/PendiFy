@@ -8,8 +8,10 @@ the game's own loopback port is asked one number, its clock, to tell when the ma
 else of the live data is read, kept, printed or sent.
 """
 import base64
+import calendar
 import http.client
 import json
+import os
 import re
 import ssl
 import subprocess
@@ -221,3 +223,99 @@ def game_clock(base, get=get):
         return float(seconds)
     except OverflowError:  # an int no float holds
         return None
+
+
+# The game's own log, for a game that serves no clock: where it is under LOCALAPPDATA, the mark of the line it
+# writes when it joins the match, the most one call reads and the size of each read.
+GAME_LOG_PARTS = ("TFT", "Saved", "Logs", "TFT.log")
+GAME_LOG_MARK = b"LogNet: Welcomed by server"
+GAME_LOG_MAX_BYTES = 16 * 1024 * 1024
+GAME_LOG_CHUNK = 256 * 1024
+_GAME_LOG_STAMP = "%Y.%m.%d-%H.%M.%S"  # then :mmm, in UTC
+
+
+def real_game_log(environ=os.environ):
+    """The game's own log in a real run, <LOCALAPPDATA>/TFT/Saved/Logs/TFT.log; None when LOCALAPPDATA is unset or
+    blank."""
+    base = environ.get("LOCALAPPDATA")
+    if base is None or not base.strip():
+        return None
+    return os.path.join(base, *GAME_LOG_PARTS)
+
+
+def _log_stamp(line):
+    """The epoch of the stamp between a log line's first [ and the ] after it, YYYY.MM.DD-HH.MM.SS:mmm in UTC,
+    with its milliseconds; None when it does not parse."""
+    start = line.find(b"[")
+    end = line.find(b"]", start + 1) if start >= 0 else -1
+    if end < 0:
+        return None
+    try:
+        moment, millis = line[start + 1:end].decode("ascii").split(":")
+        if len(millis) != 3 or not millis.isdigit():
+            return None
+        return calendar.timegm(time.strptime(moment, _GAME_LOG_STAMP)) + int(millis) / 1000
+    except ValueError:  # not ASCII, not one colon, or not the stamp's shape; UnicodeDecodeError is a ValueError
+        return None
+
+
+def _holds_welcome(lines, since):
+    """True when one of `lines`, whole lines each ending in a line feed, is a welcome stamped at or after `since`.
+    A welcome older than `since`, or whose stamp does not parse, is skipped and the search goes on."""
+    at = lines.find(GAME_LOG_MARK)
+    while at >= 0:
+        start = lines.rfind(b"\n", 0, at) + 1
+        stamp = _log_stamp(lines[start:lines.find(b"\n", at)])
+        if stamp is not None and stamp >= since:
+            return True
+        at = lines.find(GAME_LOG_MARK, at + len(GAME_LOG_MARK))
+    return False
+
+
+class GameLogStart:
+    """Whether the game's own log shows it joined the match: a welcome line stamped at or after a time.
+
+    The log is read in binary and on from where the last call stopped: the first call from byte 0, each later one
+    from the end of the last whole line read, at most GAME_LOG_MAX_BYTES a call in GAME_LOG_CHUNK reads; a partial
+    last line is read again next time, and a file shorter than the offset, a new one, is read from its start. Only
+    the stamp of a welcome line is parsed. No line or part of one is kept, returned, logged or printed: between
+    calls the object keeps the offset and nothing of the file. Every failure answers False, never an exception.
+    `path` answers the log's path or None; `opener` opens it as open() does."""
+
+    def __init__(self, path=real_game_log, opener=open):
+        self._path, self._opener = path, opener
+        self._offset = 0
+
+    def reset(self):
+        """Forget the offset: the next call reads the file from its start."""
+        self._offset = 0
+
+    def __call__(self, since):
+        """True when the log holds a welcome stamped at or after `since`, in epoch seconds; else False."""
+        path = self._path()
+        if path is None:
+            return False
+        try:
+            with self._opener(path, "rb") as handle:
+                if handle.seek(0, os.SEEK_END) < self._offset:
+                    self._offset = 0
+                handle.seek(self._offset)
+                return self._read_on(handle, since)
+        except OSError:  # no file, a folder, a refused open or a read that broke
+            return False
+
+    def _read_on(self, handle, since):
+        budget, partial = GAME_LOG_MAX_BYTES, b""
+        while budget > 0:
+            chunk = handle.read(min(GAME_LOG_CHUNK, budget))
+            if not chunk:
+                return False
+            budget -= len(chunk)
+            partial += chunk
+            end = partial.rfind(b"\n") + 1  # the whole lines read so far end there
+            if end:
+                lines, partial = partial[:end], partial[end:]
+                self._offset += end
+                if _holds_welcome(lines, since):
+                    return True
+        return False

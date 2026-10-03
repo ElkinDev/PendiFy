@@ -7,10 +7,11 @@ and answers the pause before the next; run() is the loop around it. The script's
 check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
 InProgress after a read of another phase is the loading screen: it beeps on the PC only, once per game, and
 starts a watch that asks the game's own loopback port its clock at most once a second. The clock above zero
-is the match's true start: a beep and match_started. A game that never answers its clock is announced after
-120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client, ends the watch
-with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no port, no clock,
-no token.
+is the match's true start: a beep and match_started. A game with no clock port is read from its own log, a
+welcome line stamped no earlier than 30 s before the loading screen. A game that never answers its clock is
+announced after 120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client,
+ends the watch with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no
+port, no clock, no token.
 
 pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
 thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
@@ -42,6 +43,7 @@ STEP_PAUSE = 0.3  # S:799
 NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
+LIVE_LOG_GRACE_SECONDS = 30.0  # a welcome in the game's own log counts from this long before the loading screen
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 LOG_LINES = 50  # the events the log keeps, the newest
 
@@ -83,10 +85,12 @@ def _phase(raw):
 class Watcher:
     def __init__(self, credentials, alert, *, accept=True, addresses=client.real_addresses, get=client.get,
                  post=client.post, clock=time.monotonic, wall=time.time, sleep=None, delay=accept_delay,
-                 log=None, stop=None, live=client.real_live_address, game_clock=client.game_clock):
+                 log=None, stop=None, live=client.real_live_address, game_clock=client.game_clock, game_log=None):
         self._credentials, self._alert, self._accept = credentials, alert, accept
         self._addresses, self._get, self._post = addresses, get, post
         self._live, self._game_clock = live, game_clock
+        # The game's own log, asked on the clock's turns when the clock gives no start; a callable with reset().
+        self._game_log = game_log if game_log is not None else client.GameLogStart()
         self._clock, self._wall, self._delay = clock, wall, delay
         self._stop = stop if stop is not None else threading.Event()
         self._sleep = sleep if sleep is not None else self._stop.wait
@@ -100,6 +104,7 @@ class Watcher:
         self._last_alert = None
         self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
         self._next_live = None  # the injected clock from which the game's clock may be asked again
+        self._watch_wall = None  # the wall clock when the loading screen opened, the game's log read against it
         self._paused = threading.Event()  # set and cleared by the page's thread, read by the loop
         self._pauses = 0  # every pause counted by the page's thread, under the lock; the loop compares it
         self._honored = 0  # the count of the last pause the loop has rested for; read and written by it only
@@ -284,11 +289,14 @@ class Watcher:
         self._log(LOADING_LINE)
         self._note(LOADING)
         self._watch_since = self._next_live = self._clock()
+        self._watch_wall = self._wall()
+        self._game_log.reset()
 
     def _watch(self, phase):
         """One turn of the watch: the game's clock asked when due, its value above zero the start and any other
-        number a restart of the wait; then the wait, which fires on a step whose phase read was InProgress and ends
-        with no alert with no client."""
+        number a restart of the wait; with no start from the clock, the game's own log asked on that same turn, a
+        welcome stamped no earlier than LIVE_LOG_GRACE_SECONDS before the loading screen the start; then the wait,
+        which fires on a step whose phase read was InProgress and ends with no alert with no client."""
         if self._watch_since is None:
             return
         now = self._clock()
@@ -301,6 +309,10 @@ class Watcher:
                 return
             if seconds is not None:
                 self._watch_since = now
+            if self._game_log(self._watch_wall - LIVE_LOG_GRACE_SECONDS):
+                self._watch_since = None
+                self._fire(MATCH_STARTED, STARTED_LINE)
+                return
         if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
             if phase == IN_PROGRESS:
                 self._watch_since = None
@@ -333,11 +345,12 @@ class Watcher:
         self._set_client(WAITING)
 
     def _rest(self):
-        """The first paused turn: the client, the watch, the hold and the start latch are dropped, so the turn
-        after a resume is a fresh connection."""
+        """The first paused turn: the client, the watch, the hold and the start latch are dropped and the reader of
+        the game's log reset, so the turn after a resume is a fresh connection."""
         self._resting = True
         self._forget()
-        self._watch_since = self._next_live = None
+        self._watch_since = self._next_live = self._watch_wall = None
+        self._game_log.reset()
         self._hold_until = None
         self._start_alerted = False
         self._log(PAUSED_LINE)
