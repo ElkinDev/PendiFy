@@ -12,7 +12,9 @@ start line stamped no earlier than 30 s before the loading screen. A game that n
 announced after 120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client,
 ends the watch with no alert. While the game's log shows a join line and no start line, the game in its match and
 not started yet, those 120 s are held, up to 300 s from the loading screen. A reconnect is the same game. The
-console gets fixed lines only: no phase, no port, no clock, no token.
+console gets fixed lines only: no phase, no port, no clock, no token. Once the match has started, or was already
+under way when the client was found, a turn that reads InProgress with no watch running answers IN_GAME_PAUSE, so
+the client is asked once every five seconds, only to see the game end, and a pause from the page waits up to that.
 
 pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
 thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
@@ -41,6 +43,10 @@ GAME_BOUNDARY_PHASES = frozenset({"None", "Lobby", "Matchmaking", READY_CHECK, "
 ACCEPT_DELAY = (1.0, 2.5)  # S:136
 HOLD_SECONDS = 15.0  # S:778, S:793
 STEP_PAUSE = 0.3  # S:799
+# During a match no watch runs and the phase is read only to see a boundary end the game: one read every five
+# seconds is enough, about 300 in a 25 minute match where 0.3 s made 5,000. A pause from the page waits up to this
+# long; a stop does not, since the sleep is the stop event's wait.
+IN_GAME_PAUSE = 5.0
 NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
@@ -209,6 +215,8 @@ class Watcher:
             self._forget()
             phase = None
         self._watch(phase)
+        if phase == IN_PROGRESS and self._watch_since is None:  # the match under way: read only to see its end
+            return IN_GAME_PAUSE
         return STEP_PAUSE
 
     def snapshot(self):

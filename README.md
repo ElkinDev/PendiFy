@@ -57,7 +57,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 ### Qué envía y a quién
 
-Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pendify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego. Para saber cuándo empieza la partida lee el reloj del juego en este mismo PC, y no lo guarda ni lo envía. Si el juego no da su reloj, lee en su lugar el registro propio del juego en este mismo PC, solo la hora de dos clases de línea, y no guarda ni envía nada de él.
+Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pendify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego. Para saber cuándo empieza la partida lee el reloj del juego en este mismo PC, y no lo guarda ni lo envía. Si el juego no da su reloj, lee en su lugar el registro propio del juego en este mismo PC, solo la hora de dos clases de línea, y no guarda ni envía nada de él. Una vez empezada la partida, pregunta al cliente del juego una vez cada cinco segundos, solo para ver cuándo termina.
 
 ### `--dry`
 
@@ -136,7 +136,7 @@ License: MIT
     python -m pendify ping <kind>
 
 The first loads the config, starts the page and opens it in the default browser, paired or not.
-It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps, and when the match itself starts it beeps and sends the started alert.
+It also watches the game client on this PC: when a match is found it accepts after a short random delay, beeps, and sends the found-match alert; when the loading screen starts it beeps, and when the match itself starts it beeps and sends the started alert. Once the match has started it asks the game client once every five seconds, only to see the match end.
 Add `--dry` to watch and alert without accepting. Add `--quiet` for the start by the system at logon, the line the start with Windows switch writes (`pythonw -m pendify --quiet`): it never opens the browser, a start that ends well shows no window, and a second quiet start prints `already running` and exits. One copy runs per config folder: a second start opens the page of the one that runs and exits. Ctrl+C stops the page and the watcher together.
 The second sends one alert with the stored pair and prints one line with the answer.
 
