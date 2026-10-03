@@ -50,7 +50,10 @@ class Credentials:
 
 class FakeGameLog:
     """The game's own log as the watcher sees it: each ask answers the next of `answers`, then False. Every reset
-    and the `since` of every ask are kept in `calls`, in order. No file is read."""
+    and the `since` of every ask are kept in `calls`, in order. `joined` is the real reader's: False unless a test
+    sets it, as the reader sets it when it reads the game's join line. No file is read."""
+
+    joined = False
 
     def __init__(self, *answers):
         self.answers, self.calls = list(answers), []

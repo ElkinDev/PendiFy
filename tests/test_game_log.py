@@ -3,8 +3,8 @@
 The game writes its log live, UTF-8 with a BOM and CRLF lines. Its join line comes first and is not the start;
 the match starts when the game leaves its loading widget, and a start line holding one of two marks is written
 then. The reader answers whether the log holds a start line stamped at or after a time, reading on from where it
-stopped; between calls it keeps an offset, a bool for its join line, and nothing of the file. Every file here is written by the test, under
-build/tmp, in the log's shape with lines made up for it; no line of a real log is used.
+stopped; between calls it keeps an offset, a bool for its join line, and nothing of the file. Every file here is
+written by the test, under build/tmp, in the log's shape with lines made up for it; no line of a real log is used.
 """
 import calendar
 import inspect

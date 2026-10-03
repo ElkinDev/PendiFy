@@ -32,19 +32,6 @@ def body(value):
     return json.dumps(value).encode()
 
 
-class JoinedGameLog(FakeGameLog):
-    """FakeGameLog with the real reader's `joined`: False when built and after reset(), set by the test between steps
-    as the reader sets it when it reads a join line of the game's own log."""
-
-    def __init__(self, *answers):
-        super().__init__(*answers)
-        self.joined = False
-
-    def reset(self):
-        super().reset()
-        self.joined = False
-
-
 class TrueStartTest(WatcherFixture, unittest.TestCase):
     def arrive(self, subject):
         """Lobby, ChampSelect, then the arrival of InProgress; answers the injected clock at the arrival."""
@@ -446,7 +433,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
 
     def test_a_log_that_never_shows_a_start_line_leaves_the_120_s_wait_as_it_was(self):
         # (k) Mutation: any answer of the log taken as a start. Red: a ping on the arrival's turn.
-        log = JoinedGameLog()  # never joined: the wait as before the hold
+        log = FakeGameLog()  # never joined: the wait as before the hold
         subject = self.watcher(game_log=log)
         since = self.arrive(subject)
         for half in range(1, 240):  # a step every 0.5 s up to 119.5 s: one ask per due turn, once a second
@@ -500,7 +487,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
 
     def test_a_game_whose_log_shows_its_join_holds_the_wait_at_120_s(self):
         # (p) Mutation: the hold dropped. Red: the ping on the wait at 120 s.
-        log = JoinedGameLog()
+        log = FakeGameLog()
         subject = self.watcher(game_log=log)
         since = self.arrive(subject)
         self.step_joined(subject, log, since, range(1, 121))
@@ -511,7 +498,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
 
     def test_a_joined_game_whose_log_shows_a_start_line_at_140_s_starts_on_that_turn(self):
         # (q) Mutation: the hold placed before the ask of the log. Red: no ping at 140 s.
-        log = JoinedGameLog()
+        log = FakeGameLog()
         subject = self.watcher(game_log=log)
         since = self.arrive(subject)
         self.step_joined(subject, log, since, range(1, 140))
@@ -529,7 +516,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
     def test_a_joined_game_that_never_starts_is_announced_on_the_wait_at_300_s_from_the_loading(self):
         # (r) Mutation: the ceiling made 301 s. Red: no ping at 300 s.
         self.assertEqual(watcher.LIVE_JOINED_CEILING_SECONDS, 300.0)
-        log = JoinedGameLog()
+        log = FakeGameLog()
         subject = self.watcher(game_log=log)
         since = self.arrive(subject)
         self.step_joined(subject, log, since, range(1, 300))
@@ -543,7 +530,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
 
     def test_a_clock_of_zero_in_the_hold_restarts_the_wait_and_the_ceiling_stays_300_s_from_the_loading(self):
         # (s) Mutation: the ceiling counted from the last restart of the wait. Red: no ping at 300 s.
-        log = JoinedGameLog()
+        log = FakeGameLog()
         subject = self.watcher(game_log=log)
         since = self.arrive(subject)
         self.step_joined(subject, log, since, range(1, 130))
@@ -557,6 +544,51 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assertEqual((len(self.beeps), self.pings), (2, [STARTED_PING]))
         self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)),
                          (1, 0))
+
+    def joined_then_lost(self, subject, log, credentials, since, until):
+        """The log shows the join from second 9 (step_joined), the client answers InProgress up to 59 s and is lost
+        at 60 s: the credentials read None from then on. A step once a second after it, up to `until`, excluded."""
+        self.step_joined(subject, log, since, range(1, 60))
+        credentials.port, self.fake.dropping = None, True
+        for second in range(60, until):
+            self.step_at(subject, since + second)
+
+    def test_a_joined_game_whose_client_is_lost_holds_with_no_alert_and_its_watch_ends_silently_at_300_s(self):
+        # (t1) Mutation: the hold applied only under phase == IN_PROGRESS. Red: the watch over at 120 s, no ask after.
+        credentials, log = Credentials(self.fake.port), FakeGameLog()
+        subject = self.watcher(credentials=credentials, game_log=log)
+        since = self.arrive(subject)
+        self.joined_then_lost(subject, log, credentials, since, 120)
+        self.assertEqual(self.lines.count(watcher.LOST_LINE), 1)
+        asks = len(log.asks)
+        for second in range(120, 300):  # the hold: the log still asked on every due turn, once a second
+            self.step_at(subject, since + second)
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks)), (1, [], asks + 180))
+        self.step_at(subject, since + 300.0)  # the ceiling with no client: the watch over, no alert
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks)), (1, [], asks + 181))
+        log.answers.append(True)  # a start line the reader would answer: never asked again
+        for second in range(301, 400, 3):
+            self.step_at(subject, since + second)
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks)), (1, [], asks + 181))
+        self.assertEqual((self.lines.count(watcher.STARTED_LINE), self.lines.count(watcher.STARTED_ON_WAIT_LINE)),
+                         (0, 0))
+
+    def test_a_joined_game_whose_client_is_lost_starts_on_the_log_s_start_line_at_200_s(self):
+        # (t2) Mutation: the hold applied only under phase == IN_PROGRESS. Red: the watch over at 120 s, no ping.
+        credentials, log = Credentials(self.fake.port), FakeGameLog()
+        subject = self.watcher(credentials=credentials, game_log=log)
+        since = self.arrive(subject)
+        self.joined_then_lost(subject, log, credentials, since, 200)
+        self.assertEqual((len(self.beeps), self.pings), (1, []))
+        log.answers.append(True)  # the ask at 200 s finds a start line
+        self.step_at(subject, since + 200.0)
+        self.assertEqual((len(self.beeps), self.pings), (2, [STARTED_PING]))
+        self.assertEqual((self.lines.count(watcher.STARTED_LINE), self.lines.count(watcher.STARTED_ON_WAIT_LINE)),
+                         (1, 0))
+        asks = len(log.asks)
+        for second in range(201, 400, 3):  # past the ceiling at 300 s: nothing more for that game
+            self.step_at(subject, since + second)
+        self.assertEqual((len(self.beeps), len(self.pings), len(log.asks)), (2, 1, asks))
 
 
 class AlerterSoundTest(WatcherFixture, unittest.TestCase):
