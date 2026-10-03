@@ -3,7 +3,7 @@
 The game writes its log live, UTF-8 with a BOM and CRLF lines. Its join line comes first and is not the start;
 the match starts when the game leaves its loading widget, and a start line holding one of two marks is written
 then. The reader answers whether the log holds a start line stamped at or after a time, reading on from where it
-stopped; between calls it keeps an offset and nothing of the file. Every file here is written by the test, under
+stopped; between calls it keeps an offset, a bool for its join line, and nothing of the file. Every file here is written by the test, under
 build/tmp, in the log's shape with lines made up for it; no line of a real log is used.
 """
 import calendar
@@ -203,17 +203,19 @@ class GameLogStartTest(unittest.TestCase):
         self.assertIs(subject(SINCE), True)
 
     def test_after_a_true_the_reader_keeps_its_offset_and_nothing_of_the_file(self):
-        # (g) Mutation: the last chunk kept on the object. Red: bytes of the file in vars().
-        self.write(BOM, others(START - 1, 2), start(START, 1), others(START + 1))
+        # (g) Mutation: the last chunk kept on the object. Red: bytes of the file in vars(). Mutation: the join kept as
+        # its line, not as a bool. Red: text of the file in vars(), or no bool.
+        self.write(BOM, others(START - 1, 2), join(START - 0.5), start(START, 1), others(START + 1))
         subject = self.reader()
         self.assertIs(subject(SINCE), True)
         kept = vars(subject)
         for name, value in kept.items():
             self.assertNotIsInstance(value, (bytes, bytearray, memoryview, str, list, tuple, dict, set), name)
-        for text in ("Fixture", "Setting", "Loaded"):
+        for text in ("Fixture", "Setting", "Loaded", "Welcomed"):
             self.assertNotIn(text, repr(kept))
         self.assertEqual(sorted(type(value).__name__ for value in kept.values()),
-                         ["CountingOpener", "function", "int"])
+                         ["CountingOpener", "bool", "function", "int"])
+        self.assertIs(kept.get("joined"), True)
 
     def test_a_join_line_with_no_start_line_after_it_answers_false_until_a_start_line_is_appended(self):
         # (n) Mutation: the join line taken as a mark. Red: the join alone answers True.
@@ -223,6 +225,30 @@ class GameLogStartTest(unittest.TestCase):
         self.assertIs(subject(SINCE), False)
         self.append(start(START, 1), others(START + 1))
         self.assertIs(subject(SINCE), True)
+
+    def test_a_join_line_stamped_at_or_after_since_sets_joined_while_the_call_answers_false(self):
+        # (o) Mutation: a join older than since taken. Red: joined True on the join 20 s before the since.
+        # Mutation: reset() leaving the bool. Red: joined True after the reset.
+        self.write(BOM, others(START - 40, 2), join(START - 20), others(START - 10, 3))
+        subject = self.reader()
+        self.assertIs(subject(SINCE), False)
+        self.assertIs(getattr(subject, "joined", None), True)
+        self.assertIs(subject(SINCE), False)  # nothing new read; the bool is kept between calls
+        self.assertIs(getattr(subject, "joined", None), True)
+        subject.reset()
+        self.assertIs(getattr(subject, "joined", None), False)
+        self.assertIs(subject(START - 20), False)  # at the join's stamp itself
+        self.assertIs(getattr(subject, "joined", None), True)
+        older = self.reader()
+        self.assertIs(getattr(older, "joined", None), False)  # False when built
+        self.assertIs(older(START - 19.999), False)
+        self.assertIs(getattr(older, "joined", None), False)
+        self.write(BOM, b"[not a stamp][  7]" + JOIN_TEXT.encode("ascii") + b"\r\n", others(START, 2))
+        broken = self.reader()
+        self.assertIs(broken(SINCE), False)
+        self.assertIs(getattr(broken, "joined", None), False)
+        self.assertEqual(client.GAME_LOG_JOIN, b"LogNet: Welcomed by server")
+        self.assertIn(client.GAME_LOG_JOIN, JOIN_TEXT.encode("ascii"))
 
 
 if __name__ == "__main__":
