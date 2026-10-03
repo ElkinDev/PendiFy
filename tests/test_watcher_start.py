@@ -3,7 +3,7 @@
 The arrival of InProgress after a read of another phase is the loading screen: a beep on the PC only and the
 last alert "loading". From there the watcher asks the game's port one thing, its clock, at most once a
 second, until the clock is above zero (match_started, a beep and a ping) or 120 s pass with InProgress read
-(the same alert, on the wait). A game that serves no clock is read from its own log on the same turns, a welcome
+(the same alert, on the wait). A game that serves no clock is read from its own log on the same turns, a start line
 stamped no earlier than 30 s before the loading screen the start. The game's port is a fake on 127.0.0.1 over
 plain http, the game's log a fake reader, the clock is the injected one and nothing sleeps. AlerterSoundTest: the
 loading screen's sound is a beep and nothing else.
@@ -384,7 +384,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         built = watcher.Watcher(Credentials(self.fake.port), self.alerter())
         self.assertIs(type(built._game_log), client.GameLogStart)  # None builds the reader of the game's own log
 
-    def test_a_game_with_no_clock_whose_log_shows_the_welcome_starts_on_that_turn_not_on_the_wait(self):
+    def test_a_game_with_no_clock_whose_log_shows_a_start_line_starts_on_that_turn_not_on_the_wait(self):
         # (h) Mutation: the log not asked. Red: the alert at 120 s, on the wait.
         log = FakeGameLog(False, False, True)
         subject = self.watcher(game_log=log)
@@ -430,7 +430,7 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
         self.assertEqual((self.lines.count(watcher.STARTED_LINE), self.lines.count(watcher.STARTED_ON_WAIT_LINE)),
                          (1, 0))
 
-    def test_a_log_that_never_shows_the_welcome_leaves_the_120_s_wait_as_it_was(self):
+    def test_a_log_that_never_shows_a_start_line_leaves_the_120_s_wait_as_it_was(self):
         # (k) Mutation: any answer of the log taken as a start. Red: a ping on the arrival's turn.
         log = FakeGameLog()
         subject = self.watcher(game_log=log)
