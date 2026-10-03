@@ -8,7 +8,7 @@ check (S:778, S:793) is a hold on the injected clock, so a stop never waits for 
 InProgress after a read of another phase is the loading screen: it beeps on the PC only, once per game, and
 starts a watch that asks the game's own loopback port its clock at most once a second. The clock above zero
 is the match's true start: a beep and match_started. A game with no clock port is read from its own log, a
-welcome line stamped no earlier than 30 s before the loading screen. A game that never answers its clock is
+start line stamped no earlier than 30 s before the loading screen. A game that never answers its clock is
 announced after 120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client,
 ends the watch with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no
 port, no clock, no token.
@@ -43,7 +43,7 @@ STEP_PAUSE = 0.3  # S:799
 NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
-LIVE_LOG_GRACE_SECONDS = 30.0  # a welcome in the game's own log counts from this long before the loading screen
+LIVE_LOG_GRACE_SECONDS = 30.0  # a start line in the game's log counts from this long before the loading screen
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 LOG_LINES = 50  # the events the log keeps, the newest
 
@@ -295,7 +295,7 @@ class Watcher:
     def _watch(self, phase):
         """One turn of the watch: the game's clock asked when due, its value above zero the start and any other
         number a restart of the wait; with no start from the clock, the game's own log asked on that same turn, a
-        welcome stamped no earlier than LIVE_LOG_GRACE_SECONDS before the loading screen the start; then the wait,
+        start line stamped no earlier than LIVE_LOG_GRACE_SECONDS before the loading screen the start; then the wait,
         which fires on a step whose phase read was InProgress and ends with no alert with no client."""
         if self._watch_since is None:
             return

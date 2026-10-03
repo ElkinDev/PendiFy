@@ -225,10 +225,12 @@ def game_clock(base, get=get):
         return None
 
 
-# The game's own log, for a game that serves no clock: where it is under LOCALAPPDATA, the mark of the line it
-# writes when it joins the match, the most one call reads and the size of each read.
+# The game's own log, for a game that serves no clock: where it is under LOCALAPPDATA, the two marks of the lines
+# it writes when the match starts (as it leaves its loading widget; its join line comes earlier and is not the
+# start), the most one call reads and the size of each read.
 GAME_LOG_PARTS = ("TFT", "Saved", "Logs", "TFT.log")
-GAME_LOG_MARK = b"LogNet: Welcomed by server"
+GAME_LOG_MARKS = (b"UTFTMusicPlayerSubsystem::LoadMusicData - Loaded music",
+                  b"TFTEncounterSubsystem: Setting SetZoomOutExtension")
 GAME_LOG_MAX_BYTES = 16 * 1024 * 1024
 GAME_LOG_CHUNK = 256 * 1024
 _GAME_LOG_STAMP = "%Y.%m.%d-%H.%M.%S"  # then :mmm, in UTC
@@ -259,28 +261,31 @@ def _log_stamp(line):
         return None
 
 
-def _holds_welcome(lines, since):
-    """True when one of `lines`, whole lines each ending in a line feed, is a welcome stamped at or after `since`.
-    A welcome older than `since`, or whose stamp does not parse, is skipped and the search goes on."""
-    at = lines.find(GAME_LOG_MARK)
-    while at >= 0:
-        start = lines.rfind(b"\n", 0, at) + 1
-        stamp = _log_stamp(lines[start:lines.find(b"\n", at)])
-        if stamp is not None and stamp >= since:
-            return True
-        at = lines.find(GAME_LOG_MARK, at + len(GAME_LOG_MARK))
+def _holds_start(lines, since):
+    """True when one of `lines`, whole lines each ending in a line feed, is a start line, one holding either mark
+    of GAME_LOG_MARKS, stamped at or after `since`. A start line older than `since`, or whose stamp does not
+    parse, is skipped and the search goes on."""
+    for mark in GAME_LOG_MARKS:
+        at = lines.find(mark)
+        while at >= 0:
+            start = lines.rfind(b"\n", 0, at) + 1
+            stamp = _log_stamp(lines[start:lines.find(b"\n", at)])
+            if stamp is not None and stamp >= since:
+                return True
+            at = lines.find(mark, at + len(mark))
     return False
 
 
 class GameLogStart:
-    """Whether the game's own log shows it joined the match: a welcome line stamped at or after a time.
+    """Whether the game's own log shows the match started: a start line stamped at or after a time.
 
     The log is read in binary and on from where the last call stopped: the first call from byte 0, each later one
     from the end of the last whole line read, at most GAME_LOG_MAX_BYTES a call in GAME_LOG_CHUNK reads; a partial
     last line is read again next time, and a file shorter than the offset, a new one, is read from its start. Only
-    the stamp of a welcome line is parsed. No line or part of one is kept, returned, logged or printed: between
-    calls the object keeps the offset and nothing of the file. Every failure answers False, never an exception.
-    `path` answers the log's path or None; `opener` opens it as open() does."""
+    the stamp of a start line is parsed; the join line, written before the start, is no start line. No line or
+    part of one is kept, returned, logged or printed: between calls the object keeps the offset and nothing of the
+    file. Every failure answers False, never an exception. `path` answers the log's path or None; `opener` opens it
+    as open() does."""
 
     def __init__(self, path=real_game_log, opener=open):
         self._path, self._opener = path, opener
@@ -291,7 +296,7 @@ class GameLogStart:
         self._offset = 0
 
     def __call__(self, since):
-        """True when the log holds a welcome stamped at or after `since`, in epoch seconds; else False."""
+        """True when the log holds a start line stamped at or after `since`, in epoch seconds; else False."""
         path = self._path()
         if path is None:
             return False
@@ -316,6 +321,6 @@ class GameLogStart:
             if end:
                 lines, partial = partial[:end], partial[end:]
                 self._offset += end
-                if _holds_welcome(lines, since):
+                if _holds_start(lines, since):
                     return True
         return False
