@@ -5,7 +5,8 @@ the client process's command line through PowerShell takes the place of the scri
 most once every 10 s. Every failure is no client, never an exception. Nothing here prints, logs or raises
 the client's token, and Credentials hides it from repr. The client's phase says the loading screen opened;
 the game's own loopback port is asked one number, its clock, to tell when the match itself starts. Nothing
-else of the live data is read, kept, printed or sent.
+else of the live data is read, kept, printed or sent. A game that serves no clock is read from its own log on this
+PC instead: only the stamps of its join and start lines are parsed, and nothing of the log is kept.
 """
 import base64
 import calendar
@@ -226,11 +227,12 @@ def game_clock(base, get=get):
 
 
 # The game's own log, for a game that serves no clock: where it is under LOCALAPPDATA, the two marks of the lines
-# it writes when the match starts (as it leaves its loading widget; its join line comes earlier and is not the
-# start), the most one call reads and the size of each read.
+# it writes when the match starts (as it leaves its loading widget), the mark of its join line (written when the
+# game joins its match, earlier, and no start), the most one call reads and the size of each read.
 GAME_LOG_PARTS = ("TFT", "Saved", "Logs", "TFT.log")
 GAME_LOG_MARKS = (b"UTFTMusicPlayerSubsystem::LoadMusicData - Loaded music",
                   b"TFTEncounterSubsystem: Setting SetZoomOutExtension")
+GAME_LOG_JOIN = b"LogNet: Welcomed by server"
 GAME_LOG_MAX_BYTES = 16 * 1024 * 1024
 GAME_LOG_CHUNK = 256 * 1024
 _GAME_LOG_STAMP = "%Y.%m.%d-%H.%M.%S"  # then :mmm, in UTC
@@ -261,11 +263,11 @@ def _log_stamp(line):
         return None
 
 
-def _holds_start(lines, since):
-    """True when one of `lines`, whole lines each ending in a line feed, is a start line, one holding either mark
-    of GAME_LOG_MARKS, stamped at or after `since`. A start line older than `since`, or whose stamp does not
-    parse, is skipped and the search goes on."""
-    for mark in GAME_LOG_MARKS:
+def _holds(lines, marks, since):
+    """True when one of `lines`, whole lines each ending in a line feed, holds one of `marks` and is stamped at or
+    after `since`: a start line with GAME_LOG_MARKS, a join line with (GAME_LOG_JOIN,). A line older than `since`,
+    or whose stamp does not parse, is skipped and the search goes on."""
+    for mark in marks:
         at = lines.find(mark)
         while at >= 0:
             start = lines.rfind(b"\n", 0, at) + 1
@@ -282,18 +284,21 @@ class GameLogStart:
     The log is read in binary and on from where the last call stopped: the first call from byte 0, each later one
     from the end of the last whole line read, at most GAME_LOG_MAX_BYTES a call in GAME_LOG_CHUNK reads; a partial
     last line is read again next time, and a file shorter than the offset, a new one, is read from its start. Only
-    the stamp of a start line is parsed; the join line, written before the start, is no start line. No line or
-    part of one is kept, returned, logged or printed: between calls the object keeps the offset and nothing of the
-    file. Every failure answers False, never an exception. `path` answers the log's path or None; `opener` opens it
-    as open() does."""
+    the stamps of start lines and join lines are parsed; the join line, written before the start, is no start line,
+    but one stamped at or after `since` sets `joined`, the game in its match and not started yet, False again only
+    when built and after reset(). No line or part of one is kept, returned, logged or printed: between calls the
+    object keeps the offset and that bool and nothing of the file. Every failure answers False, never an exception.
+    `path` answers the log's path or None; `opener` opens it as open() does."""
 
     def __init__(self, path=real_game_log, opener=open):
         self._path, self._opener = path, opener
         self._offset = 0
+        self.joined = False
 
     def reset(self):
-        """Forget the offset: the next call reads the file from its start."""
+        """Forget the offset and the join: the next call reads the file from its start."""
         self._offset = 0
+        self.joined = False
 
     def __call__(self, since):
         """True when the log holds a start line stamped at or after `since`, in epoch seconds; else False."""
@@ -321,6 +326,8 @@ class GameLogStart:
             if end:
                 lines, partial = partial[:end], partial[end:]
                 self._offset += end
-                if _holds_start(lines, since):
+                if not self.joined and _holds(lines, (GAME_LOG_JOIN,), since):
+                    self.joined = True
+                if _holds(lines, GAME_LOG_MARKS, since):
                     return True
         return False

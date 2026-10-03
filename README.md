@@ -57,7 +57,7 @@ El botón de arriba a la derecha cambia entre el tema claro y el oscuro, y el pr
 
 ### Qué envía y a quién
 
-Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pendify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego. Para saber cuándo empieza la partida lee el reloj del juego en este mismo PC, y no lo guarda ni lo envía.
+Solo envía, al servicio de enlace de Pendi, el tipo de aviso (partida encontrada o partida empezada) junto con el identificador del enlace y el secreto de este PC, que viven en `%APPDATA%\pendify\config.json`. El servicio lo entrega a la cuenta que enlazaste. No envía tu nombre, tus partidas ni nada más del juego. Para saber cuándo empieza la partida lee el reloj del juego en este mismo PC, y no lo guarda ni lo envía. Si el juego no da su reloj, lee en su lugar el registro propio del juego en este mismo PC, solo la hora de dos clases de línea, y no guarda ni envía nada de él.
 
 ### `--dry`
 
@@ -122,7 +122,7 @@ The button at the top right switches between the light and the dark theme, and t
 
 ### What it sends and to whom
 
-It only sends, to Pendi's link service, the alert kind (match found or match started) together with the link id and this PC's secret, which live in `%APPDATA%\pendify\config.json`. The service delivers it to the account you linked. It sends no name, no match history and nothing else from the game. To tell when the match starts it reads the game's clock on this same PC, and neither keeps nor sends it.
+It only sends, to Pendi's link service, the alert kind (match found or match started) together with the link id and this PC's secret, which live in `%APPDATA%\pendify\config.json`. The service delivers it to the account you linked. It sends no name, no match history and nothing else from the game. To tell when the match starts it reads the game's clock on this same PC, and neither keeps nor sends it. When the game gives no clock, it reads the game's own log on this same PC instead, only the time stamps of two kinds of line, and neither keeps nor sends any of it.
 
 ### `--dry`
 

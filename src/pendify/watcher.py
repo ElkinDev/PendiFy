@@ -10,8 +10,9 @@ starts a watch that asks the game's own loopback port its clock at most once a s
 is the match's true start: a beep and match_started. A game with no clock port is read from its own log, a
 start line stamped no earlier than 30 s before the loading screen. A game that never answers its clock is
 announced after 120 s of the watch with InProgress read; a read of a boundary phase, or 120 s with no client,
-ends the watch with no alert. A reconnect is the same game. The console gets fixed lines only: no phase, no
-port, no clock, no token.
+ends the watch with no alert. While the game's log shows a join line and no start line, the game in its match and
+not started yet, those 120 s are held, up to 300 s from the loading screen. A reconnect is the same game. The
+console gets fixed lines only: no phase, no port, no clock, no token.
 
 pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
 thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
@@ -44,6 +45,7 @@ NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
 LIVE_LOG_GRACE_SECONDS = 30.0  # a start line in the game's log counts from this long before the loading screen
+LIVE_JOINED_CEILING_SECONDS = 300.0  # a game whose log shows its join holds the wait up to this long from the loading
 QUEUE_FOUND, MATCH_STARTED = worker.KINDS
 LOG_LINES = 50  # the events the log keeps, the newest
 
@@ -105,6 +107,7 @@ class Watcher:
         self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
         self._next_live = None  # the injected clock from which the game's clock may be asked again
         self._watch_wall = None  # the wall clock when the loading screen opened, the game's log read against it
+        self._watch_began = None  # the injected clock when the loading screen opened, never moved by a clock restart
         self._paused = threading.Event()  # set and cleared by the page's thread, read by the loop
         self._pauses = 0  # every pause counted by the page's thread, under the lock; the loop compares it
         self._honored = 0  # the count of the last pause the loop has rested for; read and written by it only
@@ -288,7 +291,7 @@ class Watcher:
             self._last_alert = (LOADING, self._wall())
         self._log(LOADING_LINE)
         self._note(LOADING)
-        self._watch_since = self._next_live = self._clock()
+        self._watch_since = self._next_live = self._watch_began = self._clock()
         self._watch_wall = self._wall()
         self._game_log.reset()
 
@@ -296,7 +299,8 @@ class Watcher:
         """One turn of the watch: the game's clock asked when due, its value above zero the start and any other
         number a restart of the wait; with no start from the clock, the game's own log asked on that same turn, a
         start line stamped no earlier than LIVE_LOG_GRACE_SECONDS before the loading screen the start; then the wait,
-        which fires on a step whose phase read was InProgress and ends with no alert with no client."""
+        which fires on a step whose phase read was InProgress and ends with no alert with no client, held while the
+        game's log shows its join and no start, up to LIVE_JOINED_CEILING_SECONDS from the loading screen."""
         if self._watch_since is None:
             return
         now = self._clock()
@@ -314,6 +318,8 @@ class Watcher:
                 self._fire(MATCH_STARTED, STARTED_LINE)
                 return
         if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
+            if self._game_log.joined and now < self._watch_began + LIVE_JOINED_CEILING_SECONDS:
+                return  # joined and not started yet: the watch goes on, the log still asked on each due turn
             if phase == IN_PROGRESS:
                 self._watch_since = None
                 self._fire(MATCH_STARTED, STARTED_ON_WAIT_LINE)
@@ -349,7 +355,7 @@ class Watcher:
         the game's log reset, so the turn after a resume is a fresh connection."""
         self._resting = True
         self._forget()
-        self._watch_since = self._next_live = self._watch_wall = None
+        self._watch_since = self._next_live = self._watch_wall = self._watch_began = None
         self._game_log.reset()
         self._hold_until = None
         self._start_alerted = False
