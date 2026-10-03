@@ -10,11 +10,13 @@ import ast
 import base64
 import contextlib
 import io
+import os
 import re
 import ssl
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import support
 from support import LINK_ID, SECRET, FakeClock, error
@@ -46,6 +48,25 @@ class Credentials:
         return None if self.port is None else client.Credentials(self.port, TOKEN)
 
 
+class FakeGameLog:
+    """The game's own log as the watcher sees it: each ask answers the next of `answers`, then False. Every reset
+    and the `since` of every ask are kept in `calls`, in order. No file is read."""
+
+    def __init__(self, *answers):
+        self.answers, self.calls = list(answers), []
+
+    def reset(self):
+        self.calls.append("reset")
+
+    def __call__(self, since):
+        self.calls.append(since)
+        return self.answers.pop(0) if self.answers else False
+
+    @property
+    def asks(self):
+        return [call for call in self.calls if call != "reset"]
+
+
 class WatcherFixture:
     """The fakes and helpers of the watcher's tests: the client, the game's port (closed until a test sets its
     answer), the injected clock, the alerter that records beeps and pings, and the console lines."""
@@ -53,6 +74,11 @@ class WatcherFixture:
     def setUp(self):
         tmp = support.temp_dir()
         self.addCleanup(tmp.cleanup)
+        # A watcher built with no game_log reads the game's log under LOCALAPPDATA: here this test's own folder,
+        # where no game writes one, never the PC's.
+        local = mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp.name})
+        local.start()
+        self.addCleanup(local.stop)
         self.store = config.ConfigStore(Path(tmp.name))
         self.store.set_typed(LINK_ID, SECRET)
         self.clock = FakeClock()
@@ -85,7 +111,8 @@ class WatcherFixture:
         kwargs.setdefault("live", lambda: self.game.base)  # the game's port is a fake on 127.0.0.1, never 2999
         return watcher.Watcher(credentials or Credentials(self.fake.port), alerter or self.alerter(), accept=accept,
                                addresses=lambda port: f"http://127.0.0.1:{port}", clock=self.clock,
-                               wall=lambda: WALL, sleep=kwargs.pop("sleep", self.sleep), delay=lambda: delay,
+                               wall=kwargs.pop("wall", lambda: WALL), sleep=kwargs.pop("sleep", self.sleep),
+                               delay=lambda: delay,
                                log=self.lines.append, **kwargs)
 
     def steps_until(self, subject, deadline, every=0.3):

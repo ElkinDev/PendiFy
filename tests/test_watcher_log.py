@@ -11,7 +11,7 @@ import types
 import unittest
 
 import support
-from test_watcher import PING_WALL, TOKEN, WALL, WatcherFixture
+from test_watcher import PING_WALL, TOKEN, WALL, FakeGameLog, WatcherFixture
 
 alert = support.module("alert")
 client = support.module("client")
@@ -78,12 +78,13 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
             self.subject.resume()
         self.world.update(turn)
 
-    def make(self, alerter=None):
+    def make(self, alerter=None, **kwargs):
         return watcher.Watcher(types.SimpleNamespace(read=self.read_client), alerter or self.alerter(),
                                addresses=lambda port: "http://client", get=self.get,
                                post=lambda url, token, timeout: 204, clock=self.clock, wall=self.wall,
                                sleep=self.turn_sleep, delay=lambda: self.world.get("delay", 0), log=self.lines.append,
-                               live=lambda: "http://game", game_clock=lambda address: self.world["clock"])
+                               live=lambda: "http://game", game_clock=lambda address: self.world["clock"],
+                               **kwargs)
 
     def logged(self, *turns):
         """run() over `turns`: the first is the world of turn 0, each next one is entered at the sleep after a turn;
@@ -245,6 +246,22 @@ class WatcherLogTest(WatcherFixture, unittest.TestCase):
         subject._fire(QUEUE_FOUND)
         self.assertEqual(subject.events(), [(1, at(0), "match_started", None)])
         self.assertEqual((self.pings, self.lines), ([watcher.MATCH_STARTED, QUEUE_FOUND], []))
+
+    def test_a_start_read_from_the_game_s_log_notes_match_started_once_as_the_clock_s_start_does(self):
+        # Mutation: the log's start fired with no note. Red: no match_started in the log.
+        log = FakeGameLog(False, True)
+        self.turns = [{"client": True, "phase": "ChampSelect"}, {"phase": "InProgress"},
+                      *[{"advance": watcher.LIVE_POLL_SECONDS}] * 3]
+        self.subject = self.make(game_log=log)
+        self.enter(self.turns[0])
+        self.subject.run()
+        self.assertEqual(self.subject.events(), self.numbered(
+            (at(0), "started", None), (at(0), "connected", None), (at(0), "phase", "ChampSelect"),
+            (at(1), "phase", "InProgress"), (at(1), "loading", None), (at(2), "match_started", None),
+            (PING_WALL, "ping", "sent")))
+        self.assertEqual(self.lines,
+                         [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.STARTED_LINE, SENT_LINE])
+        self.assertEqual(log.asks, [at(1) - watcher.LIVE_LOG_GRACE_SECONDS] * 2)
 
     def test_a_watcher_whose_alert_cannot_listen_keeps_its_events_with_no_ping(self):
         # The tests' fakes have no listen: the watcher is built and runs as before, its pings not kept.

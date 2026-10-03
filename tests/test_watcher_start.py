@@ -3,18 +3,22 @@
 The arrival of InProgress after a read of another phase is the loading screen: a beep on the PC only and the
 last alert "loading". From there the watcher asks the game's port one thing, its clock, at most once a
 second, until the clock is above zero (match_started, a beep and a ping) or 120 s pass with InProgress read
-(the same alert, on the wait). The game's port is a fake on 127.0.0.1 over plain http, the clock is the
-injected one and nothing sleeps. AlerterSoundTest: the loading screen's sound is a beep and nothing else.
+(the same alert, on the wait). A game that serves no clock is read from its own log on the same turns, a welcome
+stamped no earlier than 30 s before the loading screen the start. The game's port is a fake on 127.0.0.1 over
+plain http, the game's log a fake reader, the clock is the injected one and nothing sleeps. AlerterSoundTest: the
+loading screen's sound is a beep and nothing else.
 """
 import contextlib
 import inspect
 import io
 import json
+import threading
 import unittest
 
 import support
 from support import LINK_ID, SECRET
-from test_watcher import GAME_WORDS, MATCH_STARTED, QUEUE_FOUND, TOKEN, Credentials, WatcherFixture
+from test_watcher import (GAME_WORDS, MATCH_STARTED, QUEUE_FOUND, TOKEN, WALL, Credentials, FakeGameLog,
+                          WatcherFixture)
 
 client = support.module("client")
 watcher = support.module("watcher")
@@ -372,6 +376,105 @@ class TrueStartTest(WatcherFixture, unittest.TestCase):
                 self.assertNotIn(value, text)
         for line in self.lines:
             self.assertIsNone(GAME_WORDS.search(line), line)
+
+    def test_the_names_and_values_of_the_start_read_from_the_game_s_log(self):
+        # Mutation: the grace made 60 s, or a watcher built with no reader. Red: the values differ.
+        self.assertEqual(watcher.LIVE_LOG_GRACE_SECONDS, 30.0)
+        self.assertIsNone(inspect.signature(watcher.Watcher).parameters["game_log"].default)
+        built = watcher.Watcher(Credentials(self.fake.port), self.alerter())
+        self.assertIs(type(built._game_log), client.GameLogStart)  # None builds the reader of the game's own log
+
+    def test_a_game_with_no_clock_whose_log_shows_the_welcome_starts_on_that_turn_not_on_the_wait(self):
+        # (h) Mutation: the log not asked. Red: the alert at 120 s, on the wait.
+        log = FakeGameLog(False, False, True)
+        subject = self.watcher(game_log=log)
+        since = self.arrive(subject)  # the first due turn
+        fired = []
+        for second in range(1, 131):
+            self.step_at(subject, since + second)
+            if self.pings and not fired:
+                fired.append(second)
+        self.assertEqual(fired, [2])  # the third due turn: the arrival's, then 1 s and 2 s after it
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks), self.game.count()), (2, [STARTED_PING], 3, 3))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+        self.assertEqual(self.lines, [watcher.CONNECTED_LINE, watcher.LOADING_LINE, watcher.STARTED_LINE,
+                                      "alert: sent to the phone"])
+
+    def test_the_log_is_asked_from_the_wall_time_of_the_loading_less_30_s_on_every_due_turn(self):
+        # (i) Mutation: the wall read at each ask, or the grace added. Red: the since moves, or is 60 s later.
+        log = FakeGameLog()
+        subject = self.watcher(game_log=log, wall=lambda: WALL + self.clock())
+        since = self.arrive(subject)
+        for second in (1, 2, 3):
+            self.step_at(subject, since + second)
+        self.assertEqual(log.calls, ["reset", *[WALL + since - 30.0] * 4])
+
+    def test_a_clock_above_zero_starts_the_match_first_and_the_log_is_not_asked_on_that_turn(self):
+        # (j) Mutation: the log asked before the clock. Red: an ask on the clock's turn.
+        log = FakeGameLog(True, True)
+        self.game.clock(CLOCK)
+        subject = self.watcher(game_log=log)
+        self.arrive(subject)
+        self.assertEqual((len(self.beeps), self.pings, log.calls), (2, [STARTED_PING], ["reset"]))
+        self.assertEqual(self.lines.count(watcher.STARTED_LINE), 1)
+
+    def test_a_clock_at_or_below_zero_restarts_the_wait_and_the_log_is_still_asked_on_that_turn(self):
+        # (j) Mutation: the log asked only when the clock gave no number. Red: no ask on a clock of zero.
+        log = FakeGameLog(False, True)
+        self.game.clock(0)
+        subject = self.watcher(game_log=log)
+        since = self.arrive(subject)
+        self.assertEqual((self.pings, len(log.asks), self.game.count()), ([], 1, 1))
+        self.step_at(subject, since + 1.0)
+        self.assertEqual((self.pings, len(log.asks), self.game.count()), ([STARTED_PING], 2, 2))
+        self.assertEqual((self.lines.count(watcher.STARTED_LINE), self.lines.count(watcher.STARTED_ON_WAIT_LINE)),
+                         (1, 0))
+
+    def test_a_log_that_never_shows_the_welcome_leaves_the_120_s_wait_as_it_was(self):
+        # (k) Mutation: any answer of the log taken as a start. Red: a ping on the arrival's turn.
+        log = FakeGameLog()
+        subject = self.watcher(game_log=log)
+        since = self.arrive(subject)
+        for half in range(1, 240):  # a step every 0.5 s up to 119.5 s: one ask per due turn, once a second
+            self.step_at(subject, since + half / 2)
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks), self.game.count()), (1, [], 120, 120))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "loading"))
+        self.step_at(subject, since + 120.0)
+        self.assertEqual((len(self.beeps), self.pings, len(log.asks)), (2, [STARTED_PING], 121))
+        self.assertEqual(subject.snapshot(), self.shown("InProgress", "started", "sent"))
+        self.assertEqual((self.lines.count(watcher.STARTED_ON_WAIT_LINE), self.lines.count(watcher.STARTED_LINE)),
+                         (1, 0))
+
+    def test_a_pause_during_the_watch_resets_the_log_reader_and_asks_nothing_while_paused(self):
+        # (l) Mutation: _rest leaving the reader as it was. Red: no reset after the pause.
+        log, stop, turns = FakeGameLog(), threading.Event(), []
+
+        def sleep(seconds):
+            self.clock.advance(seconds)
+            turns.append(seconds)
+            if len(turns) == 500:  # 150 s of paused turns, past the wait
+                stop.set()
+
+        subject = self.watcher(game_log=log, sleep=sleep, stop=stop)
+        since = self.arrive(subject)
+        self.step_at(subject, since + 1.0)
+        self.assertEqual(log.calls, ["reset", WALL - 30.0, WALL - 30.0])
+        subject.pause()
+        subject.run()
+        self.assertEqual(len(turns), 500)
+        self.assertEqual(log.calls, ["reset", WALL - 30.0, WALL - 30.0, "reset"])
+        self.assertEqual((len(self.beeps), self.pings, self.game.count()), (1, [], 2))
+        self.assertIn(watcher.PAUSED_LINE, self.lines)
+
+    def test_a_second_game_s_loading_resets_the_log_reader_before_its_first_ask(self):
+        # (m) Mutation: the reset dropped from _loading. Red: the second game asks the reader where the first left it.
+        log = FakeGameLog()
+        subject = self.watcher(game_log=log)
+        since = self.arrive(subject)
+        self.step_at(subject, since + 1.0)
+        self.read(subject, "EndOfGame", "Lobby", "ChampSelect", "InProgress")
+        self.assertEqual(log.calls, ["reset", WALL - 30.0, WALL - 30.0, "reset", WALL - 30.0])
+        self.assertEqual((len(self.beeps), self.pings), (2, []))  # two loading screens, no start
 
 
 class AlerterSoundTest(WatcherFixture, unittest.TestCase):
