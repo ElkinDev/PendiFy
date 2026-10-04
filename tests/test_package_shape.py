@@ -202,7 +202,7 @@ class PackageShapeTest(unittest.TestCase):
     def test_pyproject_points_its_urls_at_the_repository_and_keeps_its_version(self):
         # Mutation: Source pointed at a fork. Red: the urls are not the repository's.
         project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-        self.assertEqual((project["name"], project["version"]), (support.PACKAGE, "0.1.9"))
+        self.assertEqual((project["name"], project["version"]), (support.PACKAGE, "0.1.10"))
         self.assertEqual(project.get("urls"), {"Homepage": REPOSITORY, "Source": REPOSITORY})
         self.assertIn("Operating System :: Microsoft :: Windows", project.get("classifiers", []))
         # The license is the SPDX expression; a License classifier beside it is refused by setuptools.
