@@ -70,6 +70,27 @@ NAME = "PendiFy"
 REPO = "https://github.com/ElkinDev/PendiFy"
 CREDIT = {"es": "Creado por", "en": "Created by"}
 CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
+# The running version (lane pfver, OR-114): the credit ends with it, after the repository link. Every page this module
+# renders reads it through page._running_version set here to VERSION (setUpModule), so the whole-page pins hold one
+# known version whatever copy, or none, the machine running the suite has installed.
+VERSION = "0.1.11"
+SEAM = mock.patch.object(page, "_running_version", return_value=VERSION)
+
+
+def setUpModule():
+    SEAM.start()
+
+
+def tearDownModule():
+    SEAM.stop()
+
+
+def credit_markup(lang, version):
+    """The top bar's credit as the page draws it: d53c066's bytes when the version is None, else the same with the
+    escaped version after the repository link, inside the same paragraph."""
+    shown = "" if version is None else f' · <span class="version">v{html.escape(version)}</span>'
+    return (f'<p class="credit">{CREDIT[lang]} <b>Niklerk</b> · {CREDIT_LINK}github.com/ElkinDev/PendiFy</a>{shown}'
+            '</p>')
 # The words of a waiting page with a watcher and a quit button, in the order the page shows them; an entry that is not
 # a key of WORDS is printed as it is, and None is the key as codes.display prints it. The card «Este PC» sits right
 # after the watcher line (brief pcctl-r2, placement A); the page given no start with Windows draws no switch in it.
@@ -77,13 +98,14 @@ CREDIT_LINK = f'<a href="{REPO}" target="_blank" rel="noopener noreferrer">'
 # lower part is one fold; the top bar names the creator and the repository before the language switch, and «Salir»
 # closes the page. The QR's mask carries the instruction (qr_press) as text, and the label is two texts, its leading
 # capitals and the rest of the same string (qr_lead, qr_rest; expect()).
-PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", NAME, "title", "intro", "state_waiting",
+PAGE_ORDER = (NAME, "credit", "Niklerk", "·", "github.com/ElkinDev/PendiFy", "·", f"v{VERSION}", NAME, "title",
+              "intro", "state_waiting",
               "watch_waiting", "this_pc", "pause", "qr_press", "code_label", None, "qr_lead", "qr_rest", "show_code",
               "check", "log_title",
               "log_help", "fold", "typed_title", "link_id_label", "secret_label", "save", "forget", "forget_sentence",
               "forget", "quit")
 # The texts of PAGE_ORDER before the language switch: the title tag and the credit.
-BEFORE_SWITCH = 5
+BEFORE_SWITCH = 7
 # The language switch's two labels, the same in both languages, sit in the header between the title tag and the
 # title row (lane pclang, owner report OR-96).
 SWITCH_LABELS = ["ES", "EN"]
@@ -1078,26 +1100,43 @@ class PairingPageTest(unittest.TestCase):
     def test_the_top_bar_names_the_creator_and_the_repository_on_every_page(self):
         # Mutation: the credit left in the foot. Red: the bar does not open with it. Mutation: the name left as
         # ElkinDev. Red: the credit differs. Mutation: the footer drawn with no quit. Red: the page with nothing to
-        # stop holds a footer. Mutation: the link without rel noopener. Red: the credit differs.
-        def credit(lang):
-            return (f'<header class="bar"><p class="credit">{CREDIT[lang]} <b>Niklerk</b> · {CREDIT_LINK}'
-                    'github.com/ElkinDev/PendiFy</a></p><form class="langsw" role="group"')
+        # stop holds a footer. Mutation: the link without rel noopener. Red: the credit differs. Mutation (lane pfver):
+        # the version left out, drawn before the link, outside the paragraph or unescaped. Red: the credit differs.
+        def credit(lang, version):
+            return f'<header class="bar">{credit_markup(lang, version)}<form class="langsw" role="group"'
 
         quits = page.PairingPage(self.state, on_quit=lambda: None)
         documents = {}
+        # None is a copy whose version cannot be read: the credit is byte-equal to d53c066's.
+        versions = (VERSION, None, "0.1.11<b>")
+
+        def render(target, name, lang, has_quit):
+            for version in versions:
+                with mock.patch.object(page, "_running_version", return_value=version):
+                    documents[(name, lang, version)] = (target.render(lang), has_quit)
+
         for lang in ("es", "en"):
-            documents[("waiting", lang)] = (self.page.render(lang), False)
-            documents[("waiting with quit", lang)] = (quits.render(lang), True)
+            render(self.page, "waiting", lang, False)
+            render(quits, "waiting with quit", lang, True)
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         for lang in ("es", "en"):
-            documents[("linked", lang)] = (self.page.render(lang), False)
+            render(self.page, "linked", lang, False)
         for _ in range(3):
             self.state.record_ping(worker.Refused())
         for lang in ("es", "en"):
-            documents[("relink", lang)] = (self.page.render(lang), False)
-        for (name, lang), (shown, has_quit) in documents.items():
-            with self.subTest(page=name, lang=lang):
-                self.assertEqual(shown.count(credit(lang)), 1)
+            render(self.page, "relink", lang, False)
+        for (name, lang, version), (shown, has_quit) in documents.items():
+            with self.subTest(page=name, lang=lang, version=version):
+                self.assertEqual(shown.count(credit(lang, version)), 1)
+                self.assertEqual(shown.count("<b>Niklerk</b>"), 1)
+                if version == VERSION:
+                    self.assertEqual(shown.count(f"v{VERSION}"), 1)
+                    self.assertIn(f'PendiFy</a> · <span class="version">v{VERSION}</span></p>', shown)
+                elif version is None:
+                    self.assertNotIn('class="version"', shown)
+                else:
+                    self.assertNotIn("0.1.11<b>", shown)
+                    self.assertEqual(shown.count('<span class="version">v0.1.11&lt;b&gt;</span>'), 1)
                 # The sponsored picture's base64 may hold the four letters by chance (bosque's does); it links nowhere.
                 self.assertEqual(without_sponsor(shown).count("http"), 1)
                 self.assertNotIn("ElkinDev", shown.replace(CREDIT_LINK, "", 1).replace(
@@ -1115,6 +1154,18 @@ class PairingPageTest(unittest.TestCase):
         self.assertIn(".bar{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.45rem;"
                       "margin:0 0 8px}", page._STYLE)
         self.assertIn(".bar .credit{margin-right:auto}", page._STYLE)
+
+    def test_the_credit_names_the_version_that_runs_never_a_fresh_read_of_the_disk(self):
+        # Mutation: the seam reads update.installed_version() at render. Red: the page names the version an update left
+        # on the disk before the restart, not the copy that runs. Mutation: the seam answers None. Red: no version.
+        SEAM.stop()
+        self.addCleanup(SEAM.start)
+        with mock.patch.object(page.update, "RUNNING_VERSION", "0.1.11"), \
+                mock.patch.object(page.update, "installed_version", return_value="0.1.12"):
+            self.assertEqual(page._running_version(), "0.1.11")
+            shown = self.page.render("en")
+        self.assertEqual(shown.count(credit_markup("en", "0.1.11")), 1)
+        self.assertNotIn("0.1.12", shown)
 
     def test_the_linked_and_the_relink_pages_show_the_sponsored_qr_and_the_waiting_page_never(self):
         # Mutation: the aside drawn whatever the state. Red: the waiting page holds it. Mutation: the note kept on
