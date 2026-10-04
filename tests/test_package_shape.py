@@ -98,6 +98,8 @@ class PackageShapeTest(unittest.TestCase):
         self.assertIn("tray.py", [path.name for path in package_files()])
         # Mutation: update.py left out of the package. Red: no update beside the modules (lane pfupd).
         self.assertIn("update.py", [path.name for path in package_files()])
+        # Mutation: sponsor_art.py left out of the package. Red: no pictures of the sponsored QR (lane pfart).
+        self.assertIn("sponsor_art.py", [path.name for path in package_files()])
         pyproject = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(pyproject["tool"]["setuptools"]["package-data"], {support.PACKAGE: ["*.ico"]})
 
@@ -283,6 +285,7 @@ class PackageShapeTest(unittest.TestCase):
         # Mutation: tray.py left out of the package. Red: the icon by the clock is not in the wheel.
         self.assertIn(support.PACKAGE + "/tray.py", names)
         self.assertIn(support.PACKAGE + "/update.py", names)
+        self.assertIn(support.PACKAGE + "/sponsor_art.py", names)
 
 
 if __name__ == "__main__":
