@@ -71,6 +71,16 @@ class SponsorArtTest(unittest.TestCase):
             with self.subTest(style=unknown), self.assertRaises(ValueError):
                 self.art.data_uri(unknown)
 
+    def test_each_picture_is_held_once_after_import(self):
+        # Mutation: the base64 table kept beside the data URIs, every picture held twice. Red: the module still
+        # has an attribute named _BASE64.
+        self.assertFalse(hasattr(self.art, "_BASE64"))
+        for style in self.art.STYLES:
+            with self.subTest(style=style):
+                uri = self.art.data_uri(style)
+                picture = base64.b64decode(uri.split(",", 1)[1], validate=True)
+                self.assertEqual(hashlib.sha256(picture).hexdigest(), self.art.SHA256[style])
+
 
 if __name__ == "__main__":
     unittest.main()

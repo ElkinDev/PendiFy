@@ -2939,6 +2939,8 @@ _BASE64 = {
 
 # The data URIs the page's <img> reads, each with its picture's media type, built once at import.
 _DATA_URIS = {style: f"data:{MEDIA[style]};base64," + text for style, text in _BASE64.items()}
+# The base64 texts live on only inside the URIs, so each picture is held once while the program runs.
+del _BASE64
 
 
 def data_uri(style):
