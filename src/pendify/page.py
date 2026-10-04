@@ -16,7 +16,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import codes, config, icon, plate_almena, qr, update
+from . import codes, config, icon, plate_almena, qr, sponsor_art, update
 
 ADDRESS = "127.0.0.1"
 MAX_FORM_BYTES = 4096
@@ -719,32 +719,18 @@ def _mask(words):
             f'{_MASK_GROUP * 3}</span>')
 
 
-def _sponsor_runs():
-    """The sponsored QR's dark modules as one path's runs, one module tall, inside the quiet zone; and the side of
-    the whole square, quiet zone included."""
-    modules = qr.encode(SPONSOR_ADDRESS.encode("ascii")).modules
-    runs = []
-    for y, row in enumerate(modules):
-        x = 0
-        while x < len(row):
-            if not row[x]:
-                x += 1
-                continue
-            start = x
-            while x < len(row) and row[x]:
-                x += 1
-            runs.append(f"M{start + qr.QUIET_ZONE} {y + qr.QUIET_ZONE}h{x - start}v1h-{x - start}z")
-    return "".join(runs), len(modules) + 2 * qr.QUIET_ZONE
+def _pick_sponsor_style():
+    """The style the sponsored QR is drawn in, picked again at every render of the linked page, one of
+    sponsor_art.STYLES at random (the standard random module: a cosmetic pick, as the mask's; owner 2026-10-03
+    20:1x). The one seam the tests replace."""
+    return random.choice(sponsor_art.STYLES)
 
 
-_SPONSOR_RUNS, _SPONSOR_SIDE = _sponsor_runs()
-
-
-def _sponsor_qr(words):
-    """The sponsored QR: square dark modules on a light field, the same in both themes. `words` are escaped."""
-    return (f'<svg class="qr2" viewBox="0 0 {_SPONSOR_SIDE} {_SPONSOR_SIDE}" role="img" '
-            f'aria-label="{words["sponsor_qr"]}" shape-rendering="crispEdges"><rect width="{_SPONSOR_SIDE}" '
-            f'height="{_SPONSOR_SIDE}" fill="#FFFFFF"/><path fill="#1E1533" d="{_SPONSOR_RUNS}"/></svg>')
+def _sponsor_qr(words, style):
+    """The sponsored QR: the flat code of SPONSOR_ADDRESS with `style`'s picture in its dots, a PNG of the app's own
+    renderer (sponsor_art.py), the same in both themes. `words` are escaped."""
+    return (f'<img class="qr2" src="{sponsor_art.data_uri(style)}" alt="{words["sponsor_qr"]}" width="264" '
+            f'height="264" data-style="{style}">')
 
 
 def language(accept_language):
@@ -1014,8 +1000,8 @@ class PairingPage:
             note = "" if snapshot["relinkOffered"] else f'<p class="note">{words["sponsor_note"]}</p>'
             link.append(f'<aside class="side"><figure class="sponsor"><figcaption class="sponsor-by">'
                         f'{words["sponsor_by"]}</figcaption><div class="arcade"><i></i><i></i><i></i><i></i>'
-                        f'{_sponsor_qr(words)}</div><p class="sponsor-cap">{words["sponsor_cap"]}</p>{_PARTY}'
-                        f"</figure>{note}</aside>")
+                        f'{_sponsor_qr(words, _pick_sponsor_style())}</div><p class="sponsor-cap">'
+                        f'{words["sponsor_cap"]}</p>{_PARTY}</figure>{note}</aside>')
         typed = [f"<h2>{words['typed_title']}</h2>",
                  _form("typed", token, f'<label>{words["link_id_label"]} <input name="linkId" maxlength="32" '
                                        f'autocomplete="off"></label><label>{words["secret_label"]} <input '
