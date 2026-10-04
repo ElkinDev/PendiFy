@@ -931,6 +931,38 @@ class PairingPageTest(unittest.TestCase):
                 card = offered[at[0]:at[1]]
                 self.assertEqual((card.count("<div"), card.endswith("</div>")), (card.count("</div>"), True))
 
+    def test_the_sponsored_style_is_picked_at_every_render_from_the_five_and_changes_only_the_picture(self):
+        # Lane pfart (OR-113, owner 2026-10-03 20:1x: «aleatorios»). Mutation: the default seam answering a fixed
+        # style. Red: fewer than five styles over the renders. Mutation: the style's picture drawn with a change of
+        # anything else in the page. Red: two renders differ once the img is removed. Mutation: the data-style of
+        # another style. Red: the picture is not the named style's.
+        art = support.module("sponsor_art")
+        self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
+        picture = re.compile(r'<img class="qr2" src="([^"]+)" alt="[^"<>]*" width="264" height="264" '
+                             r'data-style="([a-z]+)">')
+        drawn = {}
+        for _ in range(128):
+            found = picture.findall(self.page.render("es"))
+            self.assertEqual(len(found), 1)
+            uri, style = found[0]
+            self.assertIn(style, art.STYLES)
+            self.assertEqual(uri, art.data_uri(style))
+            drawn[style] = drawn.get(style, 0) + 1
+        self.assertEqual(set(drawn), set(art.STYLES))
+        with mock.patch.object(page.random, "choice", side_effect=lambda names: names[-1]) as choice:
+            self.assertEqual(page._pick_sponsor_style(), "bosque")
+        self.assertEqual(choice.call_args.args, (art.STYLES,))
+        for lang in ("es", "en"):
+            with self.subTest(lang=lang):
+                renders = []
+                for style in ("amor", "calma"):
+                    with mock.patch.object(page, "_pick_sponsor_style", return_value=style):
+                        renders.append(self.page.render(lang))
+                self.assertNotEqual(renders[0], renders[1])
+                bare = [picture.sub("", shown, count=1) for shown in renders]
+                self.assertEqual(bare[0], bare[1])
+                self.assertEqual((bare[0].count('class="qr2"'), bare[0].count("data-style")), (0, 0))
+
     def test_the_linked_page_keeps_the_pendiapp_com_qr_visible(self):
         # Mutation: the sponsored QR put under the key's data-shown or any hiding rule. Red: a rule names it, or the
         # aside carries a data-shown or a control.
@@ -941,7 +973,7 @@ class PairingPageTest(unittest.TestCase):
                 linked = self.html(accept)
                 side = re.findall(r'<aside class="side">.*?</aside>', linked, re.S)
                 self.assertEqual(len(side), 1)
-                self.assertEqual(side[0].count('<svg class="qr2"'), 1)
+                self.assertEqual(side[0].count('<img class="qr2"'), 1)
                 self.assertEqual([marker for marker in ("data-shown", "<button", "<details") if marker in side[0]], [])
                 # aria-hidden on the figures is a screen reader's, never a hiding: only the bare attribute counts.
                 self.assertIsNone(re.search(r"(?<![-\w])hidden(?=[\s>=])", side[0]))
@@ -1059,35 +1091,51 @@ class PairingPageTest(unittest.TestCase):
 
     def test_the_linked_and_the_relink_pages_show_the_sponsored_qr_and_the_waiting_page_never(self):
         # Mutation: the aside drawn whatever the state. Red: the waiting page holds it. Mutation: the note kept on
-        # the relink page. Red: its aside ends with the note.
-        def side(lang, note):
+        # the relink page. Red: its aside ends with the note. Lane pfart (OR-113): the code is one of the app's five
+        # styles, the seam's pick, as an img of its PNG; the label, the frame, the caption and the party stay.
+        # Mutation: the picture of another style drawn. Red: the style's data URI is not in the aside. Mutation: the
+        # pick made once at import or at construction. Red: the patched seam does not reach the render.
+        art = support.module("sponsor_art")
+
+        def side(lang, note, style):
             words = SPONSOR[lang]
-            return (re.escape(f'<aside class="side"><figure class="sponsor"><figcaption class="sponsor-by">{words["by"]}'
-                              '</figcaption><div class="arcade"><i></i><i></i><i></i><i></i><svg class="qr2" '
-                              f'viewBox="0 0 33 33" role="img" aria-label="{words["qr"]}" shape-rendering="crispEdges">'
-                              '<rect width="33" height="33" fill="#FFFFFF"/><path fill="#1E1533" d="')
-                    + r"(?:M\d+ \d+h\d+v1h-\d+z)+"
-                    + re.escape(f'"/></svg></div><p class="sponsor-cap">{words["cap"]}</p>{page._PARTY}</figure>'
-                                + (f'<p class="note">{words["note"]}</p>' if note else "") + "</aside></section>"))
+            return (f'<aside class="side"><figure class="sponsor"><figcaption class="sponsor-by">{words["by"]}'
+                    '</figcaption><div class="arcade"><i></i><i></i><i></i><i></i><img class="qr2" '
+                    f'src="{art.data_uri(style)}" alt="{words["qr"]}" width="264" height="264" data-style="{style}">'
+                    f'</div><p class="sponsor-cap">{words["cap"]}</p>{page._PARTY}</figure>'
+                    + (f'<p class="note">{words["note"]}</p>' if note else "") + "</aside></section>")
+
+        def shown(lang, style):
+            with mock.patch.object(page, "_pick_sponsor_style", return_value=style) as pick:
+                drawn = self.page.render(lang)
+            self.assertEqual(pick.call_count, 1)
+            return drawn
 
         for lang in ("es", "en"):
-            waiting = self.page.render(lang)
-            self.assertEqual([marker for marker in ("<aside", '<svg class="qr2"', SPONSOR[lang]["by"]) if marker in waiting], [])
+            asked = AssertionError("the style asked on the waiting page")
+            with mock.patch.object(page, "_pick_sponsor_style", side_effect=asked):
+                waiting = self.page.render(lang)
+            self.assertEqual([marker for marker in ("<aside", '<img class="qr2"', "data-style", SPONSOR[lang]["by"])
+                              if marker in waiting], [])
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         for lang in ("es", "en"):
-            with self.subTest(page="linked", lang=lang):
-                linked = self.page.render(lang)
-                self.assertEqual(linked.count("<aside"), 1)
-                self.assertRegex(linked, side(lang, True))
+            for style in art.STYLES:
+                with self.subTest(page="linked", lang=lang, style=style):
+                    linked = shown(lang, style)
+                    self.assertEqual(linked.count("<aside"), 1)
+                    self.assertEqual(linked.count(side(lang, True, style)), 1)
+                    self.assertEqual((linked.count(art.data_uri(style)), linked.count("data-style=")), (1, 1))
         for _ in range(3):
             self.state.record_ping(worker.Refused())
         for lang in ("es", "en"):
-            with self.subTest(page="relink", lang=lang):
-                offered = self.page.render(lang)
-                self.assertIn('action="/relink"', offered)
-                self.assertEqual(offered.count("<aside"), 1)
-                self.assertRegex(offered, side(lang, False))
-                self.assertNotIn(SPONSOR[lang]["note"], offered)
+            for style in art.STYLES:
+                with self.subTest(page="relink", lang=lang, style=style):
+                    offered = shown(lang, style)
+                    self.assertIn('action="/relink"', offered)
+                    self.assertEqual(offered.count("<aside"), 1)
+                    self.assertEqual(offered.count(side(lang, False, style)), 1)
+                    self.assertEqual((offered.count(art.data_uri(style)), offered.count("data-style=")), (1, 1))
+                    self.assertNotIn(SPONSOR[lang]["note"], offered)
         for lang in ("es", "en"):
             words = page.WORDS[lang]
             self.assertEqual(tuple(words.get(name) for name in ("sponsor_by", "sponsor_cap", "sponsor_qr", "sponsor_note")),

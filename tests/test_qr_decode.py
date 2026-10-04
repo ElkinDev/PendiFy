@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import support
 from support import LINK_ID, SECRET
@@ -39,12 +40,8 @@ SCENE_SECRETS = ("K7QM4PXD9HTR", SECRET, LINK_ID, "HJKM2345NPQR", "MNPQ2345RSTV"
                  "QRST2345VWXY")
 
 
-# The sponsored QR of the linked page's aside: its address, and the one shape it is drawn with, a light field over the
-# whole square and one dark path of closed runs one module tall.
-SPONSOR_ADDRESS = "https://pendiapp.com"
-SPONSOR_DRAWING = re.compile(r'<svg class="qr2" viewBox="0 0 (\d+) \1" role="img" aria-label="[^"<>]*" '
-                             r'shape-rendering="crispEdges"><rect width="\1" height="\1" fill="#FFFFFF"/>'
-                             r'<path fill="#1E1533" d="((?:M\d+ \d+h\d+v1h-\d+z)+)"/></svg>')
+# The prefix of the linked page's sponsored picture (lane pfart, OR-113).
+PNG_URI = "data:image/png;base64,"
 
 
 def linked_page():
@@ -54,21 +51,6 @@ def linked_page():
         state = pairing.PairingState(store, lambda secret: worker.Refused(), clock=support.FakeClock())
         state.typed(LINK_ID, store.read().secret)
         return page.PairingPage(state).render("es")
-
-
-def run_modules(drawing):
-    """The sponsored QR's drawing read back as rows of modules, True dark; any other shape is refused."""
-    match = SPONSOR_DRAWING.fullmatch(drawing)
-    if match is None:
-        raise AssertionError(f"not the sponsored QR's one-path drawing: {drawing[:160]}")
-    side = int(match.group(1))
-    rows = [[False] * side for _ in range(side)]
-    for x, y, width, back in re.findall(r"M(\d+) (\d+)h(\d+)v1h-(\d+)z", match.group(2)):
-        if width != back or int(x) + int(width) > side or int(y) >= side:
-            raise AssertionError(f"a run that does not close inside the square: M{x} {y}h{width}v1h-{back}z")
-        for column in range(int(x), int(x) + int(width)):
-            rows[int(y)][column] = True
-    return rows
 
 
 def matrix_text(modules):
@@ -126,27 +108,36 @@ class QrDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 
-    def test_zxing_reads_the_sponsored_qr_as_the_linked_page_draws_it_at_6_7_8_and_10_px_a_module(self):
-        # Mutation: the runs drawn from another text. Red: ZXing reads that text. Mutation: the quiet zone drawn 2
-        # modules wide. Red: the drawing is not the encoder's symbol in a border of four light modules. The sizes are
-        # the page's own: every side its style gives the code, a whole number of px a module (lane pcnw, OR-99: 198 px
-        # under 360 px). Mutation: the 359 px rule left out. Red: the sides are 7, 8 and 10 px a module only.
-        shown = linked_page()
-        drawings = re.findall(r'<svg class="qr2".*?</svg>', shown)
-        self.assertEqual(len(drawings), 1)
-        rows = run_modules(drawings[0])
-        code = qr.encode(SPONSOR_ADDRESS.encode("ascii"))
-        self.assertEqual(rows, support.quiet_padded(code.modules, 4))
-        sides = [int(side) for side in re.findall(r"\.qr2\{(?:display:block;)?width:(?:min\()?(\d+)px", shown)]
-        self.assertEqual(sorted(sides), [198, 231, 264, 330])
-        self.assertEqual([side % len(rows) for side in sides], [0] * 4)
-        sizes = sorted(side // len(rows) for side in sides)
-        self.assertEqual(sizes, [6, 7, 8, 10])
-        scaled = [[[rows[r // size][c // size] for c in range(len(rows) * size)] for r in range(len(rows) * size)]
-                  for size in sizes]
-        status, decoded, errors = zxing_decode(scaled)
+    def test_zxing_reads_each_sponsored_picture_at_its_own_size_and_at_the_page_s_four_sides(self):
+        # Lane pfart (OR-113, owner 2026-10-03 20:1x): the linked page's sponsored QR is one of five of the app's own
+        # styles, a PNG drawn by the app's engine. Each picture, taken from the linked page rendered with the seam set
+        # to its style, read by ZXing as it is and scaled by area averaging to every side the page's styles give the
+        # code (lane pcnw, OR-99: 198 px under 360 px). Mutation: a style's bytes answering another text's code. Red:
+        # ZXing reads that text at all five sides. Mutation: the 359 px rule left out. Red: the sides are three.
+        sponsor_art = support.module("sponsor_art")
+        requests, where = [], []
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
+            for style in sponsor_art.STYLES:
+                with mock.patch.object(page, "_pick_sponsor_style", return_value=style):
+                    shown = linked_page()
+                pictures = re.findall(r'<img class="qr2" src="data:image/png;base64,([A-Za-z0-9+/]+=*)"', shown)
+                self.assertEqual(len(pictures), 1, style)
+                picture = base64.b64decode(pictures[0], validate=True)
+                self.assertEqual(picture, base64.b64decode(sponsor_art.data_uri(style)[len(PNG_URI):]), style)
+                path = Path(work) / f"{style}.png"
+                path.write_bytes(picture)
+                sides = sorted((int(side) for side in
+                                re.findall(r"\.qr2\{(?:display:block;)?width:(?:min\()?(\d+)px", shown)), reverse=True)
+                self.assertEqual(sides, [330, 264, 231, 198])
+                for side in [png_size(path)[0]] + sides:
+                    requests.append(f"{path} {side}")
+                    where.append(f"{style} at {side} px")
+            status, decoded, errors = zxing_read_scaled(requests)
         self.assertEqual(status, 0, errors[-1500:])
-        self.assertEqual(decoded, [SPONSOR_ADDRESS] * 4)
+        self.assertEqual(len(requests), 25)
+        self.assertEqual(len(decoded), len(requests), errors[-1500:])
+        self.assertEqual(dict(zip(where, decoded)),
+                         {spot: f"{spot.split()[-2]} {page.SPONSOR_ADDRESS}" for spot in where})
 
 
 def png_size(path):
@@ -167,6 +158,14 @@ def edge_screenshot(work, page, width, height, scale):
     if not png.is_file() or png.stat().st_size == 0:
         raise AssertionError(f"Edge wrote no screenshot (exit {run.returncode}): {run.stderr[-1500:]}")
     return png
+
+
+def zxing_read_scaled(requests):
+    """Each request "path side" read by ZXing from that PNG at that side, scaled by area averaging when the side is
+    not its own; one line each, the side read and the text."""
+    run = subprocess.run([str(JAVA), "-cp", str(JAR), str(SOURCE), "--scaled"], input="\n".join(requests),
+                         capture_output=True, text=True, encoding="utf-8", timeout=180)
+    return run.returncode, run.stdout.splitlines(), run.stderr
 
 
 def zxing_read_crops(requests):

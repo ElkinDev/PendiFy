@@ -2,7 +2,10 @@ import com.google.zxing.BinaryBitmap;
 import com.google.zxing.RGBLuminanceSource;
 import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeReader;
+import java.awt.Image;
 import java.awt.image.BufferedImage;
+import java.awt.image.ImageObserver;
+import java.awt.image.PixelGrabber;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
@@ -24,6 +27,11 @@ import javax.imageio.ImageIO;
  * <p>With the argument --png it reads rasters instead: one request a line, "path x y width height half", the
  * crop of the PNG at path in its pixels, halved by a 2 by 2 average when half is 1; it prints one line a
  * request, the decoded text, or "NO READ" and the exception's class when ZXing finds no symbol in the crop.
+ *
+ * <p>With the argument --scaled it reads whole pictures at a side: one request a line, "path side", the PNG at path
+ * read as it is when side is its own width and height, otherwise scaled to side by side with
+ * Image.SCALE_AREA_AVERAGING (what a browser's downscale is closest to); it prints one line a request, the side
+ * ZXing read, a space and the decoded text, or the side and "NO READ" with the exception's class.
  */
 public final class QrMatrixDecode {
   private static final int SCALE = 8;
@@ -34,6 +42,10 @@ public final class QrMatrixDecode {
     PrintStream out = new PrintStream(System.out, true, "UTF-8");
     if (args.length == 1 && args[0].equals("--png")) {
       readRasters(in, out);
+      return;
+    }
+    if (args.length == 1 && args[0].equals("--scaled")) {
+      readScaled(in, out);
       return;
     }
     List<String> rows = new ArrayList<>();
@@ -87,6 +99,42 @@ public final class QrMatrixDecode {
         out.println(new QRCodeReader().decode(bitmap).getText());
       } catch (com.google.zxing.ReaderException failure) {
         out.println("NO READ " + failure.getClass().getSimpleName());
+      }
+    }
+  }
+
+  private static void readScaled(BufferedReader in, PrintStream out) throws Exception {
+    String line;
+    while ((line = in.readLine()) != null) {
+      line = line.trim();
+      if (line.isEmpty()) {
+        continue;
+      }
+      int cut = line.lastIndexOf(' ');
+      if (cut <= 0) {
+        throw new IllegalArgumentException("a request is path side: " + line);
+      }
+      BufferedImage image = ImageIO.read(new File(line.substring(0, cut)));
+      if (image == null) {
+        throw new IllegalArgumentException("not an image ImageIO reads: " + line.substring(0, cut));
+      }
+      int side = Integer.parseInt(line.substring(cut + 1));
+      int[] pixels;
+      if (side == image.getWidth() && side == image.getHeight()) {
+        pixels = image.getRGB(0, 0, side, side, null, 0, side);
+      } else {
+        pixels = new int[side * side];
+        Image scaled = image.getScaledInstance(side, side, Image.SCALE_AREA_AVERAGING);
+        PixelGrabber grabber = new PixelGrabber(scaled, 0, 0, side, side, pixels, 0, side);
+        if (!grabber.grabPixels() || (grabber.getStatus() & ImageObserver.ALLBITS) == 0) {
+          throw new IllegalStateException("the scaled picture was not produced whole: " + line);
+        }
+      }
+      BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(side, side, pixels)));
+      try {
+        out.println(side + " " + new QRCodeReader().decode(bitmap).getText());
+      } catch (com.google.zxing.ReaderException failure) {
+        out.println(side + " NO READ " + failure.getClass().getSimpleName());
       }
     }
   }
