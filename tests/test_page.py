@@ -209,6 +209,22 @@ def without_icon(document):
     return icon_tags().sub("", document)
 
 
+# The linked page's sponsored picture, as page._sponsor_qr draws it (lane pfart).
+SPONSOR_IMG = re.compile(r'<img class="qr2" src="(data:image/png;base64,[A-Za-z0-9+/]+=*)" alt="[^"<>]*" '
+                         r'width="264" height="264" data-style="([a-z]+)">')
+
+
+def without_sponsor(document):
+    """The document with the linked page's sponsored picture taken out, once, and only when its data URI is
+    byte for byte the one sponsor_art carries for its data-style (lane pfart, OR-113): the pins that allow no other
+    image or data: still see any other, a picture of another payload in the same tag included."""
+    art = support.module("sponsor_art")
+    found = SPONSOR_IMG.search(document)
+    if found is None or found.group(2) not in art.STYLES or found.group(1) != art.data_uri(found.group(2)):
+        return document
+    return document[:found.start()] + document[found.end():]
+
+
 def without_credit(document):
     """The document with the top bar's one link out taken out, its start tag only, once."""
     return document.replace(CREDIT_LINK, "", 1)
@@ -390,8 +406,10 @@ class PairingPageTest(unittest.TestCase):
         for value in ('<svg class="qr"', secret, codes.display(secret), LINK_ID, codes.display(LINK_ID),
                       'action="/relink"'):
             self.assertNotIn(value, without_icon(linked))
-        # The icon's own data URI stays on every page (brief pcico); no other data: may, in any case of the scheme.
-        self.assertNotIn("data:", without_icon(linked).lower())
+        # The icon's own data URI stays on every page (brief pcico), and the linked page draws its sponsored picture,
+        # one of five fixed PNGs (lane pfart); no other data: may, in any case of the scheme.
+        self.assertEqual(without_sponsor(linked).count('<img class="qr2"'), 0)
+        self.assertNotIn("data:", without_icon(without_sponsor(linked)).lower())
         self.call("POST", "/relink")  # nothing offered: a no-op
         self.assertEqual(self.store.read().link_id, LINK_ID)
         for _ in range(3):
@@ -407,14 +425,19 @@ class PairingPageTest(unittest.TestCase):
 
     def test_only_the_icon_itself_is_taken_out_of_the_linked_page(self):
         # A second 32 px image in the icon's tag shape but with another payload is not the icon: the linked page's
-        # "no data: outside the icon" pin must still see it.
+        # "no data: outside the icon" pin must still see it. Lane pfart: nor is a sponsored picture of another
+        # payload in the sponsored tag's shape, or a second sponsored picture, the sponsored one.
         self.call("POST", "/typed", form={"linkId": LINK_ID, "secret": self.secret()})
         linked = self.html()
-        extra = '<img alt="" width="32" height="32" src="data:image/png;base64,AAAA">'
-        added = linked.replace("</body>", extra + "</body>", 1)
-        self.assertEqual(added.count(extra), 1)
-        self.assertIn("data:", without_icon(added))
-        self.assertNotIn("data:", without_icon(linked))
+        sponsored = SPONSOR_IMG.search(linked).group(0)
+        for extra in ('<img alt="" width="32" height="32" src="data:image/png;base64,AAAA">',
+                      '<img class="qr2" src="data:image/png;base64,AAAA" alt="" width="264" height="264" '
+                      'data-style="amor">', sponsored):
+            with self.subTest(extra=extra[:60]):
+                added = linked.replace("</body>", extra + "</body>", 1)
+                self.assertEqual(added.count(extra), 2 if extra == sponsored else 1)
+                self.assertIn("data:", without_icon(without_sponsor(added)))
+        self.assertNotIn("data:", without_icon(without_sponsor(linked)))
 
     def test_only_the_icon_itself_is_exempt_from_the_key_places(self):
         # A PNG data URI outside every details is not the icon: KeyPlace must report it as a place outside them.
@@ -562,7 +585,10 @@ class PairingPageTest(unittest.TestCase):
             for lang, shown in documents.items():
                 with self.subTest(page=name, lang=lang):
                     tagline = html.escape(page.WORDS[lang]["title"])
-                    self.assertEqual((shown.count("<img"), shown.count("<h1>"), shown.count("<title>")), (1, 1, 1))
+                    # The linked and the relink pages draw the sponsored picture as well (lane pfart).
+                    self.assertEqual(shown.count('<img class="qr2"'), 0 if name == "waiting" else 1)
+                    self.assertEqual((without_sponsor(shown).count("<img"), shown.count("<h1>"),
+                                      shown.count("<title>")), (1, 1, 1))
                     self.assertIn(f"<title>{NAME}</title>", shown)
                     self.assertIn(f'<div class="title-row"><img alt="" width="32" height="32" src="{uri}"><h1>{NAME}'
                                   f'</h1></div><p class="tagline">{tagline}</p><p class="intro">', shown)
