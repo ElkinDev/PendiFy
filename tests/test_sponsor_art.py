@@ -11,9 +11,13 @@ import unittest
 import support
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-PREFIX = "data:image/png;base64,"
-# One manifest line of the module's docstring: style, delivered side, bytes, sha256.
-MANIFEST_LINE = re.compile(r"^ *(\w+): (\d+) px a side, (\d+) bytes, sha256 ([0-9a-f]{64})\.?$", re.M)
+JPEG_SIGNATURE = b"\xff\xd8\xff"
+# Each style's media type: the three flat codes PNG, the two 3D stills JPEG (lane pfart, amendment 1).
+MEDIA = {"amor": "image/png", "calma": "image/png", "otono": "image/png", "jardin": "image/jpeg",
+         "bosque": "image/jpeg"}
+# One manifest row of the module's docstring: style, media type, side, bytes, sha256.
+MANIFEST_LINE = re.compile(r"^ *(\w+): (image/png|image/jpeg), (\d+) px, (\d+) bytes, sha256 ([0-9a-f]{64})\.$",
+                           re.M)
 
 
 class SponsorArtTest(unittest.TestCase):
@@ -21,9 +25,10 @@ class SponsorArtTest(unittest.TestCase):
         self.art = support.module("sponsor_art")
 
     def manifest(self):
-        """{style: (side, bytes, sha256)} as the module's docstring writes MANIFEST.txt of the design lane."""
-        return {style: (int(side), int(size), digest)
-                for style, side, size, digest in MANIFEST_LINE.findall(self.art.__doc__ or "")}
+        """{style: (media type, side, bytes, sha256)} as the module's docstring writes the rows of MANIFEST.txt and
+        MANIFEST-3d.txt of the design lane."""
+        return {style: (media, int(side), int(size), digest)
+                for style, media, side, size, digest in MANIFEST_LINE.findall(self.art.__doc__ or "")}
 
     def test_the_styles_are_the_five_the_owner_named_in_order(self):
         # Mutation: a style dropped or the order changed. Red: the tuple differs.
@@ -31,21 +36,30 @@ class SponsorArtTest(unittest.TestCase):
         self.assertEqual(set(self.art.SHA256), set(self.art.STYLES))
         self.assertEqual(list(self.manifest()), list(self.art.STYLES))
 
-    def test_each_picture_is_the_manifest_png_byte_for_byte(self):
+    def test_each_picture_is_its_manifest_row_byte_for_byte(self):
         # Mutation: one picture re-encoded or cut. Red: its sha256, its size or its signature differs from the
-        # manifest's. Mutation: two styles answering the same picture. Red: fewer than five digests.
+        # manifest's. Mutation: two styles answering the same picture. Red: fewer than five digests. Amendment 1
+        # (owner 2026-10-03 20:3x): jardin and bosque are the app's 3D stills, JPEG. Mutation: the flat jardin kept.
+        # Red: its media type is image/png and its bytes are not the still's row.
         manifest = self.manifest()
+        self.assertEqual({style: row[0] for style, row in manifest.items()}, MEDIA)
+        self.assertEqual(self.art.MEDIA, MEDIA)
         seen = set()
         for style in self.art.STYLES:
             with self.subTest(style=style):
+                media, side, size, digest = manifest[style]
+                prefix = f"data:{media};base64,"
                 uri = self.art.data_uri(style)
-                self.assertTrue(uri.startswith(PREFIX), uri[:40])
-                picture = base64.b64decode(uri[len(PREFIX):], validate=True)
-                self.assertEqual(picture[:8], PNG_SIGNATURE)
-                self.assertEqual(picture[12:16], b"IHDR")
-                width, height = struct.unpack(">II", picture[16:24])
-                side, size, digest = manifest[style]
-                self.assertEqual((width, height, len(picture)), (side, side, size))
+                self.assertTrue(uri.startswith(prefix), uri[:40])
+                picture = base64.b64decode(uri[len(prefix):], validate=True)
+                if media == "image/png":
+                    self.assertEqual(picture[:8], PNG_SIGNATURE)
+                    self.assertEqual(picture[12:16], b"IHDR")
+                    width, height = struct.unpack(">II", picture[16:24])
+                    self.assertEqual((width, height), (side, side))
+                else:
+                    self.assertEqual(picture[:3], JPEG_SIGNATURE)
+                self.assertEqual(len(picture), size)
                 self.assertEqual(hashlib.sha256(picture).hexdigest(), digest)
                 self.assertEqual(self.art.SHA256[style], digest)
                 seen.add(digest)

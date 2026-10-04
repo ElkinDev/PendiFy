@@ -210,8 +210,8 @@ def without_icon(document):
 
 
 # The linked page's sponsored picture, as page._sponsor_qr draws it (lane pfart).
-SPONSOR_IMG = re.compile(r'<img class="qr2" src="(data:image/png;base64,[A-Za-z0-9+/]+=*)" alt="[^"<>]*" '
-                         r'width="264" height="264" data-style="([a-z]+)">')
+SPONSOR_IMG = re.compile(r'<img class="qr2" src="(data:image/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*)" '
+                         r'alt="[^"<>]*" width="264" height="264" data-style="([a-z]+)">')
 
 
 def without_sponsor(document):
@@ -1098,7 +1098,8 @@ class PairingPageTest(unittest.TestCase):
         for (name, lang), (shown, has_quit) in documents.items():
             with self.subTest(page=name, lang=lang):
                 self.assertEqual(shown.count(credit(lang)), 1)
-                self.assertEqual(shown.count("http"), 1)
+                # The sponsored picture's base64 may hold the four letters by chance (bosque's does); it links nowhere.
+                self.assertEqual(without_sponsor(shown).count("http"), 1)
                 self.assertNotIn("ElkinDev", shown.replace(CREDIT_LINK, "", 1).replace(
                     "github.com/ElkinDev/PendiFy</a>", "", 1))
                 feet = re.findall(r"<footer[^>]*>(.*?)</footer>", shown, re.S)

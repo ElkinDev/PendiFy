@@ -9,6 +9,7 @@ import hashlib
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,8 +41,11 @@ SCENE_SECRETS = ("K7QM4PXD9HTR", SECRET, LINK_ID, "HJKM2345NPQR", "MNPQ2345RSTV"
                  "QRST2345VWXY")
 
 
-# The prefix of the linked page's sponsored picture (lane pfart, OR-113).
-PNG_URI = "data:image/png;base64,"
+# The linked page's sponsored picture (lane pfart, OR-113): its media type and its base64 text. The three flat styles
+# are read and asserted; the two 3D stills are read and recorded, never asserted either way (amendment 1).
+SPONSOR_PICTURE = re.compile(r'<img class="qr2" src="data:(image/png|image/jpeg);base64,([A-Za-z0-9+/]+=*)"')
+FLAT_STYLES = ("amor", "calma", "otono")
+STILL_STYLES = ("jardin", "bosque")
 
 
 def linked_page():
@@ -108,36 +112,71 @@ class QrDecodeTest(unittest.TestCase):
         self.assertEqual(status, 0, errors[-1500:])
         self.assertEqual(decoded, texts)
 
-    def test_zxing_reads_each_sponsored_picture_at_its_own_size_and_at_the_page_s_four_sides(self):
-        # Lane pfart (OR-113, owner 2026-10-03 20:1x): the linked page's sponsored QR is one of five of the app's own
-        # styles, a PNG drawn by the app's engine. Each picture, taken from the linked page rendered with the seam set
-        # to its style, read by ZXing as it is and scaled by area averaging to every side the page's styles give the
-        # code (lane pcnw, OR-99: 198 px under 360 px). Mutation: a style's bytes answering another text's code. Red:
-        # ZXing reads that text at all five sides. Mutation: the 359 px rule left out. Red: the sides are three.
+    def sponsored_reads(self, styles):
+        """Each style's picture, taken from the linked page rendered with the seam set to it, read by ZXing as it is
+        and scaled by area averaging to every side the page's styles give the code (lane pcnw, OR-99: 198 px under
+        360 px): the places, "<style> at <side> px", and the harness's answers, one each."""
         sponsor_art = support.module("sponsor_art")
         requests, where = [], []
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
-            for style in sponsor_art.STYLES:
+            for style in styles:
                 with mock.patch.object(page, "_pick_sponsor_style", return_value=style):
                     shown = linked_page()
-                pictures = re.findall(r'<img class="qr2" src="data:image/png;base64,([A-Za-z0-9+/]+=*)"', shown)
+                pictures = SPONSOR_PICTURE.findall(shown)
                 self.assertEqual(len(pictures), 1, style)
-                picture = base64.b64decode(pictures[0], validate=True)
-                self.assertEqual(picture, base64.b64decode(sponsor_art.data_uri(style)[len(PNG_URI):]), style)
-                path = Path(work) / f"{style}.png"
+                media, text = pictures[0]
+                self.assertEqual(sponsor_art.data_uri(style), f"data:{media};base64,{text}", style)
+                picture = base64.b64decode(text, validate=True)
+                path = Path(work) / f"{style}.{'png' if media == 'image/png' else 'jpg'}"
                 path.write_bytes(picture)
                 sides = sorted((int(side) for side in
                                 re.findall(r"\.qr2\{(?:display:block;)?width:(?:min\()?(\d+)px", shown)), reverse=True)
                 self.assertEqual(sides, [330, 264, 231, 198])
-                for side in [png_size(path)[0]] + sides:
+                for side in [picture_side(picture, media)] + sides:
                     requests.append(f"{path} {side}")
                     where.append(f"{style} at {side} px")
             status, decoded, errors = zxing_read_scaled(requests)
         self.assertEqual(status, 0, errors[-1500:])
-        self.assertEqual(len(requests), 25)
         self.assertEqual(len(decoded), len(requests), errors[-1500:])
+        return where, decoded
+
+    def test_zxing_reads_the_three_flat_sponsored_pictures_at_their_own_size_and_at_the_page_s_four_sides(self):
+        # Lane pfart (OR-113, owner 2026-10-03 20:1x): the linked page's sponsored QR is one of five of the app's own
+        # styles; amor, calma and otono are flat codes with the picture in the dots, drawn by the app's engine.
+        # Mutation: a style's bytes answering another text's code. Red: ZXing reads that text at all five sides.
+        # Mutation: the 359 px rule left out. Red: the sides are three.
+        self.assertEqual(set(FLAT_STYLES + STILL_STYLES), set(support.module("sponsor_art").STYLES))
+        where, decoded = self.sponsored_reads(FLAT_STYLES)
+        self.assertEqual(len(decoded), 15)
         self.assertEqual(dict(zip(where, decoded)),
                          {spot: f"{spot.split()[-2]} {page.SPONSOR_ADDRESS}" for spot in where})
+
+    def test_the_two_3d_stills_are_read_at_the_same_five_sides_and_the_answers_recorded_never_asserted(self):
+        # Amendment 1 (owner 2026-10-03 20:3x): jardin and bosque are the app's 3D stills, which phone cameras read;
+        # ZXing reading the 3D picture itself is not the claim either way (MANIFEST-3d.txt records ten no reads). The
+        # case asserts only that the harness answered for all ten, at the side asked, and prints the ten answers.
+        where, decoded = self.sponsored_reads(STILL_STYLES)
+        self.assertEqual(len(decoded), 10)
+        self.assertEqual([answer.split(" ", 1)[0] for answer in decoded], [spot.split()[-2] for spot in where])
+        for spot, answer in zip(where, decoded):
+            print(f"[sponsor 3d still] {spot}: {answer}", file=sys.stderr)
+
+
+def picture_side(picture, media):
+    """A square picture's side: a PNG's from its IHDR chunk, a JPEG's from its first start-of-frame segment."""
+    if media == "image/png":
+        width, height = struct.unpack(">II", picture[16:24])
+    else:
+        at = 2
+        frames = set(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
+        while picture[at] == 0xFF and picture[at + 1] not in frames:
+            at += 2 + struct.unpack(">H", picture[at + 2:at + 4])[0]
+        if picture[at] != 0xFF:
+            raise AssertionError(f"no start of frame in the JPEG before byte {at}")
+        height, width = struct.unpack(">HH", picture[at + 5:at + 9])
+    if width != height:
+        raise AssertionError(f"not a square picture: {width} by {height}")
+    return width
 
 
 def png_size(path):

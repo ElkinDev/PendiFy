@@ -727,8 +727,8 @@ def _pick_sponsor_style():
 
 
 def _sponsor_qr(words, style):
-    """The sponsored QR: the flat code of SPONSOR_ADDRESS with `style`'s picture in its dots, a PNG of the app's own
-    renderer (sponsor_art.py), the same in both themes. `words` are escaped."""
+    """The sponsored QR: the code of SPONSOR_ADDRESS in `style`, a picture of the app's own (sponsor_art.py: three
+    flat codes with the picture in the dots, two 3D stills), the same in both themes. `words` are escaped."""
     return (f'<img class="qr2" src="{sponsor_art.data_uri(style)}" alt="{words["sponsor_qr"]}" width="264" '
             f'height="264" data-style="{style}">')
 
