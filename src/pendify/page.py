@@ -726,6 +726,13 @@ def _pick_sponsor_style():
     return random.choice(sponsor_art.STYLES)
 
 
+def _running_version():
+    """The version this copy runs, as update.py read it once at the start, for the top bar's credit; None when it
+    could not be read. Never a fresh read of the disk: after an update is installed and before the restart, the page
+    still names the copy that runs (owner 2026-10-03 21:0x, OR-114). The one seam the tests replace."""
+    return update.RUNNING_VERSION
+
+
 def _sponsor_qr(words, style):
     """The sponsored QR: the code of SPONSOR_ADDRESS in `style`, a picture of the app's own (sponsor_art.py: three
     flat codes with the picture in the dots, two 3D stills), the same in both themes. `words` are escaped."""
@@ -1014,8 +1021,11 @@ class PairingPage:
         quit_button = f'<button type="submit">{words["quit"]}</button>'
         quit_form = "" if self.on_quit is None else _form("quit", token, quit_button)
         foot = "" if self.on_quit is None else f'<footer class="foot">{quit_form}</footer>'
+        # The credit ends with the running version after the repository link, when it is known (lane pfver, OR-114).
+        version = _running_version()
+        running = "" if version is None else f' · <span class="version">v{html.escape(version)}</span>'
         credit = (f'<p class="credit">{words["credit"]} <b>{CREATOR}</b> · <a href="{REPOSITORY}" target="_blank" '
-                  f'rel="noopener noreferrer">{REPOSITORY.removeprefix("https://")}</a></p>')
+                  f'rel="noopener noreferrer">{REPOSITORY.removeprefix("https://")}</a>{running}</p>')
         # The typed link and the forget in one fold, open when the typed values were refused so the note shows.
         fold = " open" if snapshot["typedRefused"] else ""
         bar = (f'<header class="bar">{credit}{_switch(words, token, lang)}<button id="theme-toggle" class="icon-btn" '
