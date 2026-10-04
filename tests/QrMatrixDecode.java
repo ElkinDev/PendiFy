@@ -126,8 +126,10 @@ public final class QrMatrixDecode {
         pixels = new int[side * side];
         Image scaled = image.getScaledInstance(side, side, Image.SCALE_AREA_AVERAGING);
         PixelGrabber grabber = new PixelGrabber(scaled, 0, 0, side, side, pixels, 0, side);
-        if (!grabber.grabPixels() || (grabber.getStatus() & ImageObserver.ALLBITS) == 0) {
-          throw new IllegalStateException("the scaled picture was not produced whole: " + line);
+        // The area-averaging filter ends its one frame with FRAMEBITS; a static source would say ALLBITS.
+        if (!grabber.grabPixels() || (grabber.getStatus() & (ImageObserver.ALLBITS | ImageObserver.FRAMEBITS)) == 0) {
+          throw new IllegalStateException("the scaled picture was not produced whole: " + line + ", status "
+              + grabber.getStatus());
         }
       }
       BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(side, side, pixels)));
