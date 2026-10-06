@@ -88,8 +88,9 @@ class PackageShapeTest(unittest.TestCase):
     def test_the_icon_tools_import_only_the_standard_library_and_their_grid(self):
         # Mutation: `from PIL import Image` in tools/make_icon.py. Red: PIL is not in sys.stdlib_module_names.
         tools = sorted((support.ROOT / "tools").glob("*.py"))
-        self.assertEqual([path.name for path in tools], ["icon_grid.py", "make_icon.py"])
-        self.assertEqual(imports_outside(tools, {"icon_grid"}), [])
+        self.assertEqual([path.name for path in tools], ["icon_grid.py", "make_icon.py", "render_alert_stills.py"])
+        icon_tools = [support.ROOT / "tools" / name for name in ("icon_grid.py", "make_icon.py")]
+        self.assertEqual(imports_outside(icon_tools, {"icon_grid"}), [])
 
     def test_the_package_lists_its_icon_and_the_pyproject_ships_it(self):
         # Mutation: the package-data table dropped. Red: setuptools would leave pendify.ico out of the wheel.

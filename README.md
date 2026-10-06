@@ -8,6 +8,10 @@ Es gratis, no pide permisos de administrador y solo usa Python.
 
 ![La página de PendiFy en el navegador, en tema oscuro: este PC enlazado a la cuenta, la lista de actividad y el código QR patrocinado que abre pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
 
+Así llega un aviso: el programa espera al cliente del juego, detecta la partida y envía el aviso a tu cuenta.
+
+![Tres momentos de la página de PendiFy en tema oscuro: esperando el cliente del juego, la partida encontrada con su aviso enviado y la partida empezada con su aviso enviado.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/alert-flow.gif)
+
 ### Instalar
 
 Pulsa Windows + R, pega esta línea completa y pulsa Enter. También sirve en PowerShell o en el Símbolo del sistema.
@@ -74,6 +78,10 @@ It links once to your Pendi account by scanning a QR code, with no new account o
 It is free, needs no administrator rights and only uses Python.
 
 ![The PendiFy page in the browser, in dark theme: this PC linked to the account, the activity list and the sponsored QR code that opens pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
+
+How an alert arrives: the program waits for the game client, detects the match and sends the alert to your account.
+
+![Three moments of the PendiFy page in dark theme: waiting for the game client, the match found with its alert sent, and the match started with its alert sent.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/alert-flow.gif)
 
 ### Install
 

@@ -44,7 +44,7 @@ class ReadmePictureTest(unittest.TestCase):
             self.assertEqual(len(lines), 1, f"{name} section: picture lines {lines}")
             alt = PICTURE_LINE.match(lines[0]).group(1).strip()
             self.assertTrue(alt, f"{name} section: empty alt text")
-        self.assertEqual(text.count("!["), 2, "the README holds pictures beyond the two sections")
+        self.assertEqual(text.count(PICTURE_URL), 2, "the README holds the page picture beyond the two sections")
         self.assertNotIn("docs/demo.jpeg", text)
 
     def test_the_picture_sits_before_each_install_heading(self):
