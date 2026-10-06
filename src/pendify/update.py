@@ -28,6 +28,8 @@ MODES = config.UPDATE_MODES
 AUTO, NOTIFY, OFF = MODES
 FIRST_ROUND_SECONDS = 60
 ROUND_SECONDS = 6 * 60 * 60
+# The one early round after auto mode's first failed install of a version, for an index that lags PyPI's JSON.
+RETRY_SECONDS = 10 * 60
 INSTALL_SECONDS = 10 * 60
 # How long main's stop waits for an install under way before the run file goes.
 INSTALL_JOIN_SECONDS = 60
@@ -136,6 +138,8 @@ class Updater:
         self._log = _log if log is None else log
         self._lock = threading.Lock()
         self._state = (NONE, None, None)
+        # The versions whose install failed once in a round of auto mode: each had its one early round.
+        self._retried = set()
         # Set while no install runs: what wait() reads; cleared under the lock wherever the state turns installing.
         self._idle = threading.Event()
         self._idle.set()
@@ -175,43 +179,52 @@ class Updater:
         return False
 
     def run(self):
-        """One round a minute after the start, then one every six hours, until the close."""
+        """One round a minute after the start, then one every six hours, until the close; after a round in which
+        auto mode's install of a version failed for the first time, the next one comes ten minutes after, once for
+        that version."""
         delay = FIRST_ROUND_SECONDS
         while not self._wait(delay):
-            self.round()
-            delay = ROUND_SECONDS
+            delay = RETRY_SECONDS if self.round() else ROUND_SECONDS
 
     def round(self):
-        """One check; a newer version reads available, and auto mode installs it at once. A failure is one log
-        line, and the next round runs. Nothing is checked again once an install has started, ended ready or failed:
-        a failed version is tried again at the next start only."""
+        """One check; a newer version reads available, and auto mode installs it at once. A failed install is open
+        too: when the check still names a newer version, auto mode installs it again and notify mode reads it
+        available, so the page offers «Actualizar» again. A failure is one log line, and the next round runs; a check
+        that fails or names nothing newer leaves the state as it is. Nothing is checked again once an install has
+        started or ended ready. True when auto mode's install of that version failed here for the first time, the
+        round run() brings ten minutes early; False otherwise."""
         if self.mode == OFF or not self._open():
-            return
+            return False
         try:
             latest = self._check()
         except Exception as failure:  # the network, PyPI or its answer: silent on the page until the next round
             self._log(f"the check failed: {type(failure).__name__}")
-            return
+            return False
         if not newer(latest, self.current_version):
-            return
+            return False
         with self._lock:
-            if self._state[0] not in (NONE, AVAILABLE):
-                return
+            if self._state[0] not in (NONE, AVAILABLE, FAILED):
+                return False
             self._state = (AVAILABLE, latest, None)
-        if self.mode == AUTO:
-            self._apply(latest)
+        if self.mode != AUTO or self._apply(latest):
+            return False
+        with self._lock:
+            first = latest not in self._retried
+            self._retried.add(latest)
+        return first
 
     def request_install(self):
-        """The page's «Actualizar» in notify mode: the version seen installed on its own thread, then the restart.
-        False, and nothing done, in any other mode or state."""
+        """The page's «Actualizar» in notify mode, and its «Reintentar» after a failed install in either mode: the
+        version installed on its own thread, then, in notify mode, the restart; in auto mode it reads ready and waits
+        for «Reiniciar ahora». False, and nothing done, in any other mode or state."""
         with self._lock:
             state, version, _ = self._state
-            if self.mode != NOTIFY or state != AVAILABLE:
+            if state != FAILED and (self.mode != NOTIFY or state != AVAILABLE):
                 return False
             self._state = (INSTALLING, version, None)
             self._idle.clear()
-        threading.Thread(target=self._install_then_restart, args=(version,), name="update-install",
-                         daemon=True).start()
+        threading.Thread(target=self._install_then_restart if self.mode == NOTIFY else self._apply, args=(version,),
+                         name="update-install", daemon=True).start()
         return True
 
     def restart(self, opens_page=True):
@@ -226,7 +239,7 @@ class Updater:
 
     def _open(self):
         with self._lock:
-            return self._state[0] in (NONE, AVAILABLE)
+            return self._state[0] in (NONE, AVAILABLE, FAILED)
 
     def _pip(self, version):
         """pip itself, its output in update-pip.log of the config folder."""

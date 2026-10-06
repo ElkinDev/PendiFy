@@ -133,6 +133,7 @@ WORDS = {
         "update_ready": "Actualización lista: {version}. Se aplica al reiniciar.",
         "update_restart": "Reiniciar ahora",
         "update_failed": "No se pudo instalar la versión {version}",
+        "update_retry": "Reintentar",
         "update_restarting": "Reiniciando. La página nueva se abre en unos segundos.",
         "update_tray_restart": "Reiniciar para actualizar a {version}",
     },
@@ -224,6 +225,7 @@ WORDS = {
         "update_ready": "Update ready: {version}. It applies on restart.",
         "update_restart": "Restart now",
         "update_failed": "Version {version} could not be installed",
+        "update_retry": "Try again",
         "update_restarting": "Restarting. The new page opens in a few seconds.",
         "update_tray_restart": "Restart to update to {version}",
     },
@@ -1044,8 +1046,8 @@ class PairingPage:
     def _update_line(self, words, token, seen):
         """The update's line under the state line and its one button, by state: a version seen in notify mode with
         «Actualizar», a version ready in either mode with «Reiniciar ahora», an install under way alone, a failed one
-        with pip's last line in its title; nothing for none, nor for a version auto mode is about to install.
-        `words` are escaped already."""
+        with pip's last line in its title and «Reintentar», which posts /update as «Actualizar» does, in either mode;
+        nothing for none, nor for a version auto mode is about to install. `words` are escaped already."""
         if seen is None:
             return []
         state, version = seen["state"], html.escape(seen["version"] or "")
@@ -1056,7 +1058,7 @@ class PairingPage:
         elif state == update.INSTALLING:
             key, button = "update_installing", None
         elif state == update.FAILED:
-            key, button = "update_failed", None
+            key, button = "update_failed", ("update", "update_retry")
         else:
             return []
         failed = state == update.FAILED
@@ -1281,7 +1283,9 @@ def _handler(page):
                 finally:
                     page.updater.restart()
                 return
-            if path == "/update":  # «Actualizar» in notify mode; in any other mode or state nothing is installed
+            # «Actualizar» in notify mode, and «Reintentar» after a failed install in either mode; in any other mode
+            # or state nothing is installed.
+            if path == "/update":
                 page.updater.request_install()
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/theme":  # the page's script posts it and reads no page back

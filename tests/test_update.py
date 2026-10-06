@@ -302,11 +302,11 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(waits.waited, [60, 600, 21600, 21600])
         self.assertEqual((len(get.requests), len(run.calls), made.snapshot()["state"]), (3, 3, "ready"))
         self.assertEqual(update.RETRY_SECONDS, 10 * 60)
-        # Nothing fails: every wait after the first is six hours.
+        # Nothing fails: every wait after the first is six hours, and a ready install is not checked again.
         waits = Waits(3)
         made, get, run = self.make("auto", "0.1.6", runs=[(0, "")], waits=waits)
         made.run()
-        self.assertEqual((waits.waited, len(get.requests), len(run.calls)), ([60, 21600, 21600, 21600], 3, 1))
+        self.assertEqual((waits.waited, len(get.requests), len(run.calls)), ([60, 21600, 21600, 21600], 1, 1))
         # A lasting failure, then a newer version that fails too: one early round for each version.
         waits = Waits(5)
         made, get, run = self.make("auto", "0.1.6", "0.1.6", "0.1.6", "0.1.7",
