@@ -439,5 +439,44 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(get.requests, [])
 
 
+class RoundDuringRequestedInstallTest(unittest.TestCase):
+    """A round that comes while the page's install holds (auto's «Reintentar», notify's «Actualizar») starts no
+    second pip and leaves the state installing, in both modes."""
+
+    make = UpdaterTest.make
+
+    def held_round(self, mode, runs, hold):
+        # Mutation: INSTALLING let through the round's checks (update.py:208 and :244). Red: auto starts a second
+        # pip on the round's thread and the state reads failed; notify's state reads available.
+        made, get, run = self.make(mode, "0.1.6", runs=runs)
+        made.round()
+        self.assertTrue(made.request_install())
+        self.assertTrue(run.entered.wait(5))
+        self.assertEqual(made.snapshot()["state"], "installing")
+        calls = list(run.calls)
+        made.round()
+        self.assertEqual(made.snapshot(), {"state": "installing", "version": "0.1.6", "error": None})
+        self.assertEqual(run.calls, calls)
+        hold.set()
+        self.assertTrue(made.wait(5))
+        for thread in [thread for thread in threading.enumerate() if thread.name == "update-install"]:
+            thread.join(5)
+        self.assertEqual(made.snapshot(), {"state": "ready", "version": "0.1.6", "error": None})
+        self.assertEqual(len(run.calls), len(calls))
+        return made
+
+    def test_auto_mode_a_round_during_the_retry_starts_no_second_pip(self):
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        self.held_round("auto", [(1, PIP_LINE), (0, "", hold)], hold)
+        self.assertEqual(self.restarts, [])
+
+    def test_notify_mode_a_round_during_the_page_install_starts_no_second_pip(self):
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        self.held_round("notify", [(0, "", hold)], hold)
+        self.assertEqual(self.restarts, [True])
+
+
 if __name__ == "__main__":
     unittest.main()

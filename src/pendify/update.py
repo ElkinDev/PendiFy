@@ -2,7 +2,9 @@
 installed with pip.
 
 `auto` checks and installs in the background, and the page then offers «Reiniciar ahora»; `notify` checks only, and
-the page offers «Actualizar», which installs and then restarts; `off` never checks. The check carries nothing of the
+the page offers «Actualizar», which installs and then restarts; `off` never checks. A failed install is offered
+again: auto mode's first failure of a version brings the next round ten minutes after, and the page offers
+«Reintentar» in either mode. The check carries nothing of the
 pair: one GET to pypi.org with the program's User-Agent. pip runs with python.exe beside this interpreter, since the
 output of pythonw goes nowhere, with the arguments of the paste (install.ps1:184) and the version pinned, and never
 with a console over a game; its output goes to update-pip.log in the config folder, never to pipes of this copy, and
