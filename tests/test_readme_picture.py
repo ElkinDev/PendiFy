@@ -1,14 +1,17 @@
 import hashlib
 import re
+import struct
 import unittest
 
 import support
 
-PICTURE_URL = "https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/demo.jpeg"
-PICTURE_SHA256 = "57df643cbaf201406f119affc2a51f9b84c7463f128d61acf2f6f7581a90eb15"
+PICTURE_URL = "https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png"
+PICTURE_SHA256 = "94635597a442c5e8d7088722a2a042a65d6bd60d44ef2519c5c43bb8fe8a066f"
 PICTURE_LINE = re.compile(r"^!\[([^\]]*)\]\(" + re.escape(PICTURE_URL) + r"\)$")
-# APP1 carries Exif and XMP (location, device), APP13 carries Photoshop IPTC, COM is free text.
-METADATA_MARKERS = {0xE1: "APP1", 0xED: "APP13", 0xFE: "COM"}
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Text chunks (tEXt, iTXt, zTXt) carry the capture tool and free comments, tIME the moment, eXIf a camera's fields:
+# only the chunks a plain picture needs may stay.
+ALLOWED_CHUNKS = {b"IHDR", b"pHYs", b"IDAT", b"IEND"}
 
 
 def readme_sections():
@@ -18,25 +21,17 @@ def readme_sections():
     return text, spanish, english
 
 
-def jpeg_markers(data):
-    markers = []
-    i = 2
+def png_chunk_types(data):
+    types = []
+    i = len(PNG_SIGNATURE)
     while i < len(data):
-        if data[i] != 0xFF:
-            raise AssertionError(f"no marker at byte {i}")
-        marker = data[i + 1]
-        if marker == 0xD9 or 0xD0 <= marker <= 0xD7 or marker == 0x01:
-            markers.append(marker)
-            i += 2
-            if marker == 0xD9:
-                break
-            continue
-        length = int.from_bytes(data[i + 2:i + 4], "big")
-        markers.append(marker)
-        if marker == 0xDA:
+        length = struct.unpack(">I", data[i:i + 4])[0]
+        kind = data[i + 4:i + 8]
+        types.append(kind)
+        i += 12 + length
+        if kind == b"IEND":
             break
-        i += 2 + length
-    return markers
+    return types, i
 
 
 class ReadmePictureTest(unittest.TestCase):
@@ -50,6 +45,7 @@ class ReadmePictureTest(unittest.TestCase):
             alt = PICTURE_LINE.match(lines[0]).group(1).strip()
             self.assertTrue(alt, f"{name} section: empty alt text")
         self.assertEqual(text.count("!["), 2, "the README holds pictures beyond the two sections")
+        self.assertNotIn("docs/demo.jpeg", text)
 
     def test_the_picture_sits_before_each_install_heading(self):
         # Mutation: the picture moved under the install heading. Red: its index is past the heading.
@@ -57,20 +53,29 @@ class ReadmePictureTest(unittest.TestCase):
         self.assertLess(spanish.index(PICTURE_URL), spanish.index("### Instalar"))
         self.assertLess(english.index(PICTURE_URL), english.index("### Install"))
 
-    def test_the_picture_is_a_jpeg_with_no_metadata_segment_and_its_sha_is_pinned(self):
-        # Mutation: a copy carrying Exif. Red: an APP1 marker is found and the sha differs.
-        path = support.ROOT / "docs" / "demo.jpeg"
-        self.assertTrue(path.is_file(), "no docs/demo.jpeg")
+    def test_the_picture_is_a_png_with_only_its_image_chunks_and_its_sha_is_pinned(self):
+        # Mutation: a copy keeping the capture tool's tEXt chunks. Red: a tEXt type is found and the sha differs.
+        path = support.ROOT / "docs" / "pendify-page.png"
+        self.assertTrue(path.is_file(), "no docs/pendify-page.png")
         data = path.read_bytes()
-        self.assertEqual(data[:3], b"\xff\xd8\xff")
-        found = [METADATA_MARKERS[m] for m in jpeg_markers(data) if m in METADATA_MARKERS]
-        self.assertEqual(found, [])
+        self.assertEqual(data[:8], PNG_SIGNATURE)
+        types, end = png_chunk_types(data)
+        self.assertEqual(types[0], b"IHDR")
+        self.assertEqual(types[-1], b"IEND")
+        self.assertEqual(end, len(data), "bytes after IEND")
+        self.assertEqual(sorted(set(types) - ALLOWED_CHUNKS), [])
         self.assertEqual(hashlib.sha256(data).hexdigest(), PICTURE_SHA256)
 
-    def test_the_picture_stays_out_of_the_package_tree_and_the_manifest(self):
-        # Mutation: docs/ included in MANIFEST.in or the picture put under src/. Red: it would ship.
+    def test_the_first_picture_is_gone(self):
+        # Mutation: docs/demo.jpeg kept beside the new picture. Red: the file exists.
+        self.assertFalse((support.ROOT / "docs" / "demo.jpeg").exists())
+
+    def test_the_manifest_names_no_docs_and_no_copy_of_the_picture_sits_under_src(self):
+        # Mutation: docs/ included in MANIFEST.in or the picture put under src/. Red: the word or the copy is found.
+        # This checks the manifest's text and the source tree only, not the members of a built archive.
         manifest = (support.ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         self.assertNotIn("docs", manifest)
+        self.assertEqual(list((support.ROOT / "src").rglob("pendify-page.png")), [])
         self.assertEqual(list((support.ROOT / "src").rglob("demo.jpeg")), [])
 
 
