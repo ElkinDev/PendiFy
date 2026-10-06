@@ -35,7 +35,7 @@ GAME_WORDS = re.compile(r"\b(league|legends|riot|lol)\b", re.IGNORECASE)
 FENCE = {"cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY"}
 # The update's words (lane pfupd), in the order of the brief.
 UPDATE_KEYS = ("update_available", "update_install", "update_installing", "update_ready", "update_restart",
-               "update_failed")
+               "update_failed", "update_retry")
 ROUTES = [("GET", "/"), ("GET", "/state"), ("POST", "/check"), ("POST", "/typed"), ("POST", "/forget"),
           ("POST", "/relink")]
 # A refused POST's body is read up to 64 KiB before the answer (brief lnk5a-fix1, change 1).
@@ -1674,23 +1674,27 @@ class PairingPageTest(unittest.TestCase):
         # Mutation: the kept pip line left out of the title. Red: the failed line carries no title.
         # Mutation: the line drawn above the state line. Red: the state line is not followed by the update line.
         # Mutation: the poll compares no update. Red: the script never reloads on a new state.
-        self.assertEqual([page.WORDS["es"][key] for key in UPDATE_KEYS], [
+        # Mutation: the failed line drawn with no button. Red: the failed row has no «Reintentar» form.
+        self.assertEqual([page.WORDS["es"].get(key) for key in UPDATE_KEYS], [
             "Hay una versión nueva: {version}", "Actualizar", "Instalando la versión {version}\u2026",
             "Actualización lista: {version}. Se aplica al reiniciar.", "Reiniciar ahora",
-            "No se pudo instalar la versión {version}"])
-        self.assertEqual([page.WORDS["en"][key] for key in UPDATE_KEYS], [
+            "No se pudo instalar la versión {version}", "Reintentar"])
+        self.assertEqual([page.WORDS["en"].get(key) for key in UPDATE_KEYS], [
             "A new version is out: {version}", "Update", "Installing version {version}\u2026",
             "Update ready: {version}. It applies on restart.", "Restart now",
-            "Version {version} could not be installed"])
+            "Version {version} could not be installed", "Try again"])
         hold, failure = threading.Event(), 'ERROR: No matching distribution found for pendify==0.1.6 "<x>"'
         self.addCleanup(hold.set)
         available, installing, ready_notify = self.updater("notify"), self.updater("notify", hold=hold), \
             self.updater("notify")
         ready_auto, failed = self.updater("auto"), self.updater("auto", installed=(False, failure))
-        for made in (available, installing, ready_notify, ready_auto, failed):
+        failed_notify = self.updater("notify", installed=(False, failure))
+        for made in (available, installing, ready_notify, ready_auto, failed, failed_notify):
             made.round()
         installing.request_install()
         ready_notify.request_install()
+        failed_notify.request_install()
+        self.assertTrue(failed_notify.wait(5))
         deadline = time.monotonic() + 5
         while ready_notify.snapshot()["state"] != "ready" and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -1699,7 +1703,8 @@ class PairingPageTest(unittest.TestCase):
                  (installing, "installing", "update_installing", None, None),
                  (ready_auto, "ready", "update_ready", "restart", "update_restart"),
                  (ready_notify, "ready", "update_ready", "restart", "update_restart"),
-                 (failed, "failed", "update_failed", None, None))
+                 (failed, "failed", "update_failed", "update", "update_retry"),
+                 (failed_notify, "failed", "update_failed", "update", "update_retry"))
         for made, state, line, action, label in cases:
             self.with_updater(made)
             version = None if state == "none" else "0.1.6"
@@ -1768,6 +1773,37 @@ class PairingPageTest(unittest.TestCase):
         # A second «Actualizar» finds nothing to install and only shows the page again.
         self.assertEqual(self.call("POST", "/update")[0], 303)
         self.assertEqual(quits, [True])
+
+    def test_update_in_the_failed_state_installs_again_in_either_mode_and_answers_303(self):
+        # Mutation: /update taken from available only. Red: the state stays failed and the install runs once.
+        # Mutation: auto's retried install followed by the restart. Red: auto's quits read [True].
+        # Mutation: notify's retried install left without its restart. Red: notify's quits stay empty.
+        update = support.module("update")
+        failure = "ERROR: No matching distribution found for pendify==0.1.6"
+        for mode, restarted in (("auto", []), ("notify", [True])):
+            with self.subTest(mode=mode):
+                installs, quits, answers = [], [], [(False, failure), (True, None)]
+                made = update.Updater("0.1.5", mode, check=lambda: "0.1.6",
+                                      install=lambda version, installs=installs, answers=answers: (
+                                          installs.append(version) or answers.pop(0)),
+                                      restart=lambda quits=quits: quits.append(True), clock=lambda seconds: True,
+                                      log=lambda line: None)
+                made.round()
+                if mode == "notify":
+                    self.assertTrue(made.request_install())
+                self.assertTrue(made.wait(5))
+                self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": failure})
+                self.with_updater(made)
+                status, headers, _ = self.call("POST", "/update")
+                self.assertEqual((status, headers["location"]), (303, "/"))
+                deadline = time.monotonic() + 5
+                while ((made.snapshot()["state"] != "ready" or len(quits) < len(restarted))
+                       and time.monotonic() < deadline):
+                    time.sleep(0.01)
+                for thread in [thread for thread in threading.enumerate() if thread.name == "update-install"]:
+                    thread.join(5)
+                self.assertEqual((made.snapshot()["state"], installs, quits, made.restart_requested.is_set()),
+                                 ("ready", ["0.1.6", "0.1.6"], restarted, mode == "notify"))
 
     def test_restart_answers_restarting_in_both_languages_and_the_page_keeps_the_line_until_the_poll_fails(self):
         # Mutation: /restart answered 204 with no words. Red: the answer's body is empty.

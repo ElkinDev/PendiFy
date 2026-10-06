@@ -165,21 +165,21 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(made.snapshot(), {"state": "ready", "version": "0.1.6", "error": None})
         self.assertEqual(run.calls, [])
 
-    def test_a_failed_pip_reads_failed_with_its_last_line_and_is_not_retried_in_the_same_process(self):
-        # Mutation: a failed state checked again at the next round. Red: a second GET and a second pip run.
+    def test_a_failed_pip_reads_failed_with_its_last_line_and_the_next_round_installs_it_again(self):
+        # Mutation: a failed state left closed to the rounds. Red: the second round makes no GET and runs no pip.
         # Mutation: the first stderr line kept. Red: the kept line reads "Collecting pendify==0.1.6".
-        made, get, run = self.make("auto", "0.1.6", runs=[(1, f"Collecting pendify==0.1.6\n{PIP_LINE}\n\n")])
+        # Mutation: a ready state open to the rounds. Red: the round after ready makes a third GET.
+        made, get, run = self.make("auto", "0.1.6", runs=[(1, f"Collecting pendify==0.1.6\n{PIP_LINE}\n\n"), (0, "")])
         made.round()
-        failed = {"state": "failed", "version": "0.1.6", "error": PIP_LINE}
-        self.assertEqual(made.snapshot(), failed)
+        self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": PIP_LINE})
+        self.assertEqual((len(get.requests), len(run.calls), self.logs), (1, 1, ["the install of 0.1.6 failed"]))
         made.round()
+        self.assertEqual(made.snapshot(), {"state": "ready", "version": "0.1.6", "error": None})
+        self.assertEqual((len(get.requests), len(run.calls), len(self.logs)), (2, 2, 1))
+        self.assertEqual(run.calls[1][0][-1], "pendify==0.1.6")
+        self.assertIs(run.calls[1][2], threading.current_thread())  # the round's own thread, as the first install
         made.round()
-        self.assertEqual((made.snapshot(), len(get.requests), len(run.calls)), (failed, 1, 1))
-        self.assertEqual(len(self.logs), 1)
-        # The next start tries again.
-        again, _, run = self.make("auto", "0.1.6", runs=[(0, "")])
-        again.round()
-        self.assertEqual((again.snapshot()["state"], len(run.calls)), ("ready", 1))
+        self.assertEqual((len(get.requests), len(run.calls), self.restarts), (2, 2, []))
         # A pip that cannot start, or that runs past the bound, reads failed with its exception's name.
         for failure, line in ((FileNotFoundError(2, "not found"), "FileNotFoundError"),
                               (subprocess.TimeoutExpired("pip", 600), "TimeoutExpired"),
@@ -209,6 +209,113 @@ class UpdaterTest(unittest.TestCase):
         made, _, run = self.make("auto", "0.1.6", runs=[(1, PIP_LINE)])
         self.assertFalse(made.request_install())
         self.assertEqual(run.calls, [])
+
+    def test_notify_mode_offers_a_failed_install_again_on_the_page_and_at_the_next_round(self):
+        # Mutation: the page's request refused from failed. Red: it answers False and pip runs once.
+        # Mutation: no restart after a retried «Actualizar». Red: the restart flag stays down.
+        # Mutation: notify installs a failed version at the round. Red: pip runs at the round.
+        # Mutation: notify's round leaves failed as it is. Red: the state after the round reads failed.
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        made, get, run = self.make("notify", "0.1.6", runs=[(1, PIP_LINE, hold), (0, "")])
+        made.round()
+        self.assertTrue(made.request_install())
+        self.assertTrue(run.entered.wait(5))
+        self.assertFalse(made.request_install())  # installing: nothing more to start
+        hold.set()
+        self.assertTrue(made.wait(5))
+        self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": PIP_LINE})
+        self.assertEqual((len(run.calls), self.restarts), (1, []))
+        self.assertTrue(made.request_install())  # «Reintentar»
+        self.assertTrue(wait_until(lambda: self.restarts))
+        self.assertEqual(made.snapshot(), {"state": "ready", "version": "0.1.6", "error": None})
+        self.assertTrue(made.restart_requested.is_set())
+        self.assertEqual((len(run.calls), self.restarts, len(get.requests)), (2, [True], 1))
+        self.assertIsNot(run.calls[1][2], threading.main_thread())
+        # With no request, the next round reads available again and pip does not run.
+        waits = Waits(2)
+        made, get, run = self.make("notify", "0.1.6", runs=[(1, PIP_LINE)], waits=waits)
+        made.round()
+        self.assertTrue(made.request_install())
+        self.assertTrue(made.wait(5))
+        self.assertEqual(made.snapshot()["state"], "failed")
+        made.run()
+        self.assertEqual(made.snapshot(), {"state": "available", "version": "0.1.6", "error": None})
+        self.assertEqual((waits.waited, len(get.requests), len(run.calls), self.restarts),
+                         ([60, 21600, 21600], 3, 1, []))
+
+    def test_auto_mode_takes_the_pages_request_from_failed_only_and_never_restarts_by_itself(self):
+        # Mutation: auto's request refused from failed. Red: it answers False and pip runs once.
+        # Mutation: auto's retried install followed by the restart. Red: the restart flag is set.
+        # Mutation: auto's request taken from available. Red: it answers True from available.
+        hold = threading.Event()
+        self.addCleanup(hold.set)
+        made, get, run = self.make("auto", "0.1.6", runs=[(1, PIP_LINE), (1, PIP_LINE, hold), (0, "")])
+        self.assertFalse(made.request_install())  # none
+        made.round()
+        self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": PIP_LINE})
+        self.assertTrue(made.request_install())
+        self.assertTrue(run.entered.wait(5))
+        self.assertEqual(made.snapshot()["state"], "installing")
+        self.assertFalse(made.request_install())  # installing
+        hold.set()
+        self.assertTrue(made.wait(5))
+        self.assertEqual(made.snapshot(), {"state": "failed", "version": "0.1.6", "error": PIP_LINE})
+        self.assertTrue(made.request_install())
+        self.assertTrue(made.wait(5))
+        for thread in [thread for thread in threading.enumerate() if thread.name == "update-install"]:
+            thread.join(5)
+        self.assertEqual(made.snapshot(), {"state": "ready", "version": "0.1.6", "error": None})
+        self.assertEqual((len(run.calls), len(get.requests)), (3, 1))
+        self.assertTrue(all(thread is not threading.main_thread() for _, _, thread in run.calls[1:]))
+        self.assertEqual((self.restarts, made.restart_requested.is_set()), ([], False))
+        self.assertFalse(made.request_install())  # ready
+        # A version seen in auto mode is auto's own to install: the page's request is refused there.
+        made, _, run = self.make("auto", "0.1.6")
+        made._state = (update.AVAILABLE, "0.1.6", None)
+        self.assertFalse(made.request_install())
+        self.assertEqual((made.snapshot()["state"], run.calls), ("available", []))
+
+    def test_a_round_whose_check_fails_or_names_nothing_newer_leaves_a_failed_install_as_it_is(self):
+        # Mutation: a failed state cleared by any round. Red: it reads none or available after the round.
+        failed = {"state": "failed", "version": "0.1.6", "error": PIP_LINE}
+        for mode in ("auto", "notify"):
+            for answer in (urllib.error.URLError("unreachable"), "0.1.5", "0.1.4", "0.1.6rc1"):
+                with self.subTest(mode=mode, answer=str(answer)):
+                    made, get, run = self.make(mode, "0.1.6", answer, runs=[(1, PIP_LINE)])
+                    made.round()
+                    if mode == "notify":
+                        self.assertTrue(made.request_install())
+                        self.assertTrue(made.wait(5))
+                    self.assertEqual(made.snapshot(), failed)
+                    made.round()
+                    self.assertEqual((made.snapshot(), len(get.requests), len(run.calls), self.restarts),
+                                     (failed, 2, 1, []))
+
+    def test_a_first_failed_install_brings_the_next_round_ten_minutes_after_once_per_version(self):
+        # Mutation: no early round after auto's failed install. Red: the second wait is 21600.
+        # Mutation: an early round after every failed install. Red: the third wait is 600.
+        # Mutation: one early round for the whole run, not per version. Red: 0.1.7's first failure waits 21600.
+        waits = Waits(3)
+        made, get, run = self.make("auto", "0.1.6", runs=[(1, PIP_LINE), (1, PIP_LINE), (0, "")], waits=waits)
+        made.run()
+        self.assertEqual(waits.waited, [60, 600, 21600, 21600])
+        self.assertEqual((len(get.requests), len(run.calls), made.snapshot()["state"]), (3, 3, "ready"))
+        self.assertEqual(update.RETRY_SECONDS, 10 * 60)
+        # Nothing fails: every wait after the first is six hours.
+        waits = Waits(3)
+        made, get, run = self.make("auto", "0.1.6", runs=[(0, "")], waits=waits)
+        made.run()
+        self.assertEqual((waits.waited, len(get.requests), len(run.calls)), ([60, 21600, 21600, 21600], 3, 1))
+        # A lasting failure, then a newer version that fails too: one early round for each version.
+        waits = Waits(5)
+        made, get, run = self.make("auto", "0.1.6", "0.1.6", "0.1.6", "0.1.7",
+                                   runs=[(1, PIP_LINE)] * 5, waits=waits)
+        made.run()
+        self.assertEqual(waits.waited, [60, 600, 21600, 21600, 600, 21600])
+        self.assertEqual([command[-1] for command, _, _ in run.calls],
+                         ["pendify==0.1.6"] * 3 + ["pendify==0.1.7"] * 2)
+        self.assertEqual(made.snapshot()["version"], "0.1.7")
 
     def test_a_network_failure_stays_silent_and_the_next_round_runs(self):
         # Mutation: the loop ends on a failed check. Red: one GET only and nothing seen.
