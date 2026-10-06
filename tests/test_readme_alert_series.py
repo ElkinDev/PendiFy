@@ -16,7 +16,9 @@ SENTENCES = (
 # The arrival order: the frames of the animation follow it.
 STILLS = ("alert-1-waiting.png", "alert-2-match-found.png", "alert-3-match-started.png")
 STILL_SIZE = (1920, 945)
-GIF_WIDTH = 960
+GIF_SIZE = (960, 472)
+# Two seconds a frame, in the centiseconds a Graphic Control Extension holds.
+GIF_DELAY = 200
 GIF_LIMIT = 2 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Text chunks carry the capture tool and free comments, tIME the moment, iCCP the screen's profile: only the chunks a
@@ -57,16 +59,24 @@ def _skip_sub_blocks(data, i):
 
 
 def gif_walk(data):
-    """The logical width, the frame count, the extension labels and the application ids of a GIF, by its blocks."""
-    width = struct.unpack("<H", data[6:8])[0]
+    """The logical size, the frame count, the extension labels, the application ids, the NETSCAPE2.0 loop counts and
+    the Graphic Control delays (centiseconds) of a GIF, by its blocks."""
+    size = struct.unpack("<HH", data[6:10])
     flags = data[10]
     i = 13 + (3 * (2 << (flags & 7)) if flags & 0x80 else 0)
-    frames, labels, apps = 0, [], []
+    frames, labels, apps, loops, delays = 0, [], [], [], []
     while data[i] != 0x3B:
         if data[i] == 0x21:
             labels.append(data[i + 1])
             if data[i + 1] == 0xFF:
-                apps.append(data[i + 3:i + 3 + data[i + 2]])
+                app = data[i + 3:i + 3 + data[i + 2]]
+                apps.append(app)
+                sub = i + 3 + data[i + 2]
+                # The NETSCAPE2.0 sub-block: size 3, id 1, then the loop count, 0 meaning forever.
+                if app == b"NETSCAPE2.0" and data[sub] == 3 and data[sub + 1] == 1:
+                    loops.append(struct.unpack("<H", data[sub + 2:sub + 4])[0])
+            elif data[i + 1] == 0xF9:
+                delays.append(struct.unpack("<H", data[i + 4:i + 6])[0])
             i = _skip_sub_blocks(data, i + 2)
         elif data[i] == 0x2C:
             frames += 1
@@ -75,7 +85,7 @@ def gif_walk(data):
             i = _skip_sub_blocks(data, i)
         else:
             raise AssertionError(f"unknown GIF block {data[i]:#x} at {i}")
-    return width, frames, labels, apps, i + 1
+    return size, frames, labels, apps, loops, delays, i + 1
 
 
 class ReadmeAlertSeriesTest(unittest.TestCase):
@@ -117,16 +127,21 @@ class ReadmeAlertSeriesTest(unittest.TestCase):
 
     def test_the_gif_is_under_2_mb_with_three_looping_frames_and_no_comment(self):
         # Mutation: a comment extension written, a fourth frame, or no loop. Red: label 0xFE, the count, no NETSCAPE.
+        # Mutation: saved with loop=1, duration=100 or at another height. Red: the loop count, a delay, the size.
         path = support.ROOT / "docs" / "alert-flow.gif"
         self.assertTrue(path.is_file(), "no docs/alert-flow.gif")
-        data = path.read_bytes()
+        self.check_gif(path.read_bytes())
+
+    def check_gif(self, data):
         self.assertIn(data[:6], (b"GIF87a", b"GIF89a"))
         self.assertLess(len(data), GIF_LIMIT)
-        width, frames, labels, apps, end = gif_walk(data)
-        self.assertEqual(width, GIF_WIDTH)
+        size, frames, labels, apps, loops, delays, end = gif_walk(data)
+        self.assertEqual(size, GIF_SIZE, "the logical screen size")
         self.assertEqual(frames, len(STILLS))
         self.assertNotIn(0xFE, labels, "a comment extension")
         self.assertIn(b"NETSCAPE2.0", apps, "no loop")
+        self.assertEqual(loops, [0], "the NETSCAPE2.0 loop count")
+        self.assertEqual(delays, [GIF_DELAY] * frames, "the frame delays in centiseconds")
         self.assertEqual(end, len(data), "bytes after the trailer")
 
     def test_the_render_script_exists_and_holds_no_code_link_id_or_token(self):
