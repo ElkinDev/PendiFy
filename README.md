@@ -6,7 +6,7 @@ Un programa pequeño para Windows que avisa en tu teléfono cuando se encuentra 
 Se enlaza una sola vez con tu cuenta de Pendi leyendo un código QR, sin crear ninguna cuenta nueva.
 Es gratis, no pide permisos de administrador y solo usa Python.
 
-![La página de PendiFy en el navegador: este PC enlazado a la cuenta, la lista de actividad y el código QR que abre pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/demo.jpeg)
+![La página de PendiFy en el navegador, en tema oscuro: este PC enlazado a la cuenta, la lista de actividad y el código QR patrocinado que abre pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
 
 ### Instalar
 
@@ -73,7 +73,7 @@ A small Windows program that alerts your phone when your match is found and when
 It links once to your Pendi account by scanning a QR code, with no new account of any kind.
 It is free, needs no administrator rights and only uses Python.
 
-![The PendiFy page in the browser: this PC linked to the account, the activity list and the QR code that opens pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/demo.jpeg)
+![The PendiFy page in the browser, in dark theme: this PC linked to the account, the activity list and the sponsored QR code that opens pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
 
 ### Install
 
