@@ -204,6 +204,14 @@ class PackageShapeTest(unittest.TestCase):
         for part in (RELEASE_ONLY, "pyproject.toml", '"v$version"', "exit 1"):
             self.assertIn(part, steps[check[0]])
 
+    def test_a_release_of_the_macos_app_skips_the_pypi_build(self):
+        # Mutation: the build job's condition dropped. Red: a macos-app-<version> release runs the build, which then
+        # fails its tag check, as every release of the signed app would.
+        lines = PUBLISH.read_text(encoding="utf-8").splitlines()
+        build = nested_block(lines, "  build:", 2)
+        self.assertIn("    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')", build)
+        self.assertIn("    needs: build", nested_block(lines, "  publish:", 2))
+
     def test_the_sdist_prunes_the_tests_folder(self):
         # Mutation: MANIFEST.in removed. Red: setuptools adds tests/test_*.py to the sdist on its own, without
         # their helpers, so a public download carries tests that cannot run.

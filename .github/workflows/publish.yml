@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   build:
+    # A release of the macOS app (tools/release-macos-app.sh, tag macos-app-<version>) is no PyPI release: skipped,
+    # and the publish job with it.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
