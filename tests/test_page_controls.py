@@ -382,10 +382,16 @@ class PageControlsTest(unittest.TestCase):
     def test_the_switch_of_the_click_on_accept_is_drawn_posted_and_stated_only_where_available(self):
         # Mutation: /autoaccept left out of the routes. Red: the post answers 303 and the switch stays off.
         class FakeSwitch:
-            available, on, prompted = True, False, 0
+            available, on, prompted, allowed, opened = True, False, 0, False, 0
 
             def enabled(self):
                 return self.on
+
+            def granted(self):
+                return self.allowed
+
+            def open_settings(self):
+                self.opened += 1
 
             def enable(self):
                 self.prompted += 1
@@ -403,8 +409,18 @@ class PageControlsTest(unittest.TestCase):
         self.assertIs(self.state_json(served=served)["autoaccept"], False)
         self.assertEqual(self.call("POST", "/autoaccept", form={"on": "1"}, served=served)[0], 303)
         self.assertEqual((switch.on, switch.prompted), (True, 1))
-        self.assertIn('name="autoaccept" aria-labelledby="aa-label" aria-describedby="aa-help" checked',
-                      self.call("GET", "/", served=served)[2])
+        shown = self.call("GET", "/", served=served)[2]
+        self.assertIn('name="autoaccept" aria-labelledby="aa-label" aria-describedby="aa-help" checked', shown)
+        # On and with no permission yet: the steps, the picture and the button that opens System Settings.
+        self.assertIn('class="perm"', shown)
+        self.assertIn(page.WORDS["es"]["perm_step2"], shown)
+        self.assertIn('<svg viewBox="0 0 416 200" role="img"', shown)
+        self.assertIs(self.state_json(served=served)["accessibility"], False)
+        self.assertEqual(self.call("POST", "/accessibility", served=served)[0], 303)
+        self.assertEqual(switch.opened, 1)
+        switch.allowed = True  # given: the box is gone
+        self.assertNotIn('class="perm"', self.call("GET", "/", served=served)[2])
+        self.assertIs(self.state_json(served=served)["accessibility"], True)
         self.assertEqual(self.call("POST", "/autoaccept", form={"on": "x"}, served=served)[0], 400)
         self.call("POST", "/autoaccept", form={"on": "0"}, served=served)
         self.assertFalse(switch.on)

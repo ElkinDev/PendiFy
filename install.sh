@@ -62,18 +62,16 @@ fi
 say "Installing $SOURCE"
 run "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check --upgrade "$SOURCE"
 
-# The app: a small bundle whose program starts PendiFy with the environment's Python, with no Dock icon (the page
+# The app: its main executable is PendiFy's launcher (tools/macos_launcher.c), which starts the environment's Python
+# as its child, so macOS lists the app as "PendiFy", with its icon, for the Accessibility permission. No Dock icon (the page
 # and its «Salir» button are the program's face). Opened again, it opens the page of the copy that runs.
 say "Making $APP"
 if [ -z "$DRY" ]; then
+    PKG="$("$VENV/bin/python" -c 'import pendify, pathlib; print(pathlib.Path(pendify.__file__).parent)')"
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    cat > "$APP/Contents/MacOS/PendiFy" <<EOF
-#!/bin/bash
-exec "$VENV/bin/python" -m pendify "\$@" >>"$SUPPORT/pendify.log" 2>&1
-EOF
-    chmod +x "$APP/Contents/MacOS/PendiFy"
-    VERSION="$("$VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("pendify"))' 2>/dev/null || echo 0)"
+    cp "$PKG/macos/PendiFy" "$APP/Contents/MacOS/PendiFy"
+    chmod 755 "$APP/Contents/MacOS/PendiFy"
     cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -85,20 +83,26 @@ EOF
     <key>CFBundleExecutable</key><string>PendiFy</string>
     <key>CFBundleIconFile</key><string>PendiFy</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleShortVersionString</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSUIElement</key><true/>
 </dict>
 </plist>
 EOF
-    ICO="$("$VENV/bin/python" -c 'import pendify, pathlib; print(pathlib.Path(pendify.__file__).with_name("pendify.ico"))')"
-    sips -s format icns "$ICO" --out "$APP/Contents/Resources/PendiFy.icns" >/dev/null 2>&1 || true
+    sips -s format icns "$PKG/pendify.ico" --out "$APP/Contents/Resources/PendiFy.icns" >/dev/null 2>&1 || true
+    # Ad hoc, with a fixed identifier: the same bytes give the same signature, so the permission is kept.
+    codesign --force --sign - --identifier io.github.elkindev.pendify.app "$APP" >/dev/null 2>&1 \
+        || say "The app could not be signed; macOS may list it under another name."
     touch "$APP"
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" \
+        -f "$APP" >/dev/null 2>&1 || true
 fi
 
-# A start at logon turned on from the page is rewritten with this environment's Python.
+# A start at logon turned on from the page is rewritten to go through the app, as the page writes it.
 if [ -f "$AGENT" ]; then
     say "Updating the start with macOS"
-    run "$VENV/bin/python" -c 'from pendify.autostart import Autostart; Autostart().enable()'
+    PENDIFY_APP="$APP/Contents/MacOS/PendiFy" run "$VENV/bin/python" -c \
+        'from pendify.autostart import Autostart; Autostart().enable()'
 fi
 
 say ""

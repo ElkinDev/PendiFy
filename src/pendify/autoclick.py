@@ -17,6 +17,7 @@ import sys
 import time
 
 APP_PATH = "/Applications/Teamfight Tactics.app"
+SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 OWNER_NAME = "TFTClient-Mac-Shipping"
 ACCEPT_ACROSS = 0.5
 ACCEPT_DOWN = 0.6085
@@ -180,8 +181,8 @@ class Switch:
     """The page's switch of the click on accept, kept in config.json, on by default; available on macOS only. While
     on, macOS is asked for the Accessibility permission, which its person grants once in System Settings."""
 
-    def __init__(self, store, prompt=None):
-        self._store = store
+    def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run):
+        self._store, self._granted, self._run = store, granted, run
         self._prompt = prompt if prompt is not None else (lambda: trusted(prompt=True))
         self.available = available()
 
@@ -204,6 +205,17 @@ class Switch:
 
     def disable(self):
         return self._set(False)
+
+    def granted(self):
+        """True once macOS lets this app click (the Accessibility permission); asks nothing."""
+        return bool(self._granted())
+
+    def open_settings(self):
+        """System Settings, opened at its Accessibility list."""
+        try:
+            self._run(["/usr/bin/open", SETTINGS_URL], capture_output=True, timeout=TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     def _set(self, on):
         try:

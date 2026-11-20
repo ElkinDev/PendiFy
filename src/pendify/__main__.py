@@ -188,7 +188,9 @@ def _restart(args, spawn, show, opens_page):
     which claims the run file as a first start does. One that opens its page, as every restart asked today does,
     goes without --quiet; one that does not keeps this run's --quiet. This run's --dry, --data-dir, --worker and
     --client-lockfile go with it either way."""
-    command = [sys.executable, "-m", __package__] + (["--quiet"] if args.quiet and not opens_page else [])
+    app = os.environ.get("PENDIFY_APP") if sys.platform == "darwin" else None  # through PendiFy.app's launcher
+    command = ([app] if app else [sys.executable, "-m", __package__])
+    command += ["--quiet"] if args.quiet and not opens_page else []
     command += ["--dry"] if args.dry else []
     for option in ("data_dir", "worker", "client_lockfile"):
         if hasattr(args, option):  # the parser's SUPPRESS: present only when this run was given it

@@ -7,6 +7,7 @@ path; the real one imports winreg inside itself and takes the key path as an arg
 scratch key. Where winreg cannot be imported the start with Windows is not available, and the page shows and
 routes nothing of it. A registry failure is one sentence on stderr, by its type only, and changes nothing.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -126,7 +127,12 @@ class Autostart:
 
     def command(self):
         """install.ps1's start line plus --quiet: pythonw.exe beside the interpreter when that file exists, else
-        the interpreter, quoted when its path holds a space (install.ps1's Format-Arg)."""
+        the interpreter, quoted when its path holds a space (install.ps1's Format-Arg). Started by PendiFy.app on
+        macOS (PENDIFY_APP, its launcher), the app's own executable, so the start at logon keeps the app's
+        permissions."""
+        app = os.environ.get("PENDIFY_APP") if IS_MAC else None
+        if app:
+            return f'"{app}" --quiet'
         interpreter = Path(self._executable)
         windowless = interpreter.with_name("pythonw.exe")
         chosen = str(windowless if windowless.is_file() else interpreter)
