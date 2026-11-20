@@ -408,3 +408,18 @@ class ConfigStoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoAcceptConfigTest(unittest.TestCase):
+    def test_the_click_on_accept_is_off_by_default_kept_across_writes_and_off_is_no_key(self):
+        tmp = support.temp_dir()
+        self.addCleanup(tmp.cleanup)
+        store = config.ConfigStore(Path(tmp.name))
+        store.set_typed(support.LINK_ID, support.SECRET)
+        self.assertFalse(store.read_autoaccept())
+        store.set_autoaccept(True)
+        store.set_lang("en")  # another write keeps it
+        self.assertTrue(store.read_autoaccept())
+        store.set_autoaccept(False)
+        self.assertFalse(store.read_autoaccept())
+        self.assertNotIn("autoaccept", store.path.read_text(encoding="utf-8"))
