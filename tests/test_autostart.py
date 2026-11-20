@@ -171,7 +171,8 @@ class LaunchAgentTest(unittest.TestCase):
         tmp = support.temp_dir()
         self.addCleanup(tmp.cleanup)
         self.path = Path(tmp.name) / "LaunchAgents" / "io.github.elkindev.pendify.plist"
-        self.agent = autostart.LaunchAgent(path=self.path)
+        self.log = Path(tmp.name) / "pendify.log"
+        self.agent = autostart.LaunchAgent(path=self.path, log_path=self.log)
 
     def test_write_read_and_delete_keep_one_plist_that_runs_the_start_line_at_load(self):
         import plistlib
@@ -185,7 +186,8 @@ class LaunchAgentTest(unittest.TestCase):
             written = plistlib.load(handle)
         self.assertEqual(written, {"Label": "io.github.elkindev.pendify",
                                    "ProgramArguments": ["/opt/a b/bin/python3", "-m", "pendify", "--quiet"],
-                                   "RunAtLoad": True, "ProcessType": "Interactive"})
+                                   "RunAtLoad": True, "ProcessType": "Interactive",
+                                   "StandardOutPath": str(self.log), "StandardErrorPath": str(self.log)})
         self.assertTrue(subject.disable())
         self.assertFalse(self.path.exists())
         self.assertTrue(subject.disable())  # a missing plist is nothing to remove

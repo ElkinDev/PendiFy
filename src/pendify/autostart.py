@@ -56,9 +56,12 @@ class LaunchAgent:
     read, write and delete, as WindowsRegistry; `write` takes the start line and keeps it as the plist's
     ProgramArguments."""
 
-    def __init__(self, path=None, label=LAUNCH_AGENT_LABEL):
+    def __init__(self, path=None, label=LAUNCH_AGENT_LABEL, log_path=None):
         self.path = Path(path) if path is not None else Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
         self.label = label
+        # The program's output, where the PendiFy app writes it too: launchd drops it otherwise.
+        self.log_path = (Path(log_path) if log_path is not None else
+                         Path.home() / "Library" / "Application Support" / "pendify" / "pendify.log")
 
     def read(self):
         """The plist's text, or None when it is missing."""
@@ -72,7 +75,8 @@ class LaunchAgent:
         import shlex
 
         agent = {"Label": self.label, "ProgramArguments": shlex.split(text), "RunAtLoad": True,
-                 "ProcessType": "Interactive"}
+                 "ProcessType": "Interactive", "StandardOutPath": str(self.log_path),
+                 "StandardErrorPath": str(self.log_path)}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "wb") as handle:
             plistlib.dump(agent, handle)

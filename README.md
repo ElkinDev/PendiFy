@@ -54,6 +54,7 @@ El instalador busca Python 3.10 o más nuevo (si no lo hay y tienes Homebrew, in
 - Iniciar con macOS: el interruptor «Iniciar con macOS» de la página crea un LaunchAgent solo para tu usuario, sin permisos de administrador.
 - Configuración: `~/Library/Application Support/pendify/config.json`; el registro del programa queda en `pendify.log` en esa misma carpeta.
 - Sonido: el aviso suena con los sonidos del sistema.
+- App de Teamfight Tactics: si juegas TFT con su app propia (sin el cliente de League), PendiFy lee el registro del juego y avisa a tu teléfono cuando aparece la partida y cuando empieza. Esa app no ofrece una forma de aceptar desde fuera, así que la partida la aceptas tú; con el cliente de League se acepta sola como en Windows.
 - Desinstalar: `curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/uninstall.sh | bash`. Quita la app, el inicio con macOS y el entorno; la configuración se queda.
 
 ### Enlazar
@@ -140,6 +141,7 @@ The installer looks for Python 3.10 or newer (with none and Homebrew present, it
 - Start with macOS: the page's "Start with macOS" switch makes a LaunchAgent for your user only, with no administrator rights.
 - Config: `~/Library/Application Support/pendify/config.json`; the program's log is `pendify.log` in that same folder.
 - Sound: the alert plays the system's sounds.
+- Teamfight Tactics app: if you play TFT with its own app (no League client), PendiFy reads the game's log and alerts your phone when the match is found and when it starts. That app offers no way to accept from outside, so you accept the match yourself; with the League client it is accepted for you, as on Windows.
 - Uninstall: `curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/uninstall.sh | bash`. It removes the app, the start with macOS and the environment; the config is kept.
 
 ### Link
