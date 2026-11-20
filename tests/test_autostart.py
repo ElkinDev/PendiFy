@@ -164,6 +164,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS only: a LaunchAgent is the start at logon there")
 class LaunchAgentTest(unittest.TestCase):
     """The macOS start at logon: one plist under a scratch folder here, never the user's LaunchAgents."""
 

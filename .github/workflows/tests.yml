@@ -23,4 +23,9 @@ jobs:
           python-version: "3.12"
       - name: Run the suite
         working-directory: tests
+        # The temporary folder on the checkout's own drive, by its long name: a hosted Windows runner keeps the
+        # checkout on D: and TEMP on C: under an 8.3 short name, which a PC with one drive never shows.
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: python -m unittest discover -s . -v
