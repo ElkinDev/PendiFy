@@ -314,10 +314,12 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
                 pass  # unmarked, the finally marks it again; the stop goes on
             stop.set()
 
+        clicking = autoclick.Switch(store) if getattr(args, "client_lockfile", None) is None else None
+        if clicking is not None and clicking.available and clicking.enabled():
+            clicking.ask()  # on by default: the permission is asked for at the start, not at the first pop
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events,
-                                        autoaccept=autoclick.Switch(store) if getattr(args, "client_lockfile", None)
-                                        is None else None)
+                                        autoaccept=clicking)
         pairing_page.run = run  # its /replace answers the secret the publish below writes
         url = pairing_page.start()
         # The update's rounds on their own thread (update.py), built once the page serves; its restart is the
