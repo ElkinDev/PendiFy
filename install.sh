@@ -90,8 +90,17 @@ if [ -z "$DRY" ]; then
 </plist>
 EOF
     sips -s format icns "$PKG/pendify.ico" --out "$APP/Contents/Resources/PendiFy.icns" >/dev/null 2>&1 || true
-    # Ad hoc, with a fixed identifier: the same bytes give the same signature, so the permission is kept.
-    codesign --force --sign - --identifier io.github.elkindev.pendify.app "$APP" >/dev/null 2>&1 \
+    # Signed with the owner's Developer ID when the keychain holds one, so macOS names the developer in Login Items
+    # instead of "unidentified developer"; ad hoc otherwise, or when that signing fails. A fixed identifier either
+    # way: the same bytes and identity give the same signature, so the permission is kept. PENDIFY_SIGN_IDENTITY
+    # names another identity, or - for ad hoc.
+    identity=${PENDIFY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)}
+    [ -n "$identity" ] || identity=-
+    codesign --force --sign "$identity" --timestamp=none --identifier io.github.elkindev.pendify.app "$APP" \
+        >/dev/null 2>&1 \
+        || { [ "$identity" != - ] && codesign --force --sign - --identifier io.github.elkindev.pendify.app "$APP" \
+             >/dev/null 2>&1; } \
         || say "The app could not be signed; macOS may list it under another name."
     touch "$APP"
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" \
