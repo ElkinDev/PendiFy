@@ -191,7 +191,9 @@ def _restart(args, spawn, show, opens_page):
         if hasattr(args, option):  # the parser's SUPPRESS: present only when this run was given it
             command += ["--" + option.replace("_", "-"), str(getattr(args, option))]
     try:
-        spawn(command, creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP, close_fds=True)
+        detached = ({"creationflags": _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+                    else {"start_new_session": True})  # Popen refuses creationflags off Windows
+        spawn(command, **detached, close_fds=True)
     except OSError:
         return _ends(RESTART_FAILED_LINE, 1, show)
     return 0

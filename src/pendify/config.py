@@ -9,6 +9,7 @@ and is moved over the old one with os.replace, so a reader sees the old file or 
 """
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -51,9 +52,15 @@ class Pairing:
     link_id: Optional[str] = field(repr=False, default=None)
 
 
-def default_base_dir(environ=None):
-    """%APPDATA%, the base of a real run. Its absence is an error, never a silent fallback."""
+def default_base_dir(environ=None, platform=None):
+    """%APPDATA%, the base of a real run; ~/Library/Application Support on macOS. Its absence is an error, never a
+    silent fallback."""
     environ = os.environ if environ is None else environ
+    if (sys.platform if platform is None else platform) == "darwin":
+        home = (environ.get("HOME") or "").strip()
+        if not home:
+            raise RuntimeError("HOME is not set, so the config folder has no place")
+        return Path(home) / "Library" / "Application Support"
     value = (environ.get("APPDATA") or "").strip()
     if not value:
         raise RuntimeError("APPDATA is not set, so the config folder has no place")

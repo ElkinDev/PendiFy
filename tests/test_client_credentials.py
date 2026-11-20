@@ -18,6 +18,9 @@ PORT = 51234
 # A command line in the shape the client's process carries: two decoys that name a port and a token too.
 COMMAND_LINE = (f'"C:/Games/Client/ClientUx.exe" --riotclient-app-port=5555 --riotclient-auth-token=decoy '
                 f"--app-port={PORT} --remoting-auth-token={TOKEN} --app-pid=4242")
+if client.IS_MAC:  # ps names the program by its path, and only the client's own program is read there
+    COMMAND_LINE = COMMAND_LINE.replace('"C:/Games/Client/ClientUx.exe"',
+                                        "/Applications/Game.app/Contents/MacOS/LeagueClientUx")
 
 
 class FakeRun:
@@ -104,11 +107,15 @@ class ClientCredentialsTest(unittest.TestCase):
         self.assertEqual(self.values(reader.read()), (PORT, TOKEN))
         self.assertEqual(len(run.calls), 2)
         args, kwargs = run.calls[0]
-        self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
-        self.assertEqual(len(args), 4)
-        # [Console]::Out: the host's own output wraps at the console width and would cut the token in two.
-        for word in ("Get-CimInstance", "Win32_Process", "LeagueClient", "[Console]::Out.WriteLine($_.CommandLine)"):
-            self.assertIn(word, args[3])
+        if client.IS_MAC:  # every command line, never cut at a width; the parse keeps the client's
+            self.assertEqual(args, ["/bin/ps", "-A", "-ww", "-o", "args="])
+        else:
+            self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
+            self.assertEqual(len(args), 4)
+            # [Console]::Out: the host's own output wraps at the console width and would cut the token in two.
+            for word in ("Get-CimInstance", "Win32_Process", "LeagueClient",
+                         "[Console]::Out.WriteLine($_.CommandLine)"):
+                self.assertIn(word, args[3])
         self.assertEqual((kwargs.get("timeout"), kwargs.get("capture_output"), kwargs.get("text")), (5, True, True))
         self.assertIsNone(client.ClientCredentials((str(self.first),), run=None, clock=self.clock).read())
 
@@ -132,3 +139,17 @@ class ClientCredentialsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnClientLinesTest(unittest.TestCase):
+    """macOS's ps lists every process: only the client's own program is read, never the Riot Client's."""
+
+    def test_the_riot_client_s_port_and_token_are_never_taken_for_the_client_s(self):
+        riot = ("/Users/Shared/Riot Games/Riot Client.app/Contents/MacOS/RiotClientServices --app-port=1111 "
+                "--remoting-auth-token=riot-token --priority-launch-path=/Applications/League of Legends.app/"
+                "Contents/LoL/LeagueClient.app/Contents/MacOS/LeagueClient")
+        league = ("/Applications/League of Legends.app/Contents/LoL/LeagueClient.app/Contents/Frameworks/"
+                  "LeagueClientUx.app/Contents/MacOS/LeagueClientUx --app-port=4242 --remoting-auth-token=ux-token")
+        self.assertEqual(client.own_client_lines(riot), "")
+        found = client.parse_command_lines(client.own_client_lines(riot + "\n" + league))
+        self.assertEqual((found.port, found.token), (4242, "ux-token"))

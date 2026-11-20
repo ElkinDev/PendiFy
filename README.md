@@ -41,6 +41,21 @@ Así no se crean los accesos directos en el Escritorio ni en el menú Inicio, y 
 
 El programa revisa PyPI cada seis horas y, cuando hay una versión más nueva, la instala en segundo plano. La página ofrece entonces «Reiniciar ahora» para empezar a usarla. Si la instalación falla, la página ofrece «Reintentar» en cualquier modo y, la primera vez que falla una versión, la siguiente revisión llega a los diez minutos. Para apagarlo, inícialo con `--no-update` o escribe `"update": "off"` en `%APPDATA%\pendify\config.json`. Las actualizaciones automáticas se instalan para tu usuario (--user).
 
+### macOS
+
+PendiFy también funciona en Mac (Apple Silicon o Intel) con League of Legends / TFT instalado. Abre la app Terminal, pega esta línea y pulsa Enter:
+
+    curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/install.sh | bash
+
+El instalador busca Python 3.10 o más nuevo (si no lo hay y tienes Homebrew, instala `python@3.12`), instala PendiFy en su propio entorno en `~/Library/Application Support/pendify/venv`, crea la app `PendiFy` en `~/Applications` (la encuentras con Spotlight o en Launchpad) y la inicia. Para actualizar, vuelve a pegar la misma línea.
+
+- Iniciar: abre `PendiFy` desde Spotlight o Launchpad; si ya está abierto, abre su página.
+- Detener: pulsa «Salir» en la página. En Mac no hay icono junto al reloj.
+- Iniciar con macOS: el interruptor «Iniciar con macOS» de la página crea un LaunchAgent solo para tu usuario, sin permisos de administrador.
+- Configuración: `~/Library/Application Support/pendify/config.json`; el registro del programa queda en `pendify.log` en esa misma carpeta.
+- Sonido: el aviso suena con los sonidos del sistema.
+- Desinstalar: `curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/uninstall.sh | bash`. Quita la app, el inicio con macOS y el entorno; la configuración se queda.
+
 ### Enlazar
 
 Al iniciarse, el navegador abre una página local con un código QR. Escanéalo con la cámara del teléfono: se abre la app Pendi y te pide confirmar el enlace. La página muestra cuando el enlace quedó hecho.
@@ -111,6 +126,21 @@ If Windows answers that `python` was not found, use `py` in its place: `py -m pi
 This way leaves no shortcut on the Desktop or in the Start menu, and the start with Windows is the switch on the page. To update, press «Quit» on the page, run the same pip line again and start it again. To remove it, first turn off the «Start with Windows» switch on the page, press «Quit», then run `python -m pip uninstall pendify`. The configuration in `%APPDATA%\pendify`, with the link to the phone, stays; you can delete that folder by hand.
 
 The program checks PyPI every six hours and, when a newer version exists, installs it in the background. The page then offers «Restart now» to start using it. If the install fails, the page offers «Try again» in either mode and, the first time a version fails, the next check comes ten minutes later. To turn this off, start it with `--no-update` or write `"update": "off"` in `%APPDATA%\pendify\config.json`. Automatic updates install for your user (--user).
+
+### macOS
+
+PendiFy also runs on a Mac (Apple Silicon or Intel) with League of Legends / TFT installed. Open the Terminal app, paste this line and press Enter:
+
+    curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/install.sh | bash
+
+The installer looks for Python 3.10 or newer (with none and Homebrew present, it installs `python@3.12`), installs PendiFy in its own environment in `~/Library/Application Support/pendify/venv`, makes the `PendiFy` app in `~/Applications` (find it with Spotlight or in Launchpad) and starts it. To update, paste the same line again.
+
+- Start: open `PendiFy` from Spotlight or Launchpad; if it already runs, its page opens.
+- Stop: press "Quit" on the page. On a Mac there is no icon by the clock.
+- Start with macOS: the page's "Start with macOS" switch makes a LaunchAgent for your user only, with no administrator rights.
+- Config: `~/Library/Application Support/pendify/config.json`; the program's log is `pendify.log` in that same folder.
+- Sound: the alert plays the system's sounds.
+- Uninstall: `curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/uninstall.sh | bash`. It removes the app, the start with macOS and the environment; the config is kept.
 
 ### Link
 

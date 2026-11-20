@@ -78,8 +78,8 @@ class WatcherFixture:
         tmp = support.temp_dir()
         self.addCleanup(tmp.cleanup)
         # A watcher built with no game_log reads the game's log under LOCALAPPDATA: here this test's own folder,
-        # where no game writes one, never the PC's.
-        local = mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp.name})
+        # where no game writes one, never the PC's. On macOS the log is under HOME: the same folder there.
+        local = mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp.name, "HOME": tmp.name})
         local.start()
         self.addCleanup(local.stop)
         self.store = config.ConfigStore(Path(tmp.name))
