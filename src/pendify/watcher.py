@@ -210,6 +210,8 @@ class Watcher:
             own = getattr(self._found, "phase", None)  # a client that says its phase itself: the TFT app's log
             if callable(own):
                 phase = own()
+                # Read again after the phase: a client watched together with the TFT app may have just appeared.
+                base, token = self._addresses(self._found.port), self._found.token
                 self._on_phase(phase, base, token)
             else:
                 status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
