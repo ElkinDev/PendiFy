@@ -191,3 +191,17 @@ The second sends one alert with the stored pair and prints one line with the ans
 Both commands take `--data-dir <dir>`, used instead of `%APPDATA%` (the config file lives in a folder under it), and `--worker <address>`, used instead of the pairing service's address and accepted only as `http://127.0.0.1:<port>` or `http://localhost:<port>`, so a test run never reaches the real service. `--client-lockfile <file>` replaces the game client's lockfile, with no read of the running processes, and the client it names is reached over plain http on 127.0.0.1, so a test run never reaches a real client.
 
     python -m unittest discover -s tests -v
+
+### Releasing the macOS app
+
+`install.sh` downloads `PendiFy.app` prebuilt, signed with the Developer ID of team BL4KZH338B and notarized by Apple, so that on any Mac the Login Items list and the permission prompts name the developer. It builds the app on the Mac instead while no release is published, when a check of the download (its sha256, its signature, its team) fails, or with `PENDIFY_BUILD_APP=1`. A release is made on the maintainer's Mac, whose login keychain holds the Developer ID Application identity of that team.
+
+Once, store the notary credentials in the keychain under the profile `PendiFy`; the command asks for an app-specific password made for it in the Apple Account settings:
+
+    xcrun notarytool store-credentials PendiFy --apple-id <apple id> --team-id BL4KZH338B
+
+Then, for each release, from a commit that is pushed, with no other change in the tree and `gh` signed in:
+
+    tools/release-macos-app.sh
+
+It builds the app as `install.sh` builds it, signs it with the hardened runtime and a secure timestamp, has Apple notarize it, staples the ticket, publishes the zip as the GitHub release `macos-app-<version>` (the version in `pyproject.toml`, one release per version) and writes the zip's URL and sha256 into `install.sh`. Commit and push `install.sh` after the release: installs download the new app only once that `install.sh` is on `main`. `NOTARY_PROFILE` names another profile, and `tools/release-macos-app.sh --no-publish` only builds and signs the app into `build/macos-app`, with no notarization, no release and no change to `install.sh`.
