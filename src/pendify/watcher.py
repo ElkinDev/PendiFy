@@ -60,6 +60,7 @@ LOST_LINE = "lost the game client, looking for it again"
 ACCEPTING_LINE = "match found: accepting"
 ACCEPTED_LINE = "match found: accepted"
 DRY_LINE = "match found: not accepting (--dry)"
+MANUAL_LINE = "match found: accept it in the game"
 STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client again"
 LOADING_LINE = "loading screen: waiting for the match to start"
 STARTED_LINE = "match started: alerting"
@@ -203,12 +204,17 @@ class Watcher:
         token = self._found.token
         phase = None
         try:
-            status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
-            if status == 200:
-                phase = _phase(raw)
-                if phase is None:  # requests raises a RequestException on a body that is not JSON (S:750)
-                    raise client.ClientUnreachable("ValueError")
+            own = getattr(self._found, "phase", None)  # a client that says its phase itself: the TFT app's log
+            if callable(own):
+                phase = own()
                 self._on_phase(phase, base, token)
+            else:
+                status, raw = self._get(base + client.PHASE_PATH, token, client.CLIENT_TIMEOUT)
+                if status == 200:
+                    phase = _phase(raw)
+                    if phase is None:  # requests raises a RequestException on a body that is not JSON (S:750)
+                        raise client.ClientUnreachable("ValueError")
+                    self._on_phase(phase, base, token)
         except client.ClientUnreachable:  # S:796-798
             self._log(LOST_LINE)
             self._note("lost")
@@ -269,6 +275,11 @@ class Watcher:
             self._ready_check(base, token)
 
     def _ready_check(self, base, token):
+        if not getattr(self._found, "accepts", True):  # the TFT app: nothing can accept for the player
+            self._log(MANUAL_LINE)
+            self._fire(QUEUE_FOUND)
+            self._hold()
+            return
         if not self._accept:  # the script's --dry (S:773-777)
             self._log(DRY_LINE)
             self._fire(QUEUE_FOUND)  # S:776
