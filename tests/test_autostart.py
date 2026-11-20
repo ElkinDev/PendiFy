@@ -187,7 +187,8 @@ class LaunchAgentTest(unittest.TestCase):
         self.assertEqual(written, {"Label": "io.github.elkindev.pendify",
                                    "ProgramArguments": ["/opt/a b/bin/python3", "-m", "pendify", "--quiet"],
                                    "RunAtLoad": True, "ProcessType": "Interactive",
-                                   "StandardOutPath": str(self.log), "StandardErrorPath": str(self.log)})
+                                   "StandardOutPath": str(self.log), "StandardErrorPath": str(self.log),
+                                   "AssociatedBundleIdentifiers": ["io.github.elkindev.pendify.app"]})
         self.assertTrue(subject.disable())
         self.assertFalse(self.path.exists())
         self.assertTrue(subject.disable())  # a missing plist is nothing to remove

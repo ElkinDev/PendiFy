@@ -16,6 +16,9 @@ VALUE_NAME = "PendiFy"
 START_ARGS = "-m pendify --quiet"
 FAILED_LINE = "autostart: the start with Windows could not be {what} ({kind})"
 LAUNCH_AGENT_LABEL = "io.github.elkindev.pendify"
+# PendiFy.app's identifier (install.sh): named in the agent, so System Settings' login items show the app's name and
+# icon rather than a bare executable's.
+APP_BUNDLE_ID = "io.github.elkindev.pendify.app"
 IS_MAC = sys.platform == "darwin"
 
 
@@ -77,7 +80,7 @@ class LaunchAgent:
 
         agent = {"Label": self.label, "ProgramArguments": shlex.split(text), "RunAtLoad": True,
                  "ProcessType": "Interactive", "StandardOutPath": str(self.log_path),
-                 "StandardErrorPath": str(self.log_path)}
+                 "StandardErrorPath": str(self.log_path), "AssociatedBundleIdentifiers": [APP_BUNDLE_ID]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "wb") as handle:
             plistlib.dump(agent, handle)
