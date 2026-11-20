@@ -124,6 +124,9 @@ WORDS = {
         "tray_open": "Abrir la página",
         "autostart_label": "Iniciar con Windows",
         "autostart_help": "Al encender el PC el programa empieza solo, sin abrir esta página.",
+        "autoaccept_label": "Aceptar partida automáticamente",
+        "autoaccept_help": "En la app de Teamfight Tactics, hace clic en Aceptar cuando aparece la partida. "
+                           "macOS pide el permiso de Accesibilidad la primera vez.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
                        "pythonw -m pendify (o python -m pendify para verlo en una consola).",
@@ -216,6 +219,9 @@ WORDS = {
         "tray_open": "Open the page",
         "autostart_label": "Start with Windows",
         "autostart_help": "When the PC turns on, the program starts by itself, without opening this page.",
+        "autoaccept_label": "Accept the match automatically",
+        "autoaccept_help": "In the Teamfight Tactics app, clicks Accept when the match is found. "
+                           "macOS asks for the Accessibility permission the first time.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
                        "(or python -m pendify to see it in a console).",
@@ -549,6 +555,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "const shown=s.dataset.shown;const paused=s.dataset.paused;const upd=s.dataset.update;"
            "const lang=document.documentElement.lang;"
            "const sw=document.querySelector('input[name=autostart]');"
+           "const aa=document.querySelector('input[name=autoaccept]');"
            # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
            # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
            "const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
@@ -570,6 +577,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "if(w&&j.watchText)w.textContent=j.watchText;"
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
            "||j.lang!==lang||(upd!==undefined&&j.update&&j.update.state+' '+(j.update.version||'')!==upd)"
+           "||(aa&&j.autoaccept!==undefined&&String(j.autoaccept)!==String(aa.defaultChecked))"
            "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
            "location.reload();"
            # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
@@ -626,7 +634,12 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "(function(){var sw=document.querySelector('input[name=autostart]');if(!sw)return;"
            "sw.addEventListener('change',function(){var f=document.querySelector('input[name=token]');"
            "fetch('/autostart',{method:'POST',body:new URLSearchParams({token:f.value,on:sw.checked?'1':'0'})})"
-           ".then(function(){location.reload();}).catch(function(){sw.checked=!sw.checked;});});})();")
+           ".then(function(){location.reload();}).catch(function(){sw.checked=!sw.checked;});});})();"
+           # The switch of the click on accept (macOS) posts its change the same way.
+           "(function(){var aa=document.querySelector('input[name=autoaccept]');if(!aa)return;"
+           "aa.addEventListener('change',function(){var f=document.querySelector('input[name=token]');"
+           "fetch('/autoaccept',{method:'POST',body:new URLSearchParams({token:f.value,on:aa.checked?'1':'0'})})"
+           ".then(function(){location.reload();}).catch(function(){aa.checked=!aa.checked;});});})();")
 # Read in <head> before the first paint, so a stored theme choice never flashes the other theme (pendiapp.com's
 # index.html head script). The choice kept in config.json, served as data-theme on <html>, wins: localStorage is
 # read only when the page came with none.
@@ -817,7 +830,7 @@ def _switch(words, token, lang):
 
 class PairingPage:
     def __init__(self, state, watch=None, on_quit=None, on_pause=None, on_resume=None, autostart=None, events=None,
-                 updater=None, mask=None):
+                 updater=None, mask=None, autoaccept=None):
         """`watch` answers the watcher's snapshot; without it the page shows no watcher line. `on_quit` stops
         the program; without it the page shows no quit button and /quit is no route. `on_pause` and `on_resume`
         pause and resume the watcher; without them /pause and /resume are no routes. `autostart` is the start
@@ -836,6 +849,8 @@ class PairingPage:
         self.on_quit = on_quit
         self.on_pause, self.on_resume = on_pause, on_resume
         self.autostart = autostart if autostart is not None and autostart.available else None
+        # The click on the TFT app's accept button (macOS), a switch as the start at logon is; None hides it.
+        self.autoaccept = autoaccept if autoaccept is not None and autoaccept.available else None
         self.events = events
         self.updater = updater
         self.mask = mask if mask is not None else random.choice(qr.MASKS)
@@ -945,6 +960,8 @@ class PairingPage:
             answer["paused"] = _paused(seen)
         if self.autostart is not None:
             answer["autostart"] = self.autostart.enabled()
+        if self.autoaccept is not None:
+            answer["autoaccept"] = self.autoaccept.enabled()
         if self.events is not None:
             answer["log"] = self._log_lines(self.events(), lang)
         if self.updater is not None:
@@ -1096,6 +1113,12 @@ class PairingPage:
                          f'aria-labelledby="sw-label" aria-describedby="sw-help"{checked}><span class="sw-text">'
                          f'<span class="sw-label" id="sw-label">{words["autostart_label"]}</span><span class="sw-help" '
                          f'id="sw-help">{words["autostart_help"]}</span></span></label>')
+        if self.autoaccept is not None:
+            checked = " checked" if self.autoaccept.enabled() else ""
+            inner.append(f'<label class="switch"><input type="checkbox" role="switch" name="autoaccept" '
+                         f'aria-labelledby="aa-label" aria-describedby="aa-help"{checked}><span class="sw-text">'
+                         f'<span class="sw-label" id="aa-label">{words["autoaccept_label"]}</span><span class="sw-help" '
+                         f'id="aa-help">{words["autoaccept_help"]}</span></span></label>')
         return f'<div class="panel pc" role="group" aria-labelledby="pc-title">{"".join(inner)}</div>'
 
     def render_stopped(self, lang):
@@ -1142,6 +1165,13 @@ class PairingPage:
             self.autostart.enable()
         else:
             self.autostart.disable()
+
+    def set_autoaccept(self, on):
+        """/autoaccept: the click on accept turned on or off; the page's next state says what holds."""
+        if on:
+            self.autoaccept.enable()
+        else:
+            self.autoaccept.disable()
 
     def act(self, path, form):
         """The route's action; a config file that cannot be read or replaced is said on the page and on
@@ -1249,6 +1279,7 @@ def _handler(page):
             routes += ("/pause",) if page.on_pause is not None else ()
             routes += ("/resume",) if page.on_resume is not None else ()
             routes += ("/autostart",) if page.autostart is not None else ()
+            routes += ("/autoaccept",) if page.autoaccept is not None else ()
             routes += ("/update", "/restart") if page.updater is not None else ()
             replace_secret = page.run.secret if page.run is not None else None
             routes += ("/replace",) if page.on_quit is not None and replace_secret is not None else ()
@@ -1311,6 +1342,11 @@ def _handler(page):
             if path == "/lang":  # es or en, then the page again, drawn in it; anything else changes nothing
                 if page.set_lang(form.get("lang", "")) == "refused":
                     return self._refuse(400)
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
+            if path == "/autoaccept":  # on is 1 or 0, as /autostart
+                if form.get("on") not in ("1", "0"):
+                    return self._refuse(400)
+                page.set_autoaccept(form["on"] == "1")
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/autostart":  # on is 1 or 0; anything else changes nothing
                 if form.get("on") not in ("1", "0"):

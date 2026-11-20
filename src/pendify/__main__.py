@@ -33,7 +33,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from . import alert, client, config, page, pairing, runfile, tft_app, update, watcher, worker
+from . import alert, autoclick, client, config, page, pairing, runfile, tft_app, update, watcher, worker
 from .autostart import Autostart
 from .tray import Tray
 
@@ -141,7 +141,8 @@ def _watcher(args, store, state, base, timeout, stop, delay, beep):
     if lockfile is None:
         credentials, addresses = client.ClientCredentials(), client.real_addresses
         if client.IS_MAC:  # with no League client, the standalone TFT app read from its log
-            credentials = tft_app.EitherClient(credentials, tft_app.AppSession())
+            credentials = tft_app.EitherClient(credentials, tft_app.AppSession(
+                autoaccept=store.read_autoaccept, clicker=autoclick.Clicker()))
     else:
         credentials, addresses = client.ClientCredentials((str(lockfile),), run=None), client.loopback_addresses
     alerter = alert.Alerter(store, state, lambda link_id, secret, kind: worker.ping(
@@ -314,7 +315,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             stop.set()
 
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
-                                        on_resume=watch.resume, autostart=autostart, events=watch.events)
+                                        on_resume=watch.resume, autostart=autostart, events=watch.events,
+                                        autoaccept=autoclick.Switch(store) if getattr(args, "client_lockfile", None)
+                                        is None else None)
         pairing_page.run = run  # its /replace answers the secret the publish below writes
         url = pairing_page.start()
         # The update's rounds on their own thread (update.py), built once the page serves; its restart is the

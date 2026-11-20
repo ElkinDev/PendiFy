@@ -379,6 +379,41 @@ class PageControlsTest(unittest.TestCase):
                                                     ("button", "reveal", None, None, None)])
                         self.assertEqual(card.count('class="reveal"'), 1)
 
+    def test_the_switch_of_the_click_on_accept_is_drawn_posted_and_stated_only_where_available(self):
+        # Mutation: /autoaccept left out of the routes. Red: the post answers 303 and the switch stays off.
+        class FakeSwitch:
+            available, on, prompted = True, False, 0
+
+            def enabled(self):
+                return self.on
+
+            def enable(self):
+                self.prompted += 1
+                self.on = True
+
+            def disable(self):
+                self.on = False
+
+        switch = FakeSwitch()
+        controls = {"watch": lambda: dict(self.snapshot), "on_pause": lambda: None, "on_resume": lambda: None}
+        served = self.serve(autoaccept=switch, **controls)
+        shown = self.call("GET", "/", served=served)[2]
+        self.assertIn('name="autoaccept"', shown)
+        self.assertIn(page.WORDS["es"]["autoaccept_label"], shown)
+        self.assertIs(self.state_json(served=served)["autoaccept"], False)
+        self.assertEqual(self.call("POST", "/autoaccept", form={"on": "1"}, served=served)[0], 303)
+        self.assertEqual((switch.on, switch.prompted), (True, 1))
+        self.assertIn('name="autoaccept" aria-labelledby="aa-label" aria-describedby="aa-help" checked',
+                      self.call("GET", "/", served=served)[2])
+        self.assertEqual(self.call("POST", "/autoaccept", form={"on": "x"}, served=served)[0], 400)
+        self.call("POST", "/autoaccept", form={"on": "0"}, served=served)
+        self.assertFalse(switch.on)
+        switch.available = False  # Windows: no switch, no route, nothing in the state
+        hidden = self.serve(autoaccept=switch, **controls)
+        self.assertNotIn('name="autoaccept"', self.call("GET", "/", served=hidden)[2])
+        self.assertNotIn("autoaccept", self.state_json(served=hidden))
+        self.assertNotEqual(self.call("POST", "/autoaccept", form={"on": "1"}, served=hidden)[0], 303)
+
     def test_the_poll_reloads_the_page_when_the_pause_differs_from_what_it_rendered(self):
         # Mutation: the poll ignores the pause. Red: a second tab keeps the old line under its old controls.
         self.assertIn("const paused=s.dataset.paused;", page._SCRIPT)

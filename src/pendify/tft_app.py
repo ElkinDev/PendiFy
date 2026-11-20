@@ -26,14 +26,21 @@ from . import client
 PROCESS_PATTERN = "Teamfight Tactics.app/Contents/MacOS/TFTClient"
 PROCESS_CHECK_SECONDS = 3.0
 READY_CHECK_SECONDS = 15.0
+# The click on accept, when turned on: the first after the pop's modal has drawn, then again while the log says no
+# accept, up to ACCEPT_ATTEMPTS clicks inside the check.
+ACCEPT_FIRST_WAIT = 1.0
+ACCEPT_RETRY_WAIT = 2.0
+ACCEPT_ATTEMPTS = 3
+NOT_ACCEPTED = "not_accepted"
 CHUNK = 1024 * 1024
 MAX_BYTES_PER_READ = 32 * 1024 * 1024
 
 LOBBY_MARK = b"Entering LobbyState[ETFTLobbyState::"
 POP_MARK = b"Match found, showing AFK Check Modal"
+ACCEPTED_MARK = b"Accepted match"
 MARKS = ((LOBBY_MARK, None),  # the phase is the state's name
          (POP_MARK, "ReadyCheck"),
-         (b"Accepted match", "Matchmaking"),
+         (ACCEPTED_MARK, "Matchmaking"),
          (b"Matchmaking Update[MATCHMAKING]", "Matchmaking"),
          (b"LogNet: Welcomed by server", "InProgress"))
 _STATE_NAME = re.compile(rb"\w+")
@@ -69,9 +76,10 @@ def last_mark(lines):
     return phase, client._log_stamp(lines[start:end if end >= 0 else len(lines)])
 
 
-def last_pop(lines):
-    """The stamp of the last queue pop line in `lines`, None with none or one whose stamp does not parse."""
-    at = lines.rfind(POP_MARK)
+def last_pop(lines, mark=POP_MARK):
+    """The stamp of the last queue pop line in `lines` (or of `mark`'s), None with none or one whose stamp does not
+    parse."""
+    at = lines.rfind(mark)
     if at < 0:
         return None
     start = lines.rfind(b"\n", 0, at) + 1
@@ -98,8 +106,11 @@ class AppSession:
     token = None
 
     def __init__(self, path=client.real_game_log, running=app_running, clock=time.monotonic, wall=time.time,
-                 opener=open):
+                 opener=open, autoaccept=None, clicker=None, sleep=time.sleep):
+        """`autoaccept` answers whether the click on accept is on (never when None); `clicker` makes it."""
         self._path, self._running, self._clock, self._wall, self._opener = path, running, clock, wall, opener
+        self._autoaccept, self._clicker, self._sleep = autoaccept, clicker, sleep
+        self._said_pop, self._accepted = None, None
         self._offset, self._file_id = 0, None
         self._phase, self._stamp = None, None
         self._pop = None  # the stamp of a queue pop read and not said yet: said once even when accepted since
@@ -120,11 +131,42 @@ class AppSession:
         self._read_on()
         pop, self._pop = self._pop, None
         if pop is not None and self._wall() - pop <= READY_CHECK_SECONDS:
+            self._said_pop = pop
             return "ReadyCheck"  # a pop accepted between two reads is still a pop
         phase = self._phase or "Lobby"
         if phase == "ReadyCheck" and (self._stamp is None or self._wall() - self._stamp > READY_CHECK_SECONDS):
             return "Matchmaking"
         return phase
+
+    def auto_accept_on(self):
+        """True when the click on accept is turned on and can be made."""
+        if self._autoaccept is None or self._clicker is None:
+            return False
+        try:
+            return bool(self._autoaccept())
+        except (OSError, ValueError):
+            return False
+
+    def auto_accept(self):
+        """The pop just said accepted by a click: True once the log says accepted (by the click or by the player),
+        else why not, a Clicker's reason or NOT_ACCEPTED. Clicks only while the check is open."""
+        pop, reason = self._said_pop, NOT_ACCEPTED
+        for attempt in range(ACCEPT_ATTEMPTS):
+            self._sleep(ACCEPT_FIRST_WAIT if attempt == 0 else ACCEPT_RETRY_WAIT)
+            self._read_on()
+            if self._accepted_since(pop):
+                return True
+            if pop is None or self._wall() - pop > READY_CHECK_SECONDS:
+                return reason
+            reason = self._clicker.click() or NOT_ACCEPTED
+            if reason == "no_permission":  # no click can be made: no retry
+                return reason
+        self._sleep(ACCEPT_RETRY_WAIT)
+        self._read_on()
+        return True if self._accepted_since(pop) else reason
+
+    def _accepted_since(self, pop):
+        return pop is not None and self._accepted is not None and self._accepted >= pop
 
     def _read_on(self):
         path = self._path()
@@ -136,6 +178,7 @@ class AppSession:
                 file_id = (status.st_dev, status.st_ino)
                 if file_id != self._file_id or status.st_size < self._offset:  # a new log: the app started again
                     self._file_id, self._offset, self._phase, self._stamp, self._pop = file_id, 0, None, None, None
+                    self._accepted = None
                 handle.seek(self._offset)
                 budget, partial = MAX_BYTES_PER_READ, b""
                 while budget > 0:
@@ -153,6 +196,9 @@ class AppSession:
                         pop = last_pop(lines)
                         if pop is not None:
                             self._pop = pop
+                        accepted = last_pop(lines, ACCEPTED_MARK)
+                        if accepted is not None:
+                            self._accepted = accepted
                         self._offset += end
                         partial = partial[end:]
         except OSError:  # no log yet, or one that cannot be read: the phase stays as it was

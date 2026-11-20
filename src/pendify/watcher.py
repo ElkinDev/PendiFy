@@ -61,6 +61,9 @@ ACCEPTING_LINE = "match found: accepting"
 ACCEPTED_LINE = "match found: accepted"
 DRY_LINE = "match found: not accepting (--dry)"
 MANUAL_LINE = "match found: accept it in the game"
+CLICKING_LINE = "match found: clicking accept in the game"
+CLICKED_LINE = "match found: accepted"
+CLICK_FAILED_LINE = "match found: the click on accept did not take ({}), accept it in the game"
 STEP_FAILED_LINE = "watcher: a step failed ({}), looking for the game client again"
 LOADING_LINE = "loading screen: waiting for the match to start"
 STARTED_LINE = "match started: alerting"
@@ -275,9 +278,18 @@ class Watcher:
             self._ready_check(base, token)
 
     def _ready_check(self, base, token):
-        if not getattr(self._found, "accepts", True):  # the TFT app: nothing can accept for the player
-            self._log(MANUAL_LINE)
-            self._fire(QUEUE_FOUND)
+        if not getattr(self._found, "accepts", True):  # the TFT app: no API accepts for the player
+            on = getattr(self._found, "auto_accept_on", None)
+            clicking = callable(on) and on()
+            self._log(CLICKING_LINE if clicking else MANUAL_LINE)
+            self._fire(QUEUE_FOUND)  # the phone first: the click takes a few seconds
+            if clicking and not self._paused.is_set() and not self._stop.is_set():
+                result = self._found.auto_accept()
+                if result is True:
+                    self._log(CLICKED_LINE)
+                    self._note("accepted")
+                else:
+                    self._log(CLICK_FAILED_LINE.format(result))
             self._hold()
             return
         if not self._accept:  # the script's --dry (S:773-777)

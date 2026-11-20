@@ -108,3 +108,122 @@ class EitherClientTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoAcceptTest(unittest.TestCase):
+    """The click on accept after a pop: clicked until the log says accepted, never once the check is over."""
+
+    def setUp(self):
+        tmp = support.temp_dir()
+        self.addCleanup(tmp.cleanup)
+        self.path = f"{tmp.name}/TFT.log"
+        open(self.path, "wb").close()
+        self.wall, self.clicks, self.on = POP_AT, [], True
+        self.answer = None
+
+        def click():
+            self.clicks.append(self.wall)
+            if self.answer is None:  # the game takes the click: its log says accepted
+                with open(self.path, "ab") as log:
+                    log.write(LINES["accepted"])
+            return self.answer
+
+        def sleep(seconds):
+            self.wall += seconds
+
+        self.session = tft_app.AppSession(path=lambda: self.path, running=lambda: True, clock=lambda: 0.0,
+                                          wall=lambda: self.wall, autoaccept=lambda: self.on,
+                                          clicker=type("K", (), {"click": lambda s: click()})(), sleep=sleep)
+
+    def pop(self):
+        with open(self.path, "ab") as log:
+            log.write(LINES["queue"] + LINES["pop"])
+        self.assertEqual(self.session.phase(), "ReadyCheck")
+
+    def test_one_click_that_takes_is_accepted(self):
+        self.pop()
+        self.assertTrue(self.session.auto_accept_on())
+        self.assertIs(self.session.auto_accept(), True)
+        self.assertEqual(len(self.clicks), 1)
+
+    def test_a_click_that_does_not_take_is_made_again_inside_the_check_only(self):
+        self.answer = tft_app.NOT_ACCEPTED
+        self.pop()
+        self.assertEqual(self.session.auto_accept(), tft_app.NOT_ACCEPTED)
+        self.assertEqual(len(self.clicks), tft_app.ACCEPT_ATTEMPTS)
+        self.assertTrue(all(at - POP_AT <= tft_app.READY_CHECK_SECONDS for at in self.clicks))
+
+    def test_no_permission_clicks_once_and_says_why(self):
+        self.answer = "no_permission"
+        self.pop()
+        self.assertEqual(self.session.auto_accept(), "no_permission")
+        self.assertEqual(len(self.clicks), 1)
+
+    def test_a_player_who_accepted_first_gets_no_click_and_off_is_off(self):
+        self.pop()
+        with open(self.path, "ab") as log:
+            log.write(LINES["accepted"])
+        self.assertIs(self.session.auto_accept(), True)
+        self.assertEqual(self.clicks, [])
+        self.on = False
+        self.assertFalse(self.session.auto_accept_on())
+
+
+class ClickerTest(unittest.TestCase):
+    """The click is made on the button's share of the app's window, and only with the app in front."""
+
+    def setUp(self):
+        self.autoclick = support.module("autoclick")
+
+    def runner(self, front, windows='[[0,29,1496,938],[0,0,1496,29]]'):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            out = ""
+            if command[-1] == "front":
+                out = "ASN:0x0-0x1:\n"
+            elif "bundlepath" in command:
+                out = '"LSBundlePath"="/Applications/Teamfight Tactics.app"' if front() else '"LSBundlePath"="/x"'
+            elif command[0] == "/usr/bin/osascript":
+                out = windows
+            return type("Done", (), {"returncode": 0, "stdout": out})()
+        return run, calls
+
+    def test_the_button_s_point_is_the_window_s_centre_across_and_its_share_down(self):
+        self.assertEqual(self.autoclick.accept_point((0, 29, 1496, 938)), (748.0, 29 + 938 * 0.6085))
+        self.assertEqual(self.autoclick.accept_point((100, 50, 1000, 600)), (600.0, 50 + 600 * 0.6085))
+
+    def test_a_click_in_front_on_the_largest_window(self):
+        run, calls = self.runner(lambda: True)
+        posted = []
+        clicker = self.autoclick.Clicker(run=run, sleep=lambda s: None, post=lambda x, y: posted.append((x, y)),
+                                         is_trusted=lambda: True)
+        self.assertIsNone(clicker.click())
+        self.assertEqual(posted, [self.autoclick.accept_point((0, 29, 1496, 938))])
+        self.assertNotIn(["/usr/bin/open", "-a", self.autoclick.APP_PATH], calls)
+
+    def test_the_app_is_brought_to_the_front_first_and_never_clicked_behind(self):
+        front = {"on": False}
+        run, calls = self.runner(lambda: front["on"])
+        clock = {"t": 0.0}
+
+        def sleep(seconds):
+            clock["t"] += seconds
+
+        posted = []
+        clicker = self.autoclick.Clicker(run=run, sleep=sleep, clock=lambda: clock["t"],
+                                         post=lambda x, y: posted.append((x, y)), is_trusted=lambda: True)
+        self.assertEqual(clicker.click(), self.autoclick.NOT_FRONT)
+        self.assertIn(["/usr/bin/open", "-a", self.autoclick.APP_PATH], calls)
+        self.assertEqual(posted, [])
+
+    def test_no_permission_or_no_window_clicks_nothing(self):
+        posted = []
+        run, _ = self.runner(lambda: True)
+        denied = self.autoclick.Clicker(run=run, post=lambda x, y: posted.append(1), is_trusted=lambda: False)
+        self.assertEqual(denied.click(), self.autoclick.NO_PERMISSION)
+        run, _ = self.runner(lambda: True, windows="[]")
+        windowless = self.autoclick.Clicker(run=run, post=lambda x, y: posted.append(1), is_trusted=lambda: True)
+        self.assertEqual(windowless.click(), self.autoclick.NO_WINDOW)
+        self.assertEqual(posted, [])
