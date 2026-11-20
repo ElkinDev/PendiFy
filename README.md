@@ -2,9 +2,11 @@
 
 ## Español
 
-Un programa pequeño para Windows que avisa en tu teléfono cuando se encuentra tu partida y cuando empieza.
+Un programa pequeño para **Windows y Mac** que avisa en tu teléfono cuando se encuentra tu partida y cuando empieza.
 Se enlaza una sola vez con tu cuenta de Pendi leyendo un código QR, sin crear ninguna cuenta nueva.
 Es gratis, no pide permisos de administrador y solo usa Python.
+
+**Nuevo: soporte para Mac.** Funciona con el cliente de League of Legends y con la app de **Teamfight Tactics** para Mac, y en esa app acepta la partida por ti con un clic automático. Se instala con una línea en la Terminal: mira [macOS](#macos).
 
 ![La página de PendiFy en el navegador, en tema oscuro: este PC enlazado a la cuenta, la lista de actividad y el código QR patrocinado que abre pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
 
@@ -89,9 +91,11 @@ Licencia: MIT
 
 ## English
 
-A small Windows program that alerts your phone when your match is found and when it starts.
+A small program for **Windows and Mac** that alerts your phone when your match is found and when it starts.
 It links once to your Pendi account by scanning a QR code, with no new account of any kind.
 It is free, needs no administrator rights and only uses Python.
+
+**New: Mac support.** It works with the League of Legends client and with the **Teamfight Tactics** app for Mac, and in that app it accepts the match for you with an automatic click. It installs with one line in the Terminal: see [macOS](#macos-1).
 
 ![The PendiFy page in the browser, in dark theme: this PC linked to the account, the activity list and the sponsored QR code that opens pendiapp.com.](https://raw.githubusercontent.com/ElkinDev/PendiFy/main/docs/pendify-page.png)
 
