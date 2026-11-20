@@ -177,8 +177,8 @@ def _post_click(x, y):
 
 
 class Switch:
-    """The page's switch of the click on accept, kept in config.json; available on macOS only. Turned on, macOS is
-    asked for the Accessibility permission, which its person grants once in System Settings."""
+    """The page's switch of the click on accept, kept in config.json, on by default; available on macOS only. While
+    on, macOS is asked for the Accessibility permission, which its person grants once in System Settings."""
 
     def __init__(self, store, prompt=None):
         self._store = store
@@ -192,9 +192,15 @@ class Switch:
             return False
 
     def enable(self):
-        granted = self._prompt()
-        print(PERMISSION_LINES[bool(granted)], flush=True)
+        self.ask()
         return self._set(True)
+
+    def ask(self):
+        """macOS asked for the Accessibility permission (it shows its prompt only while not granted), and the
+        answer said on one line; at each start while the switch is on, as it is by default."""
+        granted = bool(self._prompt())
+        print(PERMISSION_LINES[granted], flush=True)
+        return granted
 
     def disable(self):
         return self._set(False)

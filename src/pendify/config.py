@@ -36,7 +36,7 @@ LANGS = ("es", "en")
 # background, notify checks only, off never checks. With no key, or a foreign value, auto.
 UPDATE_MODES = ("auto", "notify", "off")
 DEFAULT_UPDATE = "auto"
-# The click on the TFT app's accept button (macOS), turned on from the page; off is no key.
+# The click on the TFT app's accept button (macOS): on by default, so on is no key; turned off from the page, false.
 AUTOACCEPT_KEY = "autoaccept"
 # _write's default: the stored theme and language choices are kept.
 _KEEP = object()
@@ -112,13 +112,13 @@ class ConfigStore:
         return _choice(self._stored(), "update", UPDATE_MODES) or DEFAULT_UPDATE
 
     def read_autoaccept(self):
-        """True when the click on the TFT app's accept button is turned on (macOS); False with no key or a foreign
-        value. A file that is there and cannot be read raises ConfigError, as read_theme() does."""
+        """True when the click on the TFT app's accept button is on (macOS): by default, and False only when turned
+        off (the key false). A file that is there and cannot be read raises ConfigError, as read_theme() does."""
         stored = self._stored()
-        return bool(stored) and stored.get(AUTOACCEPT_KEY) is True
+        return not (stored and stored.get(AUTOACCEPT_KEY) is False)
 
     def set_autoaccept(self, on):
-        """The page's switch of the click on accept, written beside the pair; off is kept as no key."""
+        """The page's switch of the click on accept, written beside the pair; on, the default, is kept as no key."""
         with self._lock:
             self._write(self._current(), autoaccept=bool(on))
             return bool(on)
@@ -214,7 +214,7 @@ class ConfigStore:
         lang = _choice(stored, "lang", LANGS) if lang is _KEEP else lang
         update = _choice(stored, "update", UPDATE_MODES)
         if autoaccept is _KEEP:
-            autoaccept = bool(stored) and stored.get(AUTOACCEPT_KEY) is True
+            autoaccept = not (stored and stored.get(AUTOACCEPT_KEY) is False)
         values = {"secret": pairing.secret, "linkId": pairing.link_id}
         if theme is not None:
             values["theme"] = theme
@@ -222,8 +222,8 @@ class ConfigStore:
             values["lang"] = lang
         if update is not None:
             values["update"] = update
-        if autoaccept:
-            values[AUTOACCEPT_KEY] = True
+        if not autoaccept:
+            values[AUTOACCEPT_KEY] = False
         data = json.dumps(values).encode("utf-8")
         try:
             folder.mkdir(parents=True, exist_ok=True)
