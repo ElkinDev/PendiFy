@@ -41,6 +41,13 @@ NEW_WORDS = {
            "autostart_help": "When the PC turns on, the program starts by itself, without opening this page.",
            "state_linked_paused": "This PC is linked. Alerts are paused."},
 }
+if sys.platform == "darwin":  # the start at logon is a LaunchAgent there, and the switch names macOS
+    NEW_WORDS["es"].update({"autostart_label": "Iniciar con macOS",
+                            "autostart_help": "Al iniciar sesión en el Mac el programa empieza solo, sin abrir "
+                                              "esta página."})
+    NEW_WORDS["en"].update({"autostart_label": "Start with macOS",
+                            "autostart_help": "When you log in to the Mac, the program starts by itself, without "
+                                              "opening this page."})
 LINKED_ES = "Los avisos llegarán a tu cuenta."
 STATE_LINE = re.compile(r'<p id="state"([^>]*)>(.*?)</p>', re.S)
 # The watcher line, running or paused (the sheet's paused block carries data-paused, frames A2 and A6).
@@ -186,6 +193,9 @@ class PageControlsTest(unittest.TestCase):
         self.assertNotIn("autostart", answer)
         saved = sys.modules.get("winreg")
         sys.modules["winreg"] = None  # a system with no Run value: the start with Windows is not available
+        no_agent = mock.patch.object(autostart, "IS_MAC", False)  # nor a LaunchAgent on macOS
+        no_agent.start()
+        self.addCleanup(no_agent.stop)
 
         def restore():
             if saved is None:
@@ -281,6 +291,9 @@ class PageControlsTest(unittest.TestCase):
         given_none = self.serve(**controls)
         saved = sys.modules.get("winreg")
         sys.modules["winreg"] = None  # a system with no Run value: the start with Windows is not available
+        no_agent = mock.patch.object(autostart, "IS_MAC", False)  # nor a LaunchAgent on macOS
+        no_agent.start()
+        self.addCleanup(no_agent.stop)
         self.addCleanup(lambda: sys.modules.pop("winreg", None) if saved is None else
                         sys.modules.__setitem__("winreg", saved))
         unavailable = self.serve(autostart=autostart.Autostart(executable=sys.executable), **controls)
@@ -387,6 +400,9 @@ class PageControlsTest(unittest.TestCase):
         controls = {"watch": lambda: dict(self.snapshot), "on_pause": lambda: None, "on_resume": lambda: None}
         saved = sys.modules.get("winreg")
         sys.modules["winreg"] = None
+        no_agent = mock.patch.object(autostart, "IS_MAC", False)  # nor a LaunchAgent on macOS
+        no_agent.start()
+        self.addCleanup(no_agent.stop)
         self.addCleanup(lambda: sys.modules.pop("winreg", None) if saved is None else
                         sys.modules.__setitem__("winreg", saved))
         unavailable = self.serve(autostart=autostart.Autostart(executable=sys.executable), **controls)

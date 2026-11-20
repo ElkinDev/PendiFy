@@ -1,4 +1,4 @@
-"""The start with Windows: the per-user Run value, no administrator.
+"""The start with Windows: the per-user Run value, no administrator; on macOS a per-user LaunchAgent.
 
 The value `PendiFy` under HKEY_CURRENT_USER's Run key holds the start line of install.ps1 plus --quiet, so the
 program starts at logon with no browser. Only the page writes it, on its person's ask; a start never writes it,
@@ -14,6 +14,8 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "PendiFy"
 START_ARGS = "-m pendify --quiet"
 FAILED_LINE = "autostart: the start with Windows could not be {what} ({kind})"
+LAUNCH_AGENT_LABEL = "io.github.elkindev.pendify"
+IS_MAC = sys.platform == "darwin"
 
 
 class WindowsRegistry:
@@ -49,6 +51,40 @@ class WindowsRegistry:
             pass
 
 
+class LaunchAgent:
+    """The macOS counterpart of the Run value: one per-user LaunchAgent plist, run at logon, no administrator.
+    read, write and delete, as WindowsRegistry; `write` takes the start line and keeps it as the plist's
+    ProgramArguments."""
+
+    def __init__(self, path=None, label=LAUNCH_AGENT_LABEL):
+        self.path = Path(path) if path is not None else Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+        self.label = label
+
+    def read(self):
+        """The plist's text, or None when it is missing."""
+        try:
+            return self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def write(self, text):
+        import plistlib
+        import shlex
+
+        agent = {"Label": self.label, "ProgramArguments": shlex.split(text), "RunAtLoad": True,
+                 "ProcessType": "Interactive"}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "wb") as handle:
+            plistlib.dump(agent, handle)
+
+    def delete(self):
+        """The plist removed; a missing one is nothing to remove, no error."""
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _say_failure(what, failure):
     print(FAILED_LINE.format(what=what, kind=type(failure).__name__), file=sys.stderr, flush=True)
 
@@ -60,8 +96,8 @@ class Autostart:
         if registry is None:
             try:
                 registry = WindowsRegistry()
-            except ImportError:  # no winreg on this system: no Run value to keep
-                registry = None
+            except ImportError:  # no winreg on this system: a LaunchAgent on macOS, else nothing to keep
+                registry = LaunchAgent() if IS_MAC else None
         self.registry = registry
         self.available = registry is not None
         self._executable = executable or sys.executable

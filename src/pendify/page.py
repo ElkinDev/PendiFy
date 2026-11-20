@@ -231,6 +231,19 @@ WORDS = {
     },
 }
 
+# On macOS the start at logon is a LaunchAgent and the program starts from the PendiFy app or the terminal.
+if sys.platform == "darwin":
+    WORDS["es"].update({
+        "autostart_label": "Iniciar con macOS",
+        "autostart_help": "Al iniciar sesión en el Mac el programa empieza solo, sin abrir esta página.",
+        "start_again": "Para volver a iniciarlo, abre PendiFy desde Aplicaciones o ejecuta pendify en la Terminal.",
+    })
+    WORDS["en"].update({
+        "autostart_label": "Start with macOS",
+        "autostart_help": "When you log in to the Mac, the program starts by itself, without opening this page.",
+        "start_again": "To start it again, open PendiFy from Applications or run pendify in the Terminal.",
+    })
+
 # The phase as the client names it, to its word; any other name reads phase_other.
 PHASE_WORDS = {"None": "phase_none", "Lobby": "phase_lobby", "Matchmaking": "phase_matchmaking",
                "ReadyCheck": "phase_readycheck", "ChampSelect": "phase_champselect", "InProgress": "phase_inprogress",

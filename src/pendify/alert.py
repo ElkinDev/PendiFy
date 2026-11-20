@@ -6,6 +6,8 @@ for the page as the last ping. With no link id nothing is sent and nothing is qu
 alone, with no kind and no ping. The console gets fixed lines only. listen() names the one callback told each ping's
 result name and time right after they are recorded (the watcher's log, lane pclog).
 """
+import subprocess
+import sys
 import threading
 import time
 
@@ -13,7 +15,7 @@ from . import worker
 
 try:
     import winsound
-except ImportError:  # not Windows: the beep is silent, as in the script
+except ImportError:  # not Windows: system sounds on macOS, else the beep is silent, as in the script
     winsound = None
 
 BEEP_NOTES = (988, 1319)  # S:167
@@ -23,6 +25,28 @@ PING_LINES = {"sent": "alert: sent to the phone", "refused": "alert: refused, li
               "not_delivered": "alert: not delivered", "failed": "alert: failed"}
 CONFIG_UNREADABLE_LINE = "alert: the config file could not be read, nothing was sent"
 BEEP_FAILED_LINE = "alert: the sound device refused the beep"
+# macOS has no winsound: each note of the siren is a short system sound, the low one Tink, the high one Glass.
+MAC_SOUNDS = ("/System/Library/Sounds/Tink.aiff", "/System/Library/Sounds/Glass.aiff")
+
+
+class MacSound:
+    """winsound's Beep on macOS, played by afplay, so the siren keeps its two-note shape. A missing afplay or sound
+    fails as winsound does, with RuntimeError."""
+
+    def __init__(self, run=subprocess.run):
+        self._run = run
+
+    def Beep(self, frequency, milliseconds):  # noqa: N802, winsound's own name
+        path = MAC_SOUNDS[0] if frequency < max(BEEP_NOTES) else MAC_SOUNDS[1]
+        try:
+            self._run(["/usr/bin/afplay", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, timeout=5, check=True)
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("afplay could not play the sound") from None
+
+
+if winsound is None and sys.platform == "darwin":
+    winsound = MacSound()
 
 
 def _print(line):

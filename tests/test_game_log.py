@@ -108,10 +108,16 @@ class GameLogStartTest(unittest.TestCase):
         self.assertEqual((parameters["path"].default, parameters["opener"].default), (client.real_game_log, open))
         self.assertIs(inspect.signature(client.real_game_log).parameters["environ"].default, os.environ)
         local = r"C:\Fixture\Local"
-        self.assertEqual(Path(client.real_game_log({"LOCALAPPDATA": local})),
+        self.assertEqual(Path(client.real_game_log({"LOCALAPPDATA": local}, platform="win32")),
                          Path(local, "TFT", "Saved", "Logs", "TFT.log"))
         for environ in ({}, {"LOCALAPPDATA": ""}, {"LOCALAPPDATA": "  "}):
-            self.assertIsNone(client.real_game_log(environ), environ)
+            self.assertIsNone(client.real_game_log(environ, platform="win32"), environ)
+        # macOS: the game writes the same log, in the same format, under ~/Library/Logs/TFT.
+        self.assertEqual(Path(client.real_game_log({"HOME": "/Users/someone", "LOCALAPPDATA": local},
+                                                   platform="darwin")),
+                         Path("/Users/someone/Library/Logs/TFT/TFT.log"))
+        for environ in ({}, {"HOME": ""}, {"HOME": "  "}):
+            self.assertIsNone(client.real_game_log(environ, platform="darwin"), environ)
 
     def test_a_start_line_stamped_at_or_after_since_answers_true_with_either_mark_alone(self):
         # (a) Mutation: the milliseconds not added. Red: the start at :500 read as :000, before a since at :400.

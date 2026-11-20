@@ -818,8 +818,9 @@ class MainCommandTest(unittest.TestCase):
                 thread.join(10)
                 self.assertFalse(thread.is_alive())
                 command = [sys.executable, "-m", support.PACKAGE, *kept, *carried]
-                self.assertEqual(spawned, [(command, {"creationflags": 0x00000008 | 0x00000200, "close_fds": True},
-                                            False)])
+                detached = ({"creationflags": 0x00000008 | 0x00000200} if os.name == "nt"
+                            else {"start_new_session": True})
+                self.assertEqual(spawned, [(command, {**detached, "close_fds": True}, False)])
                 again = entry._arguments(command[3:])  # the new copy reads back the values this run was given
                 self.assertEqual((again.data_dir, again.worker, again.client_lockfile, again.dry, again.quiet),
                                  (self.data, worker_base, self.no_client, "--dry" in kept, "--quiet" in kept))

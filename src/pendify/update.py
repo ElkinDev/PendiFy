@@ -80,11 +80,27 @@ def check(urlopen=urllib.request.urlopen):
     return data["info"]["version"]
 
 
+def _console_python(executable):
+    """python.exe beside a Windows interpreter (pythonw's output goes nowhere); elsewhere the interpreter itself."""
+    interpreter = Path(executable)
+    if interpreter.suffix.lower() == ".exe":
+        return str(interpreter.with_name("python.exe"))
+    return str(interpreter)
+
+
+def _detached():
+    """The options that keep pip off any console: the Windows flags there, a session of its own elsewhere, where
+    Popen refuses creationflags."""
+    if os.name == "nt":
+        return {"creationflags": CREATE_NO_WINDOW | DETACHED_PROCESS}
+    return {"start_new_session": True}
+
+
 def pip_command(version, executable, in_venv):
     """The paste's pip arguments (install.ps1:184) with the version pinned, run by python.exe beside `executable`;
     without --user in a venv, where pip refuses it."""
     user = [] if in_venv else ["--user"]
-    return [str(Path(executable).with_name("python.exe")), "-m", "pip", "install", *user, "--upgrade",
+    return [_console_python(executable), "-m", "pip", "install", *user, "--upgrade",
             "--force-reinstall", "--no-deps", "--no-warn-script-location", f"{DISTRIBUTION}=={version}"]
 
 
@@ -103,7 +119,7 @@ def install(version, log_path, run=subprocess.run, installed=installed_version, 
     try:
         with open(log_path, "wb") as output:
             done = run(pip_command(version, executable, in_venv), stdin=subprocess.DEVNULL, stdout=output,
-                       stderr=output, timeout=INSTALL_SECONDS, creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                       stderr=output, timeout=INSTALL_SECONDS, **_detached(),
                        env=environment)
         if done.returncode == 0:
             return True, None

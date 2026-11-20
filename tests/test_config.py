@@ -265,12 +265,19 @@ class ConfigStoreTest(unittest.TestCase):
 
     def test_the_base_directory_is_appdata_and_its_absence_is_loud(self):
         # Mutation: a missing APPDATA falls back to the working directory. Red: no RuntimeError.
-        self.assertEqual(config.default_base_dir({"APPDATA": "C:/Users/a b/AppData/Roaming"}),
+        self.assertEqual(config.default_base_dir({"APPDATA": "C:/Users/a b/AppData/Roaming"}, platform="win32"),
                          Path("C:/Users/a b/AppData/Roaming"))
         with self.assertRaises(RuntimeError):
-            config.default_base_dir({})
+            config.default_base_dir({}, platform="win32")
         with self.assertRaises(RuntimeError):
-            config.default_base_dir({"APPDATA": "  "})
+            config.default_base_dir({"APPDATA": "  "}, platform="win32")
+
+    def test_on_macos_the_base_directory_is_application_support_and_a_missing_home_is_loud(self):
+        self.assertEqual(config.default_base_dir({"HOME": "/Users/a b", "APPDATA": "C:/x"}, platform="darwin"),
+                         Path("/Users/a b/Library/Application Support"))
+        for environ in ({}, {"HOME": "  "}):
+            with self.assertRaises(RuntimeError):
+                config.default_base_dir(environ, platform="darwin")
 
     def test_a_base_with_spaces_and_forward_slashes_works(self):
         # Mutation: the base is split on spaces. Red: the file lands in the wrong folder.

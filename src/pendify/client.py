@@ -16,14 +16,20 @@ import os
 import re
 import ssl
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-# S:139-140: the two Windows places of the client's lockfile, the one list of them.
-LOCKFILE_PATHS = (r"C:\Riot Games\League of Legends\lockfile", r"D:\Riot Games\League of Legends\lockfile")
+IS_MAC = sys.platform == "darwin"
+# S:139-140: the two Windows places of the client's lockfile, the one list of them. On macOS the client writes it
+# inside its app bundle, in /Applications or in the user's own Applications folder.
+WINDOWS_LOCKFILE_PATHS = (r"C:\Riot Games\League of Legends\lockfile", r"D:\Riot Games\League of Legends\lockfile")
+MAC_LOCKFILE_PATHS = ("/Applications/League of Legends.app/Contents/LoL/lockfile",
+                      os.path.expanduser("~/Applications/League of Legends.app/Contents/LoL/lockfile"))
+LOCKFILE_PATHS = MAC_LOCKFILE_PATHS if IS_MAC else WINDOWS_LOCKFILE_PATHS
 # S:705: the process whose command line carries the port and the token, matched as a part of its name.
 PROCESS_NAME = "LeagueClient"
 # S:707-708, the script's two expressions.
@@ -31,9 +37,13 @@ PORT_PATTERN = re.compile(r"--app-port=(\d+)")
 TOKEN_PATTERN = re.compile(r"--remoting-auth-token=([\w-]+)")
 # Written by [Console]::Out: the host's own output wraps a long line at the console width, which would
 # cut the token in two.
-PROCESS_QUERY = ("powershell", "-NoProfile", "-Command",
-                 f"Get-CimInstance -ClassName Win32_Process -Filter 'Name LIKE ''%{PROCESS_NAME}%''' "
-                 "| ForEach-Object { [Console]::Out.WriteLine($_.CommandLine) }")
+WINDOWS_PROCESS_QUERY = ("powershell", "-NoProfile", "-Command",
+                         f"Get-CimInstance -ClassName Win32_Process -Filter 'Name LIKE ''%{PROCESS_NAME}%''' "
+                         "| ForEach-Object { [Console]::Out.WriteLine($_.CommandLine) }")
+# On macOS: every process's whole command line, never cut (-ww); parse_command_lines keeps the one that carries
+# both the port and the token.
+MAC_PROCESS_QUERY = ("/bin/ps", "-A", "-ww", "-o", "args=")
+PROCESS_QUERY = MAC_PROCESS_QUERY if IS_MAC else WINDOWS_PROCESS_QUERY
 PROCESS_READ_INTERVAL = 10.0
 PROCESS_READ_TIMEOUT = 5
 
@@ -81,7 +91,22 @@ def query_process(run):
                    timeout=PROCESS_READ_TIMEOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError):
         return None
-    return done.stdout if done.returncode == 0 and isinstance(done.stdout, str) else None
+    if done.returncode != 0 or not isinstance(done.stdout, str):
+        return None
+    return own_client_lines(done.stdout) if PROCESS_QUERY == MAC_PROCESS_QUERY else done.stdout
+
+
+def own_client_lines(text):
+    """Only the lines of `text`, ps's command lines, whose program is the client's own: the file name before the
+    first argument starts with PROCESS_NAME. The Riot Client's own process carries a port and a token of its own,
+    and names the client's path among its arguments, so a match anywhere in the line is not enough; PowerShell's
+    query filters by the process name the same way on Windows."""
+    kept = []
+    for line in text.splitlines():
+        program = line.split(" --", 1)[0].rstrip()
+        if os.path.basename(program).startswith(PROCESS_NAME):
+            kept.append(line)
+    return "\n".join(kept)
 
 
 class ClientCredentials:
@@ -238,9 +263,17 @@ GAME_LOG_CHUNK = 256 * 1024
 _GAME_LOG_STAMP = "%Y.%m.%d-%H.%M.%S"  # then :mmm, in UTC
 
 
-def real_game_log(environ=os.environ):
-    """The game's own log in a real run, <LOCALAPPDATA>/TFT/Saved/Logs/TFT.log; None when LOCALAPPDATA is unset or
-    blank."""
+MAC_GAME_LOG_PARTS = ("Library", "Logs", "TFT", "TFT.log")
+
+
+def real_game_log(environ=os.environ, platform=None):
+    """The game's own log in a real run: <LOCALAPPDATA>/TFT/Saved/Logs/TFT.log on Windows, ~/Library/Logs/TFT/TFT.log
+    on macOS; None when LOCALAPPDATA (HOME on macOS) is unset or blank."""
+    if (sys.platform if platform is None else platform) == "darwin":
+        home = environ.get("HOME")
+        if home is None or not home.strip():
+            return None
+        return os.path.join(home, *MAC_GAME_LOG_PARTS)
     base = environ.get("LOCALAPPDATA")
     if base is None or not base.strip():
         return None

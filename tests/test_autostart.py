@@ -9,6 +9,7 @@ import io
 import re
 import sys
 import unittest
+from unittest import mock
 import uuid
 from pathlib import Path
 
@@ -122,6 +123,9 @@ class AutostartTest(unittest.TestCase):
         # Mutation: the import failure left to the caller. Red: ImportError leaves Autostart().
         saved = sys.modules.get("winreg")
         sys.modules["winreg"] = None  # an import of it now raises ImportError, as on a system with none
+        no_agent = mock.patch.object(autostart, "IS_MAC", False)  # nor a LaunchAgent on macOS
+        no_agent.start()
+        self.addCleanup(no_agent.stop)
 
         def restore():
             if saved is None:
@@ -158,3 +162,40 @@ class AutostartTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaunchAgentTest(unittest.TestCase):
+    """The macOS start at logon: one plist under a scratch folder here, never the user's LaunchAgents."""
+
+    def setUp(self):
+        tmp = support.temp_dir()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "LaunchAgents" / "io.github.elkindev.pendify.plist"
+        self.agent = autostart.LaunchAgent(path=self.path)
+
+    def test_write_read_and_delete_keep_one_plist_that_runs_the_start_line_at_load(self):
+        import plistlib
+
+        self.assertIsNone(self.agent.read())
+        subject = autostart.Autostart(registry=self.agent, executable="/opt/a b/bin/python3")
+        self.assertEqual((subject.available, subject.enabled()), (True, False))
+        self.assertTrue(subject.enable())
+        self.assertTrue(subject.enabled())
+        with open(self.path, "rb") as handle:
+            written = plistlib.load(handle)
+        self.assertEqual(written, {"Label": "io.github.elkindev.pendify",
+                                   "ProgramArguments": ["/opt/a b/bin/python3", "-m", "pendify", "--quiet"],
+                                   "RunAtLoad": True, "ProcessType": "Interactive"})
+        self.assertTrue(subject.disable())
+        self.assertFalse(self.path.exists())
+        self.assertTrue(subject.disable())  # a missing plist is nothing to remove
+
+    def test_on_macos_with_no_winreg_the_launch_agent_is_the_start_at_logon(self):
+        saved = sys.modules.get("winreg")
+        sys.modules["winreg"] = None
+        self.addCleanup(lambda: sys.modules.pop("winreg", None) if saved is None else
+                        sys.modules.__setitem__("winreg", saved))
+        with mock.patch.object(autostart, "IS_MAC", True):
+            subject = autostart.Autostart(executable=sys.executable)
+        self.assertTrue(subject.available)
+        self.assertIsInstance(subject.registry, autostart.LaunchAgent)
