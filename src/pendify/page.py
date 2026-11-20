@@ -127,6 +127,13 @@ WORDS = {
         "autoaccept_label": "Aceptar partida automáticamente",
         "autoaccept_help": "En la app de Teamfight Tactics, hace clic en Aceptar cuando aparece la partida. "
                            "macOS pide el permiso de Accesibilidad la primera vez.",
+        "perm_title": "Falta un paso: dale permiso a PendiFy",
+        "perm_why": "macOS solo deja que una app haga clic por ti si tú se lo permites. Se hace una sola vez.",
+        "perm_step1": "Pulsa «Abrir Ajustes».",
+        "perm_step2": "En la lista de Accesibilidad, activa el interruptor de PendiFy, como en la imagen.",
+        "perm_step3": "Si PendiFy no está en la lista, pulsa + y elige PendiFy en la carpeta Aplicaciones de tu usuario.",
+        "perm_open": "Abrir Ajustes",
+        "perm_picture": "Ajustes del Sistema, Accesibilidad: la fila de PendiFy con su interruptor encendido.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
                        "pythonw -m pendify (o python -m pendify para verlo en una consola).",
@@ -222,6 +229,13 @@ WORDS = {
         "autoaccept_label": "Accept the match automatically",
         "autoaccept_help": "In the Teamfight Tactics app, clicks Accept when the match is found. "
                            "macOS asks for the Accessibility permission the first time.",
+        "perm_title": "One step left: give PendiFy permission",
+        "perm_why": "macOS only lets an app click for you if you allow it. It is done once.",
+        "perm_step1": "Press \"Open Settings\".",
+        "perm_step2": "In the Accessibility list, turn on PendiFy's switch, as in the picture.",
+        "perm_step3": "If PendiFy is not in the list, press + and choose PendiFy in your user's Applications folder.",
+        "perm_open": "Open Settings",
+        "perm_picture": "System Settings, Accessibility: PendiFy's row with its switch turned on.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
                        "(or python -m pendify to see it in a console).",
@@ -399,6 +413,12 @@ _STYLE = (":root{color-scheme:light dark;" + _LIGHT + "}\n"
           ".sw-label{font-weight:500;color:var(--ink)}\n"
           ".sw-help{color:var(--ink2)}\n"
           ".pc{display:grid;gap:16px;max-width:40rem;margin:24px 0 0}\n"
+          ".perm{display:grid;gap:12px;padding:16px;border:1px solid var(--line);border-radius:12px;"
+          "background:var(--tint)}\n"
+          ".perm p,.perm ol{margin:0}\n"
+          ".perm-title{font-weight:600;color:var(--ink)}\n"
+          ".perm ol{padding-left:1.25rem;display:grid;gap:4px;color:var(--ink)}\n"
+          ".perm svg{width:100%;max-width:26rem;height:auto;border-radius:10px}\n"
           ".pc h2{margin:0}\n"
           ".pc form{justify-self:start}\n"
           ".pc .switch{padding-top:16px;border-top:1px solid var(--hair)}\n"
@@ -555,7 +575,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "const shown=s.dataset.shown;const paused=s.dataset.paused;const upd=s.dataset.update;"
            "const lang=document.documentElement.lang;"
            "const sw=document.querySelector('input[name=autostart]');"
-           "const aa=document.querySelector('input[name=autoaccept]');"
+           "const aa=document.querySelector('input[name=autoaccept]');const perm=!!document.querySelector('.perm');"
            # The card «Actividad»'s list is a tab stop only while its lines are taller than its box, read at load and
            # after each insert (the design review's open item 3: a stop on a list that does not scroll is dead).
            "const g=document.querySelector('.log');function tabStop(){if(g.scrollHeight>g.clientHeight)"
@@ -578,6 +598,7 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "if(String(j.showCode)+String(j.relinkOffered)!==shown||(paused!==undefined&&String(j.paused)!==paused)"
            "||j.lang!==lang||(upd!==undefined&&j.update&&j.update.state+' '+(j.update.version||'')!==upd)"
            "||(aa&&j.autoaccept!==undefined&&String(j.autoaccept)!==String(aa.defaultChecked))"
+           "||(perm&&j.accessibility===true)"
            "||(sw&&j.autostart!==undefined&&String(j.autostart)!==String(sw.defaultChecked)))"
            "location.reload();"
            # The log's lines above the highest seq the card has drawn go on top, oldest first so the newest ends
@@ -810,6 +831,30 @@ def _log_time(at):
     return time.strftime("%H:%M:%S", time.localtime(at))
 
 
+# The Accessibility permission's picture under the switch: System Settings' list, PendiFy's row with its icon and its
+# switch on between two greyed rows, drawn in SVG so it follows no screenshot of anyone's list.
+def _permission_picture(label):
+    rows = []
+    for index, (name, on) in enumerate((("…", False), ("PendiFy", True), ("…", False))):
+        y = 44 + index * 48
+        mark = (f'<image href="{ICON_URI}" x="20" y="{y + 8}" width="28" height="28"/>' if on else
+                f'<rect x="20" y="{y + 8}" width="28" height="28" rx="7" fill="#3a3a3c"/>')
+        rows.append(f'<g opacity="{1 if on else 0.45}">{mark}'
+                    f'<text x="62" y="{y + 28}" font-size="16" fill="#f2f2f7" '
+                    f'font-family="-apple-system,BlinkMacSystemFont,sans-serif">{name}</text>'
+                    f'<rect x="344" y="{y + 10}" width="44" height="24" rx="12" fill="{"#0a84ff" if on else "#48484a"}"/>'
+                    f'<circle cx="{376 if on else 356}" cy="{y + 22}" r="10" fill="#ffffff"/></g>')
+        if index < 2:
+            rows.append(f'<line x1="62" y1="{y + 46}" x2="396" y2="{y + 46}" stroke="#3a3a3c"/>')
+    return (f'<svg viewBox="0 0 416 200" role="img" aria-label="{label}" xmlns="http://www.w3.org/2000/svg">'
+            '<rect width="416" height="200" rx="12" fill="#1c1c1e"/>'
+            '<text x="20" y="28" font-size="13" fill="#98989d" font-family="-apple-system,BlinkMacSystemFont,'
+            'sans-serif">Privacidad y seguridad › Accesibilidad</text>'
+            + "".join(rows) +
+            '<path d="M392 118 l14 6 -6 2 4 8 -3 1.5 -4 -8 -5 4 z" fill="#ffffff" stroke="#1c1c1e" stroke-width="1"/>'
+            '</svg>')
+
+
 def _form(action, token, inner):
     return (f'<form method="post" action="/{action}"><input type="hidden" name="token" value="{token}">'
             f"{inner}</form>")
@@ -962,6 +1007,7 @@ class PairingPage:
             answer["autostart"] = self.autostart.enabled()
         if self.autoaccept is not None:
             answer["autoaccept"] = self.autoaccept.enabled()
+            answer["accessibility"] = self.autoaccept.granted()
         if self.events is not None:
             answer["log"] = self._log_lines(self.events(), lang)
         if self.updater is not None:
@@ -1119,6 +1165,14 @@ class PairingPage:
                          f'aria-labelledby="aa-label" aria-describedby="aa-help"{checked}><span class="sw-text">'
                          f'<span class="sw-label" id="aa-label">{words["autoaccept_label"]}</span><span class="sw-help" '
                          f'id="aa-help">{words["autoaccept_help"]}</span></span></label>')
+            if checked and not self.autoaccept.granted():
+                steps = "".join(f"<li>{words[key]}</li>" for key in ("perm_step1", "perm_step2", "perm_step3"))
+                inner.append(f'<div class="perm" role="note" aria-labelledby="perm-title">'
+                             f'<p class="perm-title" id="perm-title">{words["perm_title"]}</p>'
+                             f'<p>{words["perm_why"]}</p><ol>{steps}</ol>'
+                             f'{_permission_picture(words["perm_picture"])}'
+                             + _form("accessibility", token, f'<button type="submit">{words["perm_open"]}</button>')
+                             + '</div>')
         return f'<div class="panel pc" role="group" aria-labelledby="pc-title">{"".join(inner)}</div>'
 
     def render_stopped(self, lang):
@@ -1279,7 +1333,7 @@ def _handler(page):
             routes += ("/pause",) if page.on_pause is not None else ()
             routes += ("/resume",) if page.on_resume is not None else ()
             routes += ("/autostart",) if page.autostart is not None else ()
-            routes += ("/autoaccept",) if page.autoaccept is not None else ()
+            routes += ("/autoaccept", "/accessibility") if page.autoaccept is not None else ()
             routes += ("/update", "/restart") if page.updater is not None else ()
             replace_secret = page.run.secret if page.run is not None else None
             routes += ("/replace",) if page.on_quit is not None and replace_secret is not None else ()
@@ -1342,6 +1396,9 @@ def _handler(page):
             if path == "/lang":  # es or en, then the page again, drawn in it; anything else changes nothing
                 if page.set_lang(form.get("lang", "")) == "refused":
                     return self._refuse(400)
+                return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
+            if path == "/accessibility":  # System Settings opened at its Accessibility list
+                page.autoaccept.open_settings()
                 return self._send(303, "text/plain; charset=utf-8", "", (("Location", "/"),))
             if path == "/autoaccept":  # on is 1 or 0, as /autostart
                 if form.get("on") not in ("1", "0"):

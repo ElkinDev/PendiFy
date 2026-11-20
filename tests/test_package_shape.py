@@ -102,7 +102,10 @@ class PackageShapeTest(unittest.TestCase):
         # Mutation: sponsor_art.py left out of the package. Red: no pictures of the sponsored QR (lane pfart).
         self.assertIn("sponsor_art.py", [path.name for path in package_files()])
         pyproject = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertEqual(pyproject["tool"]["setuptools"]["package-data"], {support.PACKAGE: ["*.ico"]})
+        self.assertEqual(pyproject["tool"]["setuptools"]["package-data"],
+                         {support.PACKAGE: ["*.ico", "macos/PendiFy"]})
+        # Mutation: the macOS launcher left out. Red: install.sh finds no main executable for PendiFy.app.
+        self.assertTrue((support.package_dir() / "macos" / "PendiFy").is_file(), "no macos/PendiFy in the package")
 
     def test_winsound_is_imported_only_behind_its_guard(self):
         # Mutation: `import winsound` at the top of a module, outside its try. Red: one unguarded import.
@@ -240,7 +243,7 @@ class PackageShapeTest(unittest.TestCase):
         self.assertTrue((support.package_dir() / (NEW_NAME + ".ico")).is_file())
         project = tomllib.loads((support.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual((project["project"]["name"], project["tool"]["setuptools"]["package-data"]),
-                         (NEW_NAME, {NEW_NAME: ["*.ico"]}))
+                         (NEW_NAME, {NEW_NAME: ["*.ico", "macos/PendiFy"]}))
         env = {**os.environ, "PYTHONPATH": str(support.SRC)}
         helped = subprocess.run([sys.executable, "-m", NEW_NAME, "--help"], cwd=str(support.SRC), env=env,
                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)

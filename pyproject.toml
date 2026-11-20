@@ -25,4 +25,4 @@ Source = "https://github.com/ElkinDev/PendiFy"
 
 # pip lays the icon beside the modules; install.ps1 points the shortcuts at it.
 [tool.setuptools.package-data]
-pendify = ["*.ico"]
+pendify = ["*.ico", "macos/PendiFy"]
