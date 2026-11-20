@@ -4,6 +4,7 @@ import json
 import subprocess
 import threading
 import time
+import sys
 import unittest
 import urllib.error
 from pathlib import Path
@@ -135,6 +136,7 @@ class UpdaterTest(unittest.TestCase):
                 self.assertEqual(get.requests, [("https://pypi.org/pypi/pendify/json", worker.USER_AGENT, 5)])
                 self.assertEqual((run.calls, self.restarts, self.logs), ([], [], []))
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows only: the interpreter is a Windows path, read with Windows separators")
     def test_auto_mode_installs_in_the_background_and_reads_ready(self):
         # Mutation: --user kept inside a venv. Red: the command inside a venv carries --user.
         # Mutation: pip run with sys.executable, pythonw. Red: the command's first word is pythonw.exe.
