@@ -7,6 +7,7 @@ import io
 import queue
 import threading
 import time
+import sys
 import unittest
 
 import support
@@ -183,6 +184,7 @@ def ended(limit=5):
     return not tray_threads()
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows only: the icon by the clock is a Win32 notification icon")
 class TrayTest(unittest.TestCase):
     def setUp(self):
         self.fake = FakeWin32()

@@ -1,0 +1,31 @@
+name: Tests
+
+# The whole suite on Windows and on macOS, the two systems PendiFy runs on: a pull request and a run by hand. A
+# commit whose subject ends in [skip ci] skips the pull request's run, as it skips every other.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the suite
+        working-directory: tests
+        # The temporary folder on the checkout's own drive, by its long name: a hosted Windows runner keeps the
+        # checkout on D: and TEMP on C: under an 8.3 short name, which a PC with one drive never shows.
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: python -m unittest discover -s . -v

@@ -1926,6 +1926,9 @@ class PairingPageTest(unittest.TestCase):
             with self.subTest(language=language):
                 replaced, stopped = self.replace_page(RUN_SECRET)
                 self.assertEqual(self.post_replace(replaced, {"secret": RUN_SECRET}, language), (202, word))
+                deadline = time.monotonic() + 5  # the quit runs just after the answer: a slow machine may lag it
+                while not stopped and time.monotonic() < deadline:
+                    time.sleep(0.02)
                 self.assertEqual(stopped, ["quit"])
 
     def test_replace_with_a_wrong_secret_answers_403_and_closes_nothing(self):

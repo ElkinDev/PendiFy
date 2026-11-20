@@ -160,7 +160,14 @@ class PackageShapeTest(unittest.TestCase):
         # Mutation: a `push:` trigger beside the release. Red: the trigger list is not release and
         # workflow_dispatch alone. Every commit subject here ends in [skip ci], which skips push runs.
         self.assertTrue(WORKFLOWS.is_dir(), "no .github/workflows")
-        self.assertEqual(sorted(path.name for path in WORKFLOWS.iterdir()), ["publish.yml"])
+        self.assertEqual(sorted(path.name for path in WORKFLOWS.iterdir()), ["publish.yml", "tests.yml"])
+        # The suite's workflow: a pull request and a run by hand, never a push, and read-only.
+        tests = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([line.strip() for line in top_level_block(tests, "on") if re.match(r"^  \S", line)],
+                         ["pull_request:", "workflow_dispatch:"])
+        self.assertEqual([line for line in tests if re.match(r"^\s*push\s*:", line) or "[push" in line], [])
+        self.assertEqual([line.strip() for line in top_level_block(tests, "permissions") if line.strip()],
+                         ["contents: read"])
         lines = PUBLISH.read_text(encoding="utf-8").splitlines()
         triggers = top_level_block(lines, "on")
         self.assertEqual([line.strip() for line in triggers if re.match(r"^  \S", line)],

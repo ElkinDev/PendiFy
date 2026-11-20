@@ -285,7 +285,8 @@ class RunFile:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             raise FolderNotWritable(errno.EACCES, "the config folder cannot be made", str(self.path.parent)) from None
-        except FileExistsError:  # what Windows raises when a regular file stands where the folder or a parent goes
+        except (FileExistsError, NotADirectoryError):  # a regular file where the folder or a parent goes: Windows
+            # raises the first, macOS and Linux the second
             raise FolderNotWritable(errno.EACCES, "the config folder cannot be made", str(self.path.parent)) from None
         for _ in range(3):
             try:
