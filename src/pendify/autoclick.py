@@ -29,8 +29,11 @@ ACCEPT_DOWN = 0.6085
 FRONT_WAIT_SECONDS = 2.5  # the switch to the app's full-screen space takes about a second
 SETTLE_SECONDS = 0.4
 TIMEOUT = 5
-# While the permission is awaited, how often a child asks macOS whether it was granted.
+# While the permission is awaited, how often a child asks macOS whether it was granted: every few seconds for the
+# first minutes after an ask, while its person is likely in System Settings, then seldom.
 PERMISSION_POLL_SECONDS = 3
+PERMISSION_FAST_SECONDS = 10 * 60
+PERMISSION_SLOW_POLL_SECONDS = 30
 
 PERMISSION_LINES = {True: "autoaccept: on, the Accessibility permission is granted",
                     False: "autoaccept: on, waiting for the Accessibility permission (System Settings, Privacy & "
@@ -204,13 +207,16 @@ class Switch:
 
     `restart()` asks for this copy's restart and answers True once asked; while it is given, an ask that finds the
     permission not granted starts the poller, which reads the grant through a child and then calls it. `wait(seconds)`
-    waits before each round and answers True once the switch is closed (the close's own wait when None)."""
+    waits before each round and answers True once the switch is closed (the close's own wait when None); `clock`
+    times the rounds from the last ask."""
 
-    def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run, restart=None, wait=None):
+    def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run, restart=None, wait=None,
+                 clock=time.monotonic):
         self._store, self._granted, self._run, self._restart = store, granted, run, restart
         self._prompt = prompt if prompt is not None else (lambda: trusted(prompt=True))
         self._closed = threading.Event()
         self._wait = self._closed.wait if wait is None else wait
+        self._clock, self._asked_at = clock, None
         # Held while the poller is started or ends, so a switch turned on as it ends is never left with none.
         self._lock = threading.Lock()
         self._polling = False
@@ -235,6 +241,7 @@ class Switch:
         awaits the grant."""
         granted = bool(self._prompt())
         print(PERMISSION_LINES[granted], flush=True)
+        self._asked_at = self._clock()  # the fast rounds start again
         if not granted:
             self._poll()
         return granted
@@ -268,9 +275,11 @@ class Switch:
             self.thread.start()
 
     def _await_grant(self):
-        """Every PERMISSION_POLL_SECONDS while the switch is on, a child asks macOS; once it says granted and the
-        restart is asked, said on one line, the poller ends and none starts again. Ends as well at the close."""
-        while not self._wait(PERMISSION_POLL_SECONDS) and not self._closed.is_set():
+        """While the switch is on, a child asks macOS every PERMISSION_POLL_SECONDS for PERMISSION_FAST_SECONDS after
+        the last ask, then every PERMISSION_SLOW_POLL_SECONDS; once it says granted and the restart is asked, said on
+        one line, the poller ends and none starts again. Ends as well at the close."""
+        while not self._wait(PERMISSION_POLL_SECONDS if self._clock() - self._asked_at < PERMISSION_FAST_SECONDS
+                             else PERMISSION_SLOW_POLL_SECONDS) and not self._closed.is_set():
             with self._lock:
                 if not self.enabled():  # turned off: an ask that turns it on again starts a new one
                     self._polling = False

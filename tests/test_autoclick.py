@@ -104,7 +104,7 @@ class PermissionPollerTest(OnMac):
 
     def setUp(self):
         super().setUp()
-        self.restarts, self.waits, self.out = [], [], io.StringIO()
+        self.restarts, self.waits, self.out, self.now = [], [], io.StringIO(), 0.0
         self.addCleanup(self.join_pollers)
 
     def join_pollers(self):
@@ -117,12 +117,13 @@ class PermissionPollerTest(OnMac):
 
     def no_wait(self, seconds):
         self.waits.append(seconds)
+        self.now += seconds  # the poller's clock moves by the wait, which takes no time
         return False
 
     def switch(self, granted=False, on=True, answers=(), restart=None, wait=None, before=None):
         self.store, self.child = Store(on), Child(*answers, before=before)
         return autoclick.Switch(self.store, prompt=lambda: granted, granted=lambda: granted, run=self.child,
-                                restart=restart or self.restart, wait=wait or self.no_wait)
+                                restart=restart or self.restart, wait=wait or self.no_wait, clock=lambda: self.now)
 
     def ask(self, switch):
         with contextlib.redirect_stdout(self.out):
@@ -156,6 +157,27 @@ class PermissionPollerTest(OnMac):
         self.ask(switch)  # an ask in a copy that stops for its restart: no poller starts again
         self.assertIs(switch.thread, ended)
         self.assertEqual(len(self.restarts), 1)
+
+    def test_every_3_seconds_for_10_minutes_after_the_ask_then_every_30(self):
+        # Mutation: no slow phase. Red: 203 waits of 3 s. Mutation: the slow phase from the start. Red: 30 s at first.
+        self.assertEqual((autoclick.PERMISSION_POLL_SECONDS, autoclick.PERMISSION_FAST_SECONDS,
+                          autoclick.PERMISSION_SLOW_POLL_SECONDS), (3, 600, 30))
+        self.now = 1000.0  # the ask is at any time of the clock
+        switch = self.switch(answers=("untrusted\n",) * 202 + ("trusted\n",))
+        self.ask(switch)
+        self.assertEqual(self.waits, [3] * 200 + [30] * 3)
+        self.assertEqual(len(self.restarts), 1)
+
+    def test_an_ask_while_the_poll_is_slow_brings_back_the_fast_one(self):
+        # Mutation: the fast phase timed from the poller's start only. Red: 30 s after the second ask.
+        def wait(seconds):
+            if seconds == 30 and self.waits.count(30) == 1:
+                switch.ask()  # the page's switch turned on again while the poller is slow
+            return self.no_wait(seconds)
+
+        switch = self.switch(answers=("untrusted\n",) * 202 + ("trusted\n",), wait=wait)
+        self.ask(switch)
+        self.assertEqual(self.waits, [3] * 200 + [30, 30] + [3])
 
     def test_the_switch_off_starts_no_poller_and_a_poller_ends_once_it_is_turned_off_and_starts_again_on(self):
         # Mutation: the poller started with the switch off. Red: a thread. Mutation: the switch not read at each round.
