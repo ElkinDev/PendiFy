@@ -72,7 +72,7 @@ class FreshCheckTest(OnMac):
         run = Child("trusted\n")
         self.assertIs(autoclick.trusted_now(run), True)
         [(command, kwargs)] = run.calls
-        self.assertEqual((command[0], command[-2]), (sys.executable, "-c"))
+        self.assertEqual(command[:3], [sys.executable, "-I", "-c"])  # isolated: no PYTHON* variable or user site
         self.assertIn("AXIsProcessTrusted()", command[-1])
         compile(command[-1], "the fresh check", "exec")  # the child's program is Python that compiles
         self.assertEqual(kwargs["timeout"], autoclick.TIMEOUT)
@@ -142,7 +142,8 @@ class PermissionPollerTest(OnMac):
 
     def test_polls_until_the_child_says_trusted_then_asks_the_restart_once_says_it_and_ends(self):
         # Mutation: the restart asked at the first round. Red: one child, not three. Mutation: the loop goes on after
-        # the restart. Red: the thread never ends. Mutation: the line left out. Red: one line only.
+        # the restart. Red: the thread never ends. Mutation: the line left out. Red: one line only. Mutation: the
+        # poller counted ended once the restart is asked. Red: a second poller and a second restart.
         switch = self.switch(answers=("untrusted\n", "untrusted\n", "trusted\n"))
         self.assertIs(self.ask(switch), False)
         self.assertTrue(switch.thread.daemon)  # a stop of the program never waits for it
@@ -151,21 +152,32 @@ class PermissionPollerTest(OnMac):
         self.assertEqual(self.restarts, [switch.thread.ident])
         self.assertEqual(self.out.getvalue().splitlines(),
                          [autoclick.PERMISSION_LINES[False], autoclick.GRANTED_LINE])
+        ended = switch.thread
+        self.ask(switch)  # an ask in a copy that stops for its restart: no poller starts again
+        self.assertIs(switch.thread, ended)
+        self.assertEqual(len(self.restarts), 1)
 
-    def test_the_switch_off_starts_no_poller_and_a_poller_ends_once_it_is_turned_off(self):
+    def test_the_switch_off_starts_no_poller_and_a_poller_ends_once_it_is_turned_off_and_starts_again_on(self):
         # Mutation: the poller started with the switch off. Red: a thread. Mutation: the switch not read at each round.
-        # Red: a child asks, and the restart follows.
+        # Red: a child asks, and the restart follows. Mutation: an ended poller still counted. Red: none starts again.
         off = self.switch(on=False, answers=("trusted\n",))
         self.assertIs(self.ask(off), False)
         self.assertIsNone(off.thread)
 
         def turned_off(seconds):
-            switch.disable()  # the page's switch turned off while the poller waits
+            if not self.waits:
+                switch.disable()  # the page's switch turned off while the first poller waits
             return self.no_wait(seconds)
 
         switch = self.switch(answers=("trusted\n",), wait=turned_off)
         self.ask(switch)
+        first = switch.thread
         self.assertEqual((self.store.on, self.child.calls, self.restarts), (False, [], []))
+        with contextlib.redirect_stdout(self.out):
+            switch.enable()  # turned on again: a new poller, which sees the grant
+            switch.thread.join(JOIN_SECONDS)
+        self.assertIsNot(switch.thread, first)
+        self.assertEqual((len(self.child.calls), self.restarts), (1, [switch.thread.ident]))
 
     def test_the_switch_turned_on_from_the_page_asks_and_polls(self):
         # Mutation: enable() asks without the poller. Red: no restart once the child says trusted.

@@ -277,8 +277,7 @@ class Switch:
                     return
             if trusted_now(self._run) and not self._closed.is_set() and self._restart():
                 print(GRANTED_LINE, flush=True)
-                self._closed.set()  # this copy stops for its restart
-                return
+                return  # still polling to _poll: none starts again in a copy that stops for its restart
 
     def _set(self, on):
         try:
