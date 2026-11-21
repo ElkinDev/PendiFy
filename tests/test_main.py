@@ -836,6 +836,7 @@ class MainCommandTest(unittest.TestCase):
         # Mutation: a restart asked while the copy stops taken. Red: a copy starts after a plain quit.
         # Mutation: a restart asked before the update exists taken. Red: the start raises.
         # Mutation: the switch's close left out of the stop. Red: no close.
+        # Mutation: the grant's restart spawned with no marker. Red: no env carries it.
         update = support.module("update")
         worker_base = entry._arguments(["--worker", "http://127.0.0.1:9"]).worker
         carried = ["--data-dir", str(self.data), "--worker", str(worker_base), "--client-lockfile", str(self.no_client)]
@@ -866,7 +867,7 @@ class MainCommandTest(unittest.TestCase):
                         self.moments.append(("close", self.restart()))
 
                 def spawn(command, spawned=spawned, **options):
-                    spawned.append((command, self.run_file.exists()))
+                    spawned.append((command, options.pop("env", None), self.run_file.exists()))
 
                 def updater(version, mode, restart, folder=None):  # the real one, its restart main's quit
                     return update.Updater(version, mode, restart=restart, folder=folder)
@@ -886,7 +887,55 @@ class MainCommandTest(unittest.TestCase):
                 self.assertEqual(result["run"][0], 0)
                 self.assertEqual(switches[0].moments, [("ask", False), ("close", False)])
                 command = [sys.executable, "-m", support.PACKAGE, *carried]  # no --quiet: the new copy opens its page
-                self.assertEqual(spawned, [(command, False)] if granted else [])
+                # The new copy carries the marker, through PendiFy.app's launcher, which keeps the environment.
+                marked = {**os.environ, entry.GRANT_RESTART_ENV: "1"}
+                self.assertEqual(spawned, [(command, marked, False)] if granted else [])
+
+    def test_a_copy_the_grant_restarted_asks_no_such_restart_and_its_own_restart_drops_the_marker(self):
+        # Mutation: the marker not read. Red: the switch is given the restart. Mutation: the marker kept in this
+        # copy's environment. Red: the page's restart inherits it. Mutation: a page's restart marked. Red: an env.
+        self.assertEqual(entry.GRANT_RESTART_ENV, "PENDIFY_GRANT_RESTART")
+        update = support.module("update")
+        made, built, spawned = [], [], []
+
+        class FakeSwitch:
+            available = True
+
+            def __init__(self, store, restart):
+                built.append(restart)
+
+            def enabled(self):
+                return True
+
+            def granted(self):
+                return False
+
+            def ask(self):  # the permission still asked for, and its line said, by the real switch
+                return False
+
+            def close(self):
+                pass
+
+        def updater(version, mode, restart, folder=None):
+            made.append(update.Updater(version, mode, restart=restart, folder=folder))
+            return made[-1]
+
+        def spawn(command, **options):
+            spawned.append((options.get("env"), os.environ.get(entry.GRANT_RESTART_ENV)))
+
+        stop = threading.Event()
+        self.addCleanup(stop.set)  # a red never leaves the run serving
+        with unittest.mock.patch.dict(os.environ, {entry.GRANT_RESTART_ENV: "1"}):
+            thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                "--no-update", opener=lambda url: True, stop=stop, updater=updater,
+                                                spawn=spawn, switch=FakeSwitch)
+            self.assertTrue(self.wait_for_the_page())
+            made[0].restart()  # the page's «Reiniciar ahora»
+            thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result["run"][0], 0)
+        self.assertEqual(built, [None])  # no restart to ask for: the switch starts no poller
+        self.assertEqual(spawned, [(None, None)])  # neither passed nor inherited
 
     def test_the_finally_joins_a_running_install_before_the_release(self):
         # Mutation: the wait left out of the finally. Red: no wait among the moments.

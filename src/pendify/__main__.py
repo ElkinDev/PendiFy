@@ -53,6 +53,9 @@ PAGE_NOT_KNOWN_LINE = ("already running: the page of the program that runs is no
 CLAIM_FAILED_LINE = "cannot start: the run file cannot be replaced: {path}"
 FOLDER_FAILED_LINE = "cannot start: the config folder cannot be written: {path}"
 RESTART_FAILED_LINE = "cannot restart: the new copy did not start; start the program again"
+# Set only on the copy the Accessibility permission's grant restarts, through PendiFy.app's launcher, which keeps the
+# environment: that copy never asks for such a restart itself, so two answers of macOS that disagree loop no restart.
+GRANT_RESTART_ENV = "PENDIFY_GRANT_RESTART"
 # The line a start that replaced an older copy shows, in the page's language: the older copy's version, «desconocida»
 # or "unknown" for a record with none, then this one's.
 REPLACED_LINES = {"es": "Se reemplazó la copia anterior ({old}) por esta ({new}).",
@@ -184,11 +187,11 @@ def _ends(line, code, show):
     return code
 
 
-def _restart(args, spawn, show, opens_page):
+def _restart(args, spawn, show, opens_page, granted=False):
     """The restart asked for, once the run file is free: a new copy of this program, detached and with no console,
     which claims the run file as a first start does. One that opens its page, as every restart asked today does,
     goes without --quiet; one that does not keeps this run's --quiet. This run's --dry, --data-dir, --worker and
-    --client-lockfile go with it either way."""
+    --client-lockfile go with it either way, and GRANT_RESTART_ENV only with the one the permission's grant asked."""
     app = os.environ.get("PENDIFY_APP") if sys.platform == "darwin" else None  # through PendiFy.app's launcher
     command = ([app] if app else [sys.executable, "-m", __package__])
     command += ["--quiet"] if args.quiet and not opens_page else []
@@ -199,7 +202,8 @@ def _restart(args, spawn, show, opens_page):
     try:
         detached = ({"creationflags": _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                     else {"start_new_session": True})  # Popen refuses creationflags off Windows
-        spawn(command, **detached, close_fds=True)
+        marker = {"env": {**os.environ, GRANT_RESTART_ENV: "1"}} if granted else {}
+        spawn(command, **detached, **marker, close_fds=True)
     except OSError:
         return _ends(RESTART_FAILED_LINE, 1, show)
     return 0
@@ -276,6 +280,8 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
     calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
     replaced = None  # the record of the older copy this start replaced
+    # Read once and dropped, so no later restart of this copy inherits it.
+    restarted_for_grant = os.environ.pop(GRANT_RESTART_ENV, None) == "1"
     try:
         holder = run.claim()
         if holder is not None and holder["closing"] and run.wait_released(holder, CLOSING_WAIT_SECONDS):
@@ -301,7 +307,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         opener(f"http://{page.ADDRESS}:{port}/")
         show(ALREADY_RUNNING_LINE)
         return 0
-    updating = None
+    updating, granted = None, threading.Event()  # set once the restart asked is the permission grant's
     try:
         mode = update.OFF if args.no_update else store.read_update()
         state = pairing.PairingState(store, lambda secret: worker.check(secret, base=base, timeout=timeout))
@@ -323,12 +329,15 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             # page's tab goes with this copy. Refused before the update exists and once this copy stops.
             if updating is None or stop.is_set():
                 return False
+            granted.set()
             updating.restart(opens_page=True)
             return True
 
         if switch is None:  # the real switch, never in a test run, where macOS would be asked for the permission
             switch = autoclick.Switch if getattr(args, "client_lockfile", None) is None else None
-        clicking = switch(store, restart=restart_granted) if switch is not None else None
+        # A copy that grant restarted still asks for the permission and says it, but never asks that restart again.
+        clicking = (switch(store, restart=None if restarted_for_grant else restart_granted) if switch is not None
+                    else None)
         if clicking is not None and clicking.available and clicking.enabled():
             clicking.ask()  # on by default: the permission is asked for at the start, not at the first pop
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
@@ -391,7 +400,7 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
     finally:
         run.release()
     if updating is not None and updating.restart_requested.is_set():
-        return _restart(args, spawn, show, updating.restart_opens_page)
+        return _restart(args, spawn, show, updating.restart_opens_page, granted.is_set())
     return 0
 
 
