@@ -212,7 +212,7 @@ class PermissionPollerTest(OnMac):
 
     def test_the_close_ends_the_wait_and_nothing_polls_after_it(self):
         # Mutation: the wait not the close's own. Red: the poller sleeps out its interval and asks a child.
-        # Mutation: an ask after the close starts a poller. Red: one more thread.
+        # Mutation: an ask after the close starts a poller. Red: a thread on the switch closed before any ask.
         self.store, self.child = Store(True), Child("trusted\n")
         switch = autoclick.Switch(self.store, prompt=lambda: False, granted=lambda: False, run=self.child,
                                   restart=self.restart)
@@ -223,6 +223,10 @@ class PermissionPollerTest(OnMac):
             self.assertFalse(switch.thread.is_alive())
             switch.ask()
         self.assertEqual((pollers(), self.child.calls, self.restarts), ([], [], []))
+        closed = self.switch(answers=("trusted\n",))
+        closed.close()  # a copy that stops before any ask: the page's switch turned on as it closes
+        self.ask(closed)
+        self.assertIsNone(closed.thread)
 
     def test_a_grant_seen_as_the_copy_closes_asks_no_restart(self):
         # Mutation: the close not read before the restart. Red: a restart asked by a copy that stops.
