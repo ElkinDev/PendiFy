@@ -830,6 +830,64 @@ class MainCommandTest(unittest.TestCase):
                 if refused:
                     self.assertEqual(out.splitlines()[-1], entry.RESTART_FAILED_LINE)
 
+    def test_a_grant_seen_by_the_switch_restarts_the_copy_with_its_page_and_never_once_it_stops(self):
+        # Mutation: the switch built with no restart. Red: nothing to call at the grant.
+        # Mutation: the restart asked without its page. Red: the quiet run's copy carries --quiet.
+        # Mutation: a restart asked while the copy stops taken. Red: a copy starts after a plain quit.
+        # Mutation: a restart asked before the update exists taken. Red: the start raises.
+        # Mutation: the switch's close left out of the stop. Red: no close.
+        update = support.module("update")
+        worker_base = entry._arguments(["--worker", "http://127.0.0.1:9"]).worker
+        carried = ["--data-dir", str(self.data), "--worker", str(worker_base), "--client-lockfile", str(self.no_client)]
+        for granted in (True, False):
+            with self.subTest(granted=granted):
+                switches, spawned = [], []
+
+                class FakeSwitch:
+                    """The page's switch, on with no permission: its ask and its close each ask for the restart, as
+                    a grant seen before the update exists and one seen as the copy stops; both are refused."""
+                    available = True
+
+                    def __init__(self, store, restart):
+                        self.restart, self.moments = restart, []
+                        switches.append(self)
+
+                    def enabled(self):
+                        return True
+
+                    def granted(self):
+                        return False
+
+                    def ask(self):
+                        self.moments.append(("ask", self.restart()))
+                        return False
+
+                    def close(self):
+                        self.moments.append(("close", self.restart()))
+
+                def spawn(command, spawned=spawned, **options):
+                    spawned.append((command, self.run_file.exists()))
+
+                def updater(version, mode, restart, folder=None):  # the real one, its restart main's quit
+                    return update.Updater(version, mode, restart=restart, folder=folder)
+
+                stop = threading.Event()
+                self.addCleanup(stop.set)  # a red never leaves the run serving
+                thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
+                                                    "--quiet", "--no-update", opener=lambda url: True, stop=stop,
+                                                    updater=updater, spawn=spawn, switch=FakeSwitch)
+                self.assertTrue(self.wait_for_the_page())
+                if granted:
+                    self.assertIs(switches[0].restart(), True)  # the switch's poller saw the grant
+                else:
+                    stop.set()  # a plain quit
+                thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(result["run"][0], 0)
+                self.assertEqual(switches[0].moments, [("ask", False), ("close", False)])
+                command = [sys.executable, "-m", support.PACKAGE, *carried]  # no --quiet: the new copy opens its page
+                self.assertEqual(spawned, [(command, False)] if granted else [])
+
     def test_the_finally_joins_a_running_install_before_the_release(self):
         # Mutation: the wait left out of the finally. Red: no wait among the moments.
         # Mutation: the wait made after the release. Red: the run file is gone at the wait.

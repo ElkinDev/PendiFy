@@ -14,7 +14,8 @@ it to end and starts. A start of a newer version over a running older copy repla
 stop through its page's /replace with the run file's secret, or ended by its pid when it has no secret or its page
 does not answer, and this start then claims the run file as a first one does. A restart the page asks for
 («Reiniciar ahora», once a newer version is installed, or the
-icon's «Reiniciar para actualizar») starts a new copy once the run file is released: without --quiet, so its page
+icon's «Reiniciar para actualizar»), and the one asked on macOS once the Accessibility permission is granted while
+this copy runs, starts a new copy once the run file is released: without --quiet, so its page
 opens, and with the --dry, --data-dir, --worker and --client-lockfile of this one.
 Where no console is attached (a pythonw start), the line a start ends on is also shown in a
 message box. `--data-dir`, `--worker` and `--client-lockfile` are the
@@ -270,7 +271,7 @@ def _ready_version(updater):
 
 
 def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, sleep, autostart, tray, updater,
-           spawn, terminate):
+           spawn, terminate, switch):
     # A quiet start is the system's, at logon: it never opens the browser, and a start that ends well shows no box.
     calm = (lambda line: None) if args.quiet else show
     run = runfile.RunFile(store.path.parent, clock=clock, sleep=sleep)
@@ -316,7 +317,18 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
                 pass  # unmarked, the finally marks it again; the stop goes on
             stop.set()
 
-        clicking = autoclick.Switch(store) if getattr(args, "client_lockfile", None) is None else None
+        def restart_granted():
+            # The Accessibility permission granted while this copy runs, which macOS keeps answering it as at its
+            # start: a new copy reads it, its page opened, as the person is likely in System Settings and this
+            # page's tab goes with this copy. Refused before the update exists and once this copy stops.
+            if updating is None or stop.is_set():
+                return False
+            updating.restart(opens_page=True)
+            return True
+
+        if switch is None:  # the real switch, never in a test run, where macOS would be asked for the permission
+            switch = autoclick.Switch if getattr(args, "client_lockfile", None) is None else None
+        clicking = switch(store, restart=restart_granted) if switch is not None else None
         if clicking is not None and clicking.available and clicking.enabled():
             clicking.ask()  # on by default: the permission is asked for at the start, not at the first pop
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
@@ -360,6 +372,8 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         finally:
             stop.set()
             updating.close()  # the restart gate shuts at the quit
+            if clicking is not None:
+                clicking.close()  # and the wait for the permission's grant ends
             # First, so a start made while this one stops waits for it instead of opening a closing page: Ctrl+C
             # and Ctrl+Break are marked only here, and the page's quit, marked already, is marked again.
             try:
@@ -390,14 +404,16 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=runfile.terminate):
+         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=runfile.terminate,
+         switch=None):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
     line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the
     seam a test run fills with a fake, so no test shows a real icon. `updater` makes the update and `spawn` starts
     the restart's new copy, the seams a test run fills with fakes, so no test reaches PyPI, runs pip or starts a
     copy. `terminate` ends an older copy by its pid when it cannot be asked to stop, the seam every test run fakes, so
-    no test ends a process."""
+    no test ends a process. `switch` makes the page's switch of the click on accept (autoclick.Switch when None, and
+    none under --client-lockfile), the seam a test run fills with a fake, so no test asks macOS for a permission."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)
@@ -413,7 +429,8 @@ def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT
         try:
             return _serve(args, store, base, timeout, opener, stop or threading.Event(),
                           delay or watcher.accept_delay, beep, show, clock, sleep,
-                          autostart if autostart is not None else Autostart(), tray, updater, spawn, terminate)
+                          autostart if autostart is not None else Autostart(), tray, updater, spawn, terminate,
+                          switch)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGBREAK, previous)
