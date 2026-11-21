@@ -24,8 +24,8 @@ LSREGISTER="${PENDIFY_LSREGISTER:-$LSREGISTER}"
 
 # The app prebuilt by tools/release-macos-app.sh, signed with PendiFy's Developer ID and notarized by Apple. A release
 # writes these two lines; while either is empty, the app is built on this Mac.
-MACOS_APP_URL=""
-MACOS_APP_SHA256=""
+MACOS_APP_URL="https://github.com/ElkinDev/PendiFy/releases/download/macos-app-0.1.13/PendiFy-macos-0.1.13.zip"
+MACOS_APP_SHA256="2357f62fdc795e5b9268a458908451bddf180a03a7438053191b867dc744c962"
 # The team the downloaded app must be signed by.
 MACOS_APP_TEAM="BL4KZH338B"
 
