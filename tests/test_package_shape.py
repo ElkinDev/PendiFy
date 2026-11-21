@@ -160,7 +160,14 @@ class PackageShapeTest(unittest.TestCase):
         # Mutation: a `push:` trigger beside the release. Red: the trigger list is not release and
         # workflow_dispatch alone. Every commit subject here ends in [skip ci], which skips push runs.
         self.assertTrue(WORKFLOWS.is_dir(), "no .github/workflows")
-        self.assertEqual(sorted(path.name for path in WORKFLOWS.iterdir()), ["publish.yml"])
+        self.assertEqual(sorted(path.name for path in WORKFLOWS.iterdir()), ["publish.yml", "tests.yml"])
+        # The suite's workflow: a pull request and a run by hand, never a push, and read-only.
+        tests = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([line.strip() for line in top_level_block(tests, "on") if re.match(r"^  \S", line)],
+                         ["pull_request:", "workflow_dispatch:"])
+        self.assertEqual([line for line in tests if re.match(r"^\s*push\s*:", line) or "[push" in line], [])
+        self.assertEqual([line.strip() for line in top_level_block(tests, "permissions") if line.strip()],
+                         ["contents: read"])
         lines = PUBLISH.read_text(encoding="utf-8").splitlines()
         triggers = top_level_block(lines, "on")
         self.assertEqual([line.strip() for line in triggers if re.match(r"^  \S", line)],
@@ -196,6 +203,14 @@ class PackageShapeTest(unittest.TestCase):
         self.assertLess(check[0], build[0])
         for part in (RELEASE_ONLY, "pyproject.toml", '"v$version"', "exit 1"):
             self.assertIn(part, steps[check[0]])
+
+    def test_a_release_of_the_macos_app_skips_the_pypi_build(self):
+        # Mutation: the build job's condition dropped. Red: a macos-app-<version> release runs the build, which then
+        # fails its tag check, as every release of the signed app would.
+        lines = PUBLISH.read_text(encoding="utf-8").splitlines()
+        build = nested_block(lines, "  build:", 2)
+        self.assertIn("    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')", build)
+        self.assertIn("    needs: build", nested_block(lines, "  publish:", 2))
 
     def test_the_sdist_prunes_the_tests_folder(self):
         # Mutation: MANIFEST.in removed. Red: setuptools adds tests/test_*.py to the sdist on its own, without

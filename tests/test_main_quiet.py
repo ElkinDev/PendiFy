@@ -6,6 +6,7 @@ page not known yet); a start that fails still shows its line. Without the flag b
 import json
 import os
 import threading
+import sys
 import unittest
 
 import support
@@ -57,6 +58,7 @@ class QuietStartTest(unittest.TestCase):
         self.assertEqual(self.started(opened=opened), (0, entry.ALREADY_RUNNING_LINE + "\n", ""))
         self.assertEqual((opened, self.boxes), (["http://127.0.0.1:54321/"], [entry.ALREADY_RUNNING_LINE]))
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows only: the winner's open handle holds the run file only where an open file is locked")
     def test_a_quiet_start_whose_running_page_is_not_known_shows_no_box_and_exits_0(self):
         # Mutation: the box shown for the page not known yet. Red: a message box at logon.
         # Mutation: the quiet start says the page-not-known line. Red: a page promised that it will never open.

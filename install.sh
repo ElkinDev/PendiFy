@@ -4,9 +4,13 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ElkinDev/PendiFy/main/install.sh | bash
 #
-# PENDIFY_DRYRUN=1   says what it would do and changes nothing
-# PENDIFY_NOSTART=1  does not start the program at the end
-# PENDIFY_SOURCE     what pip installs (default: pendify, from PyPI); a folder or a git URL also works
+# PENDIFY_DRYRUN=1        says what it would do and changes nothing
+# PENDIFY_NOSTART=1       does not start the program at the end
+# PENDIFY_SOURCE          what pip installs (default: pendify, from PyPI); a folder or a git URL also works
+# PENDIFY_BUILD_APP=1     builds the app on this Mac instead of downloading the signed one
+# PENDIFY_SIGN_IDENTITY   the identity an app built here is signed with (default: a Developer ID in the keychain,
+#                         else ad hoc); - for ad hoc
+# PENDIFY_LSREGISTER      the LaunchServices tool the app is registered with (the tests name a stand-in)
 set -euo pipefail
 
 SUPPORT="$HOME/Library/Application Support/pendify"
@@ -15,6 +19,15 @@ APP="$HOME/Applications/PendiFy.app"
 AGENT="$HOME/Library/LaunchAgents/io.github.elkindev.pendify.plist"
 SOURCE="${PENDIFY_SOURCE:-pendify}"
 DRY="${PENDIFY_DRYRUN:-}"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+LSREGISTER="${PENDIFY_LSREGISTER:-$LSREGISTER}"
+
+# The app prebuilt by tools/release-macos-app.sh, signed with PendiFy's Developer ID and notarized by Apple. A release
+# writes these two lines; while either is empty, the app is built on this Mac.
+MACOS_APP_URL="https://github.com/ElkinDev/PendiFy/releases/download/macos-app-0.1.13/PendiFy-macos-0.1.13.zip"
+MACOS_APP_SHA256="2357f62fdc795e5b9268a458908451bddf180a03a7438053191b867dc744c962"
+# The team the downloaded app must be signed by.
+MACOS_APP_TEAM="BL4KZH338B"
 
 say() { printf '%s\n' "$*"; }
 run() { if [ -n "$DRY" ]; then say "  (dry) $*"; else "$@"; fi; }
@@ -65,12 +78,12 @@ run "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check --upgr
 # The app: its main executable is PendiFy's launcher (tools/macos_launcher.c), which starts the environment's Python
 # as its child, so macOS lists the app as "PendiFy", with its icon, for the Accessibility permission. No Dock icon (the page
 # and its «Salir» button are the program's face). Opened again, it opens the page of the copy that runs.
-say "Making $APP"
-if [ -z "$DRY" ]; then
-    PKG="$("$VENV/bin/python" -c 'import pendify, pathlib; print(pathlib.Path(pendify.__file__).parent)')"
+build_app() {
+    local pkg identity
+    pkg="$("$VENV/bin/python" -c 'import pendify, pathlib; print(pathlib.Path(pendify.__file__).parent)')"
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    cp "$PKG/macos/PendiFy" "$APP/Contents/MacOS/PendiFy"
+    cp "$pkg/macos/PendiFy" "$APP/Contents/MacOS/PendiFy"
     chmod 755 "$APP/Contents/MacOS/PendiFy"
     cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -89,13 +102,67 @@ if [ -z "$DRY" ]; then
 </dict>
 </plist>
 EOF
-    sips -s format icns "$PKG/pendify.ico" --out "$APP/Contents/Resources/PendiFy.icns" >/dev/null 2>&1 || true
-    # Ad hoc, with a fixed identifier: the same bytes give the same signature, so the permission is kept.
-    codesign --force --sign - --identifier io.github.elkindev.pendify.app "$APP" >/dev/null 2>&1 \
+    sips -s format icns "$pkg/pendify.ico" --out "$APP/Contents/Resources/PendiFy.icns" >/dev/null 2>&1 || true
+    # Signed with the owner's Developer ID when the keychain holds one, so macOS names the developer in Login Items
+    # instead of "unidentified developer"; ad hoc otherwise, or when that signing fails. A fixed identifier either
+    # way: the same bytes and identity give the same signature, so the permission is kept. PENDIFY_SIGN_IDENTITY
+    # names another identity, or - for ad hoc.
+    identity=${PENDIFY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)}
+    [ -n "$identity" ] || identity=-
+    codesign --force --sign "$identity" --timestamp=none --identifier io.github.elkindev.pendify.app "$APP" \
+        >/dev/null 2>&1 \
+        || { [ "$identity" != - ] && codesign --force --sign - --identifier io.github.elkindev.pendify.app "$APP" \
+             >/dev/null 2>&1; } \
         || say "The app could not be signed; macOS may list it under another name."
+}
+
+# The signed app, downloaded into a temporary folder and put in place only when its sha256, its signature and its
+# team all check. On a failure WHY says, in a few words, which check failed.
+WHY=""
+fetch_into() {
+    local work="$1" sum team
+    curl -fsSL --retry 2 -o "$work/PendiFy.zip" "$MACOS_APP_URL" || { WHY="the download failed"; return 1; }
+    sum="$(shasum -a 256 "$work/PendiFy.zip" | cut -d ' ' -f 1)"
+    [ "$sum" = "$MACOS_APP_SHA256" ] || { WHY="its sha256 is not the one expected"; return 1; }
+    ditto -x -k "$work/PendiFy.zip" "$work/unpacked" || { WHY="it could not be unpacked"; return 1; }
+    [ -d "$work/unpacked/PendiFy.app" ] || { WHY="it holds no PendiFy.app"; return 1; }
+    codesign --verify --deep --strict "$work/unpacked/PendiFy.app" >/dev/null 2>&1 \
+        || { WHY="its signature does not verify"; return 1; }
+    team="$(codesign -dv "$work/unpacked/PendiFy.app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+    [ "$team" = "$MACOS_APP_TEAM" ] \
+        || { WHY="its team is not $MACOS_APP_TEAM (codesign reads: ${team:-nothing})"; return 1; }
+    rm -rf "$APP"
+    mkdir -p "$(dirname "$APP")"
+    ditto "$work/unpacked/PendiFy.app" "$APP" || { WHY="it could not be put at $APP"; return 1; }
+}
+fetch_app() {
+    local work code=0
+    work="$(mktemp -d "${TMPDIR:-/tmp}/pendify-app.XXXXXX")" \
+        || { WHY="no temporary folder could be made"; return 1; }
+    fetch_into "$work" || code=1
+    rm -rf "$work"
+    return "$code"
+}
+
+say "Making $APP"
+if [ "${PENDIFY_BUILD_APP:-}" = 1 ]; then
+    say "Building the app here: PENDIFY_BUILD_APP=1 asks for it."
+    [ -n "$DRY" ] || build_app
+elif [ -z "$MACOS_APP_URL" ] || [ -z "$MACOS_APP_SHA256" ]; then
+    say "Building the app here: no signed app is published yet."
+    [ -n "$DRY" ] || build_app
+elif [ -n "$DRY" ]; then
+    say "  (dry) download $MACOS_APP_URL; kept if its sha256, signature and team check, else built here"
+elif fetch_app; then
+    say "Downloaded the app signed by team $MACOS_APP_TEAM."
+else
+    say "Building the app here: the signed download was not used, $WHY."
+    build_app
+fi
+if [ -z "$DRY" ]; then
     touch "$APP"
-    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" \
-        -f "$APP" >/dev/null 2>&1 || true
+    "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 fi
 
 # A start at logon turned on from the page is rewritten to go through the app, as the page writes it.
