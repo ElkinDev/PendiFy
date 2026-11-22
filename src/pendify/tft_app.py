@@ -18,6 +18,7 @@ app's process is looked for at most once every PROCESS_CHECK_SECONDS; with the a
 """
 import json
 import os
+import random
 import re
 import subprocess
 import time
@@ -28,9 +29,12 @@ PROCESS_PATTERN = "Teamfight Tactics.app/Contents/MacOS/TFTClient"
 PROCESS_CHECK_SECONDS = 3.0
 READY_CHECK_SECONDS = 15.0
 # The click on accept, when turned on: the first after the pop's modal has drawn, then again while the log says no
-# accept, up to ACCEPT_ATTEMPTS clicks inside the check.
+# accept, up to ACCEPT_ATTEMPTS clicks inside the check. Each click waits a random share of ACCEPT_JITTER_SECONDS more,
+# to the millisecond, so no two pops are clicked at the same moment; at its most the clicks fall 3, 7 and 11 s after
+# the pop and the last look at the log at 13 s, inside READY_CHECK_SECONDS.
 ACCEPT_FIRST_WAIT = 1.0
 ACCEPT_RETRY_WAIT = 2.0
+ACCEPT_JITTER_SECONDS = 2.0
 ACCEPT_ATTEMPTS = 3
 NOT_ACCEPTED = "not_accepted"
 CHUNK = 1024 * 1024
@@ -88,6 +92,11 @@ def last_pop(lines, mark=POP_MARK):
     return client._log_stamp(lines[start:end if end >= 0 else len(lines)])
 
 
+def accept_jitter():
+    """The random wait added before a click, from 0 to ACCEPT_JITTER_SECONDS, rounded to the millisecond."""
+    return round(random.uniform(0, ACCEPT_JITTER_SECONDS), 3)
+
+
 def app_running(run=subprocess.run):
     """True while the app's process runs."""
     try:
@@ -107,10 +116,11 @@ class AppSession:
     token = None
 
     def __init__(self, path=client.real_game_log, running=app_running, clock=time.monotonic, wall=time.time,
-                 opener=open, autoaccept=None, clicker=None, sleep=time.sleep):
-        """`autoaccept` answers whether the click on accept is on (never when None); `clicker` makes it."""
+                 opener=open, autoaccept=None, clicker=None, sleep=time.sleep, jitter=accept_jitter):
+        """`autoaccept` answers whether the click on accept is on (never when None); `clicker` makes it, each click
+        `jitter()` seconds later than its wait."""
         self._path, self._running, self._clock, self._wall, self._opener = path, running, clock, wall, opener
-        self._autoaccept, self._clicker, self._sleep = autoaccept, clicker, sleep
+        self._autoaccept, self._clicker, self._sleep, self._jitter = autoaccept, clicker, sleep, jitter
         self._said_pop, self._accepted = None, None
         self._offset, self._file_id = 0, None
         self._phase, self._stamp = None, None
@@ -153,7 +163,7 @@ class AppSession:
         else why not, a Clicker's reason or NOT_ACCEPTED. Clicks only while the check is open."""
         pop, reason = self._said_pop, NOT_ACCEPTED
         for attempt in range(ACCEPT_ATTEMPTS):
-            self._sleep(ACCEPT_FIRST_WAIT if attempt == 0 else ACCEPT_RETRY_WAIT)
+            self._sleep((ACCEPT_FIRST_WAIT if attempt == 0 else ACCEPT_RETRY_WAIT) + self._jitter())
             self._read_on()
             if self._accepted_since(pop):
                 return True
@@ -162,7 +172,7 @@ class AppSession:
             reason = self._clicker.click() or NOT_ACCEPTED
             if reason == "no_permission":  # no click can be made: no retry
                 return reason
-        self._sleep(ACCEPT_RETRY_WAIT)
+        self._sleep(ACCEPT_RETRY_WAIT)  # the last look at the log, with no jitter: no click follows it
         self._read_on()
         return True if self._accepted_since(pop) else reason
 
