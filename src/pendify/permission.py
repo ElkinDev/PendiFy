@@ -93,10 +93,15 @@ class Poller:
     def _rounds(self):
         """While the switch is on, a child asks macOS every PERMISSION_POLL_SECONDS for PERMISSION_FAST_SECONDS after
         the last start, then every PERMISSION_SLOW_POLL_SECONDS; once it says granted and the restart is asked, said
-        on one line, the poller ends and none starts again. Ends as well at the close."""
+        on one line, the poller ends and none starts again. Ends as well at the close, and at a switch turned off while
+        the child asked."""
         while not self._wait(self._interval()) and not self._closed.is_set():
             if self._turned_off():
                 return
-            if trusted_now(self._run) and not self._closed.is_set() and self._restart():
+            if not trusted_now(self._run) or self._closed.is_set():
+                continue
+            if self._turned_off():  # the child takes up to TIMEOUT: the switch is read again before the restart
+                return
+            if self._restart():
                 print(GRANTED_LINE, flush=True)
                 return  # still polling: none starts again in a copy that stops for its restart

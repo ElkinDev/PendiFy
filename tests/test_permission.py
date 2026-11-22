@@ -212,7 +212,7 @@ class PermissionPollerTest(OnMac):
         failures = (OSError(5, "input/output error"), ValueError("not json"), OSError(13, "denied"), OSError(5, "io"))
         switch = self.switch(answers=("untrusted\n",) * 3 + ("trusted\n",), failures=failures)
         self.assertIs(self.ask(switch), False)
-        self.assertEqual(self.store.reads, 5)  # the start's and four rounds', the first four failed
+        self.assertEqual(self.store.reads, 6)  # the start's, four rounds' and the one after the grant; four failed
         self.assertEqual((len(self.child.calls), self.restarts), (4, [switch.poller.thread.ident]))
         self.assertEqual(self.out.getvalue().splitlines()[-1], permission.GRANTED_LINE)
         # The page reads a failed read as off, as before.
@@ -274,6 +274,15 @@ class PermissionPollerTest(OnMac):
         self.ask(switch)
         self.assertEqual((len(self.child.calls), self.restarts), (1, []))
         self.assertNotIn(permission.GRANTED_LINE, self.out.getvalue())
+
+    def test_the_switch_turned_off_while_the_child_asks_asks_no_restart_and_ends_the_poller(self):
+        # Mutation: the switch not read again once the child says trusted. Red: a restart asked with the switch off.
+        # Mutation: the poller left counted running at that off. Red: still awaited, and no new one would start.
+        switch = self.switch(answers=("trusted\n",), before=lambda: switch.disable())
+        self.ask(switch)
+        self.assertEqual((len(self.child.calls), self.restarts, self.store.on), (1, [], False))
+        self.assertNotIn(permission.GRANTED_LINE, self.out.getvalue())
+        self.assertIs(switch.awaiting(), False)
 
     def test_a_restart_not_taken_yet_is_asked_again_at_the_next_round_and_said_once(self):
         # Mutation: the poller ends whatever the restart answers. Red: one request, never taken.
