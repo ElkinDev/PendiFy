@@ -890,52 +890,64 @@ class MainCommandTest(unittest.TestCase):
                 # The new copy carries the marker, through PendiFy.app's launcher, which keeps the environment.
                 marked = {**os.environ, entry.GRANT_RESTART_ENV: "1"}
                 self.assertEqual(spawned, [(command, marked, False)] if granted else [])
+                # An unmarked copy whose ask reads not granted says nothing of a grant restart.
+                self.assertNotIn(entry.GRANT_RESTART_UNGRANTED_LINE, result["run"][1])
 
     def test_a_copy_the_grant_restarted_asks_no_such_restart_and_its_own_restart_drops_the_marker(self):
         # Mutation: the marker not read. Red: the switch is given the restart. Mutation: the marker kept in this
         # copy's environment. Red: the page's restart inherits it. Mutation: a page's restart marked. Red: an env.
+        # Mutation: the ask's answer not kept. Red: no line says the grant still reads not granted. Mutation: the line
+        # said whatever the answer. Red: it is there with the permission granted.
         self.assertEqual(entry.GRANT_RESTART_ENV, "PENDIFY_GRANT_RESTART")
+        self.assertEqual(entry.GRANT_RESTART_UNGRANTED_LINE,
+                         "autoaccept: this copy was started by the restart for the Accessibility permission, which "
+                         "still reads not granted; no further restart is asked")
         update = support.module("update")
-        made, built, spawned = [], [], []
+        for allowed in (False, True):
+            with self.subTest(granted=allowed):
+                made, built, spawned = [], [], []
 
-        class FakeSwitch:
-            available = True
+                class FakeSwitch:
+                    available = True
 
-            def __init__(self, store, restart):
-                built.append(restart)
+                    def __init__(self, store, restart):
+                        built.append(restart)
 
-            def enabled(self):
-                return True
+                    def enabled(self):
+                        return True
 
-            def granted(self):
-                return False
+                    def granted(self):
+                        return allowed
 
-            def ask(self):  # the permission still asked for, and its line said, by the real switch
-                return False
+                    def ask(self):  # the permission still asked for, and its line said, by the real switch
+                        return allowed
 
-            def close(self):
-                pass
+                    def close(self):
+                        pass
 
-        def updater(version, mode, restart, folder=None):
-            made.append(update.Updater(version, mode, restart=restart, folder=folder))
-            return made[-1]
+                def updater(version, mode, restart, folder=None, made=made):
+                    made.append(update.Updater(version, mode, restart=restart, folder=folder))
+                    return made[-1]
 
-        def spawn(command, **options):
-            spawned.append((options.get("env"), os.environ.get(entry.GRANT_RESTART_ENV)))
+                def spawn(command, spawned=spawned, **options):
+                    spawned.append((options.get("env"), os.environ.get(entry.GRANT_RESTART_ENV)))
 
-        stop = threading.Event()
-        self.addCleanup(stop.set)  # a red never leaves the run serving
-        with unittest.mock.patch.dict(os.environ, {entry.GRANT_RESTART_ENV: "1"}):
-            thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker", "http://127.0.0.1:9",
-                                                "--no-update", opener=lambda url: True, stop=stop, updater=updater,
-                                                spawn=spawn, switch=FakeSwitch)
-            self.assertTrue(self.wait_for_the_page())
-            made[0].restart()  # the page's «Reiniciar ahora»
-            thread.join(10)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(result["run"][0], 0)
-        self.assertEqual(built, [None])  # no restart to ask for: the switch starts no poller
-        self.assertEqual(spawned, [(None, None)])  # neither passed nor inherited
+                stop = threading.Event()
+                self.addCleanup(stop.set)  # a red never leaves the run serving
+                with unittest.mock.patch.dict(os.environ, {entry.GRANT_RESTART_ENV: "1"}):
+                    thread, result = self.run_in_thread("--data-dir", str(self.data), "--worker",
+                                                        "http://127.0.0.1:9", "--no-update", opener=lambda url: True,
+                                                        stop=stop, updater=updater, spawn=spawn, switch=FakeSwitch)
+                    self.assertTrue(self.wait_for_the_page())
+                    made[0].restart()  # the page's «Reiniciar ahora»
+                    thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(result["run"][0], 0)
+                self.assertEqual(built, [None])  # no restart to ask for: the switch starts no poller
+                self.assertEqual(spawned, [(None, None)])  # neither passed nor inherited
+                # Said once, and only while the grant this copy was restarted for still reads not granted.
+                self.assertEqual(result["run"][1].splitlines().count(entry.GRANT_RESTART_UNGRANTED_LINE),
+                                 0 if allowed else 1)
 
     def test_the_finally_joins_a_running_install_before_the_release(self):
         # Mutation: the wait left out of the finally. Red: no wait among the moments.

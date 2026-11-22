@@ -56,6 +56,9 @@ RESTART_FAILED_LINE = "cannot restart: the new copy did not start; start the pro
 # Set only on the copy the Accessibility permission's grant restarts, through PendiFy.app's launcher, which keeps the
 # environment: that copy never asks for such a restart itself, so two answers of macOS that disagree loop no restart.
 GRANT_RESTART_ENV = "PENDIFY_GRANT_RESTART"
+# Said by that copy when its own start still reads the permission not granted, the case that would have looped.
+GRANT_RESTART_UNGRANTED_LINE = ("autoaccept: this copy was started by the restart for the Accessibility permission, "
+                                "which still reads not granted; no further restart is asked")
 # The line a start that replaced an older copy shows, in the page's language: the older copy's version, «desconocida»
 # or "unknown" for a record with none, then this one's.
 REPLACED_LINES = {"es": "Se reemplazó la copia anterior ({old}) por esta ({new}).",
@@ -339,7 +342,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         clicking = (switch(store, restart=None if restarted_for_grant else restart_granted) if switch is not None
                     else None)
         if clicking is not None and clicking.available and clicking.enabled():
-            clicking.ask()  # on by default: the permission is asked for at the start, not at the first pop
+            # On by default: the permission is asked for at the start, not at the first pop.
+            if not clicking.ask() and restarted_for_grant:
+                print(GRANT_RESTART_UNGRANTED_LINE, flush=True)
         pairing_page = page.PairingPage(state, watch=watch.snapshot, on_quit=quit_page, on_pause=watch.pause,
                                         on_resume=watch.resume, autostart=autostart, events=watch.events,
                                         autoaccept=clicking)
