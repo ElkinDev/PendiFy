@@ -193,14 +193,20 @@ class Switch:
                  clock=time.monotonic):
         self._store, self._granted, self._run = store, granted, run
         self._prompt = prompt if prompt is not None else (lambda: trusted(prompt=True))
-        self.poller = permission.Poller(self.enabled, restart, run=run, wait=wait, clock=clock)
+        # The poller reads the stored value itself, so a read that fails is never taken for the switch turned off.
+        self.poller = permission.Poller(self._stored, restart, run=run, wait=wait, clock=clock)
         self.available = available()
 
     def enabled(self):
+        """True when the switch reads on; a read that fails reads off."""
+        return self._stored() is True
+
+    def _stored(self):
+        """The switch as config.json holds it, True or False, or None when it cannot be read."""
         try:
-            return self._store.read_autoaccept()
+            return bool(self._store.read_autoaccept())
         except (OSError, ValueError):
-            return False
+            return None
 
     def enable(self):
         """On, then asked: the poller an ask starts reads the switch on."""

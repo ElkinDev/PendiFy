@@ -40,12 +40,16 @@ class Child:
 
 
 class Store:
-    """config.json's autoaccept held in memory, never a file."""
+    """config.json's autoaccept held in memory, never a file. Each read raises the next of `failures` first, as a file
+    that cannot be read; `reads` counts them all."""
 
-    def __init__(self, on):
-        self.on = on
+    def __init__(self, on, failures=()):
+        self.on, self.failures, self.reads = on, list(failures), 0
 
     def read_autoaccept(self):
+        self.reads += 1
+        if self.failures:
+            raise self.failures.pop(0)
         return self.on
 
     def set_autoaccept(self, on):
@@ -121,8 +125,8 @@ class PermissionPollerTest(OnMac):
         self.now += seconds  # the poller's clock moves by the wait, which takes no time
         return False
 
-    def switch(self, granted=False, on=True, answers=(), restart=None, wait=None, before=None):
-        self.store, self.child = Store(on), Child(*answers, before=before)
+    def switch(self, granted=False, on=True, answers=(), restart=None, wait=None, before=None, failures=()):
+        self.store, self.child = Store(on, failures), Child(*answers, before=before)
         return autoclick.Switch(self.store, prompt=lambda: granted, granted=lambda: granted, run=self.child,
                                 restart=restart or self.restart, wait=wait or self.no_wait, clock=lambda: self.now)
 
@@ -201,6 +205,19 @@ class PermissionPollerTest(OnMac):
             switch.poller.thread.join(JOIN_SECONDS)
         self.assertIsNot(switch.poller.thread, first)
         self.assertEqual((len(self.child.calls), self.restarts), (1, [switch.poller.thread.ident]))
+
+    def test_a_read_of_the_switch_that_fails_neither_ends_the_poller_nor_keeps_it_from_starting(self):
+        # Mutation: a failed read taken as off at each round. Red: the poller ends at its first round, no restart.
+        # Mutation: taken as off at the start. Red: no poller. Mutation: enabled() answers the failed read. Red: None.
+        failures = (OSError(5, "input/output error"), ValueError("not json"), OSError(13, "denied"), OSError(5, "io"))
+        switch = self.switch(answers=("untrusted\n",) * 3 + ("trusted\n",), failures=failures)
+        self.assertIs(self.ask(switch), False)
+        self.assertEqual(self.store.reads, 5)  # the start's and four rounds', the first four failed
+        self.assertEqual((len(self.child.calls), self.restarts), (4, [switch.poller.thread.ident]))
+        self.assertEqual(self.out.getvalue().splitlines()[-1], permission.GRANTED_LINE)
+        # The page reads a failed read as off, as before.
+        page = autoclick.Switch(Store(True, failures=(OSError(5, "io"),)), prompt=lambda: False)
+        self.assertEqual([page.enabled(), page.enabled()], [False, True])
 
     def test_the_switch_turned_on_from_the_page_asks_and_polls(self):
         # Mutation: enable() asks without the poller. Red: no restart once the child says trusted.

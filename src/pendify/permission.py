@@ -41,7 +41,8 @@ def trusted_now(run=subprocess.run):
 
 
 class Poller:
-    """The grant awaited on its own daemon thread, one at most. `switched_on()` reads the page's switch; `restart()`
+    """The grant awaited on its own daemon thread, one at most. `switched_on()` reads the page's switch, True, False,
+    or None for a read that failed, which neither ends the poller nor keeps it from starting; `restart()`
     asks for this copy's restart and answers True once asked, and with none no poller starts; `run` starts the child;
     `wait(seconds)` waits before each round and answers True once closed (the close's own wait when None); `clock`
     times the rounds from the last start."""
@@ -61,7 +62,7 @@ class Poller:
         unless one runs, the switch is off, no restart can be asked for or the poller is closed."""
         self._asked_at = self._clock()
         with self._lock:
-            if self._polling or self._restart is None or self._closed.is_set() or not self._switched_on():
+            if self._polling or self._restart is None or self._closed.is_set() or self._switched_on() is False:
                 return
             self._polling = True
             self.thread = threading.Thread(target=self._rounds, name="autoaccept-permission", daemon=True)
@@ -81,10 +82,10 @@ class Poller:
         return PERMISSION_POLL_SECONDS if fast else PERMISSION_SLOW_POLL_SECONDS
 
     def _turned_off(self):
-        """True, and the poller counted ended, once the switch reads off; read under the lock, so an ask that turns it
-        on again starts a new one."""
+        """True, and the poller counted ended, once the switch reads off (a read that fails is not off); read under the
+        lock, so an ask that turns it on again starts a new one."""
         with self._lock:
-            if not self._switched_on():
+            if self._switched_on() is False:
                 self._polling = False
                 return True
         return False
