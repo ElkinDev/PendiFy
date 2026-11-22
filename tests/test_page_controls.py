@@ -390,6 +390,9 @@ class PageControlsTest(unittest.TestCase):
             def granted(self):
                 return self.allowed
 
+            def awaiting(self):
+                return False
+
             def open_settings(self):
                 self.opened += 1
 
@@ -429,6 +432,42 @@ class PageControlsTest(unittest.TestCase):
         self.assertNotIn('name="autoaccept"', self.call("GET", "/", served=hidden)[2])
         self.assertNotIn("autoaccept", self.state_json(served=hidden))
         self.assertNotEqual(self.call("POST", "/autoaccept", form={"on": "1"}, served=hidden)[0], 303)
+
+    def test_while_the_grant_is_awaited_the_state_line_carries_the_restart_s_words_for_a_tab_left_open(self):
+        # Mutation: the words drawn whatever the poller. Red: a switch with no poller carries them. Mutation: drawn
+        # once granted or off. Red: found. Mutation: drawn as data-restarting. Red: an auto update's ready would read
+        # as a restart. Mutation: the catch without the fallback. Red: the piece is not in the script.
+        restarting = {"es": "Reiniciando para usar el permiso. La página nueva se abre en unos segundos.",
+                      "en": "Restarting to use the permission. The new page opens in a few seconds."}
+        self.assertEqual({lang: page.WORDS[lang]["perm_restarting"] for lang in restarting}, restarting)
+        self.assertEqual(page._SCRIPT.count("s.textContent=follows?s.dataset.restarting:"
+                                            "(s.dataset.permRestarting||s.dataset.closed);"), 1)
+
+        class FakeSwitch:
+            available, on, allowed, waits = True, True, False, True
+
+            def enabled(self):
+                return self.on
+
+            def granted(self):
+                return self.allowed
+
+            def awaiting(self):
+                return self.waits
+
+        switch = FakeSwitch()
+        served = self.serve(autoaccept=switch, watch=lambda: dict(self.snapshot), on_pause=lambda: None,
+                            on_resume=lambda: None)
+        # (on, granted, the poller awaits): only on, not granted and awaited carries the words.
+        for case, carried in (((True, False, True), True), ((True, False, False), False),
+                              ((True, True, True), False), ((False, False, True), False)):
+            switch.on, switch.allowed, switch.waits = case
+            for lang in ("es", "en"):
+                with self.subTest(case=case, lang=lang):
+                    attributes = STATE_LINE.search(self.call("GET", "/", language=lang, served=served)[2]).group(1)
+                    self.assertEqual(re.findall(r' data-perm-restarting="([^"]*)"', attributes),
+                                     [html.escape(restarting[lang])] if carried else [])
+                    self.assertNotIn("data-restarting=", attributes)
 
     def test_the_poll_reloads_the_page_when_the_pause_differs_from_what_it_rendered(self):
         # Mutation: the poll ignores the pause. Red: a second tab keeps the old line under its old controls.

@@ -276,6 +276,39 @@ class PermissionPollerTest(OnMac):
         switch = autoclick.Switch(Store(True), prompt=lambda: False, granted=lambda: False, run=Child("trusted\n"))
         self.assertIs(self.ask(switch), False)
         self.assertIsNone(switch.poller.thread)
+        self.assertIs(switch.awaiting(), False)  # a copy the grant restarted: its page says no restart follows
+
+    def test_the_switch_awaits_the_grant_while_its_poller_runs_until_it_is_turned_off_or_closed(self):
+        # Mutation: awaiting() answers True. Red: True before any ask. Mutation: the off not read. Red: True once the
+        # poller ended at the off. Mutation: the close not read. Red: True once this copy stops.
+        seen = []
+
+        def wait(seconds):
+            seen.append(switch.awaiting())  # at each round, while the poller runs
+            if len(seen) == 2:
+                switch.disable()
+            return self.no_wait(seconds)
+
+        switch = self.switch(wait=wait)
+        self.assertIs(switch.awaiting(), False)  # no ask yet
+        self.ask(switch)
+        self.assertEqual(seen, [True, True])
+        self.assertIs(switch.awaiting(), False)  # turned off: the poller ended
+        # The grant seen and the restart asked: still awaited, as the restart follows, until this copy stops.
+        granted = self.switch(answers=("trusted\n",))
+        self.ask(granted)
+        self.assertEqual(len(self.restarts), 1)
+        self.assertIs(granted.awaiting(), True)
+        granted.close()
+        self.assertIs(granted.awaiting(), False)
+        # Closed while the poller waits out its interval (the close's own wait).
+        waiting = autoclick.Switch(Store(True), prompt=lambda: False, granted=lambda: False, run=Child(),
+                                   restart=self.restart)
+        with contextlib.redirect_stdout(self.out):
+            waiting.ask()
+        self.assertIs(waiting.awaiting(), True)
+        waiting.close()
+        self.assertIs(waiting.awaiting(), False)
 
 
 if __name__ == "__main__":

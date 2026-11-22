@@ -222,6 +222,11 @@ class Switch:
         """This copy stops: the poller's wait ends, and no restart is asked any more."""
         self.poller.close()
 
+    def awaiting(self):
+        """True while the poller awaits the grant, whose restart ends this copy; never in a copy with no restart to
+        ask for, which starts no poller."""
+        return self.poller.awaiting()
+
     def disable(self):
         return self._set(False)
 

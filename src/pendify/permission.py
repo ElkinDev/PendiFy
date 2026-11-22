@@ -71,6 +71,11 @@ class Poller:
         """This copy stops: the wait ends, and no restart is asked any more."""
         self._closed.set()
 
+    def awaiting(self):
+        """True while a poller runs and this copy is not closed, so its restart follows the grant; still True once
+        that restart is asked, until the close."""
+        return self._polling and not self._closed.is_set()
+
     def _interval(self):
         fast = self._clock() - self._asked_at < PERMISSION_FAST_SECONDS
         return PERMISSION_POLL_SECONDS if fast else PERMISSION_SLOW_POLL_SECONDS
