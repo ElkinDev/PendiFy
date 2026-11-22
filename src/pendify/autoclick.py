@@ -7,9 +7,8 @@ a MacBook Pro's full screen; the game scales its interface with the window's hei
 Nothing is clicked unless the app is the frontmost one and its window is found. Posting a click needs the
 Accessibility permission (System Settings, Privacy & Security, Accessibility); without it nothing is clicked.
 
-A process keeps the answer macOS gave it at its start: AXIsProcessTrusted() never asks again in a process with no run
-loop to hear the change, so a grant made while this copy runs is read by a child (trusted_now), which macOS judges as
-PendiFy.app too, and the copy then asks for its own restart, whose new copy reads the permission granted.
+A grant made while this copy runs is awaited by the switch's poller (permission.py), which then asks for the restart
+that lets the click use it.
 
 Standard library only: CoreGraphics, CoreFoundation and ApplicationServices through ctypes, and osascript (JXA) for
 the window's bounds and lsappinfo for the frontmost app.
@@ -18,8 +17,9 @@ import ctypes
 import json
 import subprocess
 import sys
-import threading
 import time
+
+from . import permission
 
 APP_PATH = "/Applications/Teamfight Tactics.app"
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
@@ -29,16 +29,10 @@ ACCEPT_DOWN = 0.6085
 FRONT_WAIT_SECONDS = 2.5  # the switch to the app's full-screen space takes about a second
 SETTLE_SECONDS = 0.4
 TIMEOUT = 5
-# While the permission is awaited, how often a child asks macOS whether it was granted: every few seconds for the
-# first minutes after an ask, while its person is likely in System Settings, then seldom.
-PERMISSION_POLL_SECONDS = 3
-PERMISSION_FAST_SECONDS = 10 * 60
-PERMISSION_SLOW_POLL_SECONDS = 30
 
 PERMISSION_LINES = {True: "autoaccept: on, the Accessibility permission is granted",
                     False: "autoaccept: on, waiting for the Accessibility permission (System Settings, Privacy & "
                            "Security, Accessibility)"}
-GRANTED_LINE = "autoaccept: the Accessibility permission was granted; restarting so the click can use it"
 # Why a click was not made, said on one line.
 NO_PERMISSION, NO_WINDOW, NOT_FRONT, BROKE = "no_permission", "no_window", "not_front", "broke"
 
@@ -56,10 +50,6 @@ for (var i = 0; i < list.count; i++) {
 }
 JSON.stringify(out)
 """ % OWNER_NAME
-# The fresh check's program, run by a child of this interpreter: the public AXIsProcessTrusted(), no prompt.
-_TRUSTED_NOW = ("import ctypes; ax = ctypes.CDLL(%r); ax.AXIsProcessTrusted.restype = ctypes.c_bool; "
-                "print('trusted' if ax.AXIsProcessTrusted() else 'untrusted')"
-                % _FRAMEWORKS.format("ApplicationServices"))
 
 
 class CGPoint(ctypes.Structure):
@@ -113,15 +103,6 @@ def trusted(prompt=False):
             cf.CFRelease(options)
     except (OSError, ValueError, AttributeError):
         return False
-
-
-def trusted_now(run=subprocess.run):
-    """True when macOS says now that this app may post clicks, asked by a new process, since this one keeps the
-    answer of its start; False for a no, for a child that fails or does not answer in TIMEOUT, and off macOS."""
-    if not available():
-        return False
-    output = _run([sys.executable, "-I", "-c", _TRUSTED_NOW], run)
-    return output is not None and output.strip() == "trusted"
 
 
 def accept_point(bounds):
@@ -205,22 +186,14 @@ class Switch:
     """The page's switch of the click on accept, kept in config.json, on by default; available on macOS only. While
     on, macOS is asked for the Accessibility permission, which its person grants once in System Settings.
 
-    `restart()` asks for this copy's restart and answers True once asked; while it is given, an ask that finds the
-    permission not granted starts the poller, which reads the grant through a child and then calls it. `wait(seconds)`
-    waits before each round and answers True once the switch is closed (the close's own wait when None); `clock`
-    times the rounds from the last ask."""
+    While on and not granted at an ask, its poller (permission.Poller, made with `run`, `wait` and `clock`) awaits the
+    grant and then calls `restart()`, which asks for this copy's restart and answers True once asked."""
 
     def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run, restart=None, wait=None,
                  clock=time.monotonic):
-        self._store, self._granted, self._run, self._restart = store, granted, run, restart
+        self._store, self._granted, self._run = store, granted, run
         self._prompt = prompt if prompt is not None else (lambda: trusted(prompt=True))
-        self._closed = threading.Event()
-        self._wait = self._closed.wait if wait is None else wait
-        self._clock, self._asked_at = clock, None
-        # Held while the poller is started or ends, so a switch turned on as it ends is never left with none.
-        self._lock = threading.Lock()
-        self._polling = False
-        self.thread = None
+        self.poller = permission.Poller(self.enabled, restart, run=run, wait=wait, clock=clock)
         self.available = available()
 
     def enabled(self):
@@ -241,14 +214,13 @@ class Switch:
         awaits the grant."""
         granted = bool(self._prompt())
         print(PERMISSION_LINES[granted], flush=True)
-        self._asked_at = self._clock()  # the fast rounds start again
         if not granted:
-            self._poll()
+            self.poller.start()
         return granted
 
     def close(self):
         """This copy stops: the poller's wait ends, and no restart is asked any more."""
-        self._closed.set()
+        self.poller.close()
 
     def disable(self):
         return self._set(False)
@@ -263,30 +235,6 @@ class Switch:
             self._run(["/usr/bin/open", SETTINGS_URL], capture_output=True, timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError):
             pass
-
-    def _poll(self):
-        """The poller on its own daemon thread, one at most, and only while the switch is on, a restart can be asked
-        for and the switch is not closed."""
-        with self._lock:
-            if self._polling or self._restart is None or self._closed.is_set() or not self.enabled():
-                return
-            self._polling = True
-            self.thread = threading.Thread(target=self._await_grant, name="autoaccept-permission", daemon=True)
-            self.thread.start()
-
-    def _await_grant(self):
-        """While the switch is on, a child asks macOS every PERMISSION_POLL_SECONDS for PERMISSION_FAST_SECONDS after
-        the last ask, then every PERMISSION_SLOW_POLL_SECONDS; once it says granted and the restart is asked, said on
-        one line, the poller ends and none starts again. Ends as well at the close."""
-        while not self._wait(PERMISSION_POLL_SECONDS if self._clock() - self._asked_at < PERMISSION_FAST_SECONDS
-                             else PERMISSION_SLOW_POLL_SECONDS) and not self._closed.is_set():
-            with self._lock:
-                if not self.enabled():  # turned off: an ask that turns it on again starts a new one
-                    self._polling = False
-                    return
-            if trusted_now(self._run) and not self._closed.is_set() and self._restart():
-                print(GRANTED_LINE, flush=True)
-                return  # still polling to _poll: none starts again in a copy that stops for its restart
 
     def _set(self, on):
         try:
