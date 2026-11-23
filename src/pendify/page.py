@@ -134,6 +134,7 @@ WORDS = {
         "perm_step3": "Si PendiFy no está en la lista, pulsa + y elige PendiFy en la carpeta Aplicaciones de tu usuario.",
         "perm_open": "Abrir Ajustes",
         "perm_picture": "Ajustes del Sistema, Accesibilidad: la fila de PendiFy con su interruptor encendido.",
+        "perm_restarting": "Reiniciando para usar el permiso. La página nueva se abre en unos segundos.",
         "stopped": "El programa se detuvo: ya no vigila el cliente del juego ni envía avisos.",
         "start_again": "Para volver a iniciarlo, abre el acceso directo del Escritorio o ejecuta "
                        "pythonw -m pendify (o python -m pendify para verlo en una consola).",
@@ -236,6 +237,7 @@ WORDS = {
         "perm_step3": "If PendiFy is not in the list, press + and choose PendiFy in your user's Applications folder.",
         "perm_open": "Open Settings",
         "perm_picture": "System Settings, Accessibility: PendiFy's row with its switch turned on.",
+        "perm_restarting": "Restarting to use the permission. The new page opens in a few seconds.",
         "stopped": "The program stopped: it no longer watches the game client or sends alerts.",
         "start_again": "To start it again, open the shortcut on the Desktop or run pythonw -m pendify "
                        "(or python -m pendify to see it in a console).",
@@ -584,7 +586,9 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            # drawn in place of the state line; once asked, a poll that answers changes nothing and one that fails
            # keeps the line. A page drawn while «Actualizar»'s install runs carries the words (data-restarting), so the
            # restart that follows reads the same, and a poll that finds it ready draws them at once instead of
-           # reloading a page that is stopping.
+           # reloading a page that is stopping. A page drawn while the Accessibility permission is awaited carries the
+           # words of the restart its grant asks (data-perm-restarting), which a poll that fails draws in place of the
+           # closed sentence.
            "const follows=s.dataset.restarting!==undefined;let asked=false;"
            "function restarting(t){asked=true;s.textContent=t;s.dataset.shown='closed';}"
            "const rf=document.querySelector('form[action=\"/restart\"]');"
@@ -610,8 +614,8 @@ _SCRIPT = ("const s=document.getElementById('state');const w=document.getElement
            "const x=document.createElement('span');if(l.warn)x.className='warn';x.textContent=l.text;"
            "li.append(t,x);o.insertBefore(li,o.firstChild);last=l.seq;}g.dataset.seq=String(last);"
            "while(o.children.length>50)o.lastElementChild.remove();tabStop();}})"
-           ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:s.dataset.closed;"
-           "s.dataset.shown='closed';}),5000);"
+           ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:"
+           "(s.dataset.permRestarting||s.dataset.closed);s.dataset.shown='closed';}),5000);"
            # The key shows for a minute: the reveal sets data-shown on the key, which swaps the mask for the code, and
            # flips its own label; 60 s after a show the key is masked again; one timer, cleared on every press, so a
            # hide by hand leaves none running. The sheet's function is named showKey here, since the script's first
@@ -1031,13 +1035,19 @@ class PairingPage:
         follows = (updated is not None and self.updater.mode == update.NOTIFY
                    and updated["state"] in (update.INSTALLING, update.READY))
         restarting = f' data-restarting="{words["update_restarting"]}"' if follows else ""
+        # While the switch's poller awaits the Accessibility permission, its grant restarts this copy: the state line
+        # carries those words apart (never as data-restarting, which an auto update's ready reads as a restart), and
+        # the script draws them in place of the closed sentence once the program is gone.
+        clicking = self.autoaccept
+        awaited = (clicking is not None and clicking.enabled() and not clicking.granted() and clicking.awaiting())
+        perm = f' data-perm-restarting="{words["perm_restarting"]}"' if awaited else ""
         # What this is and what to do, with the QR card beside it on a wide window; the two other roads in one fold
         # under it; the credit opens the top bar, and the quit sits at the foot, only beside a quit. The title row reads
         # the program's name, its sentence under it.
         link = [f'<div class="title-row"><img alt="" width="32" height="32" src="{ICON_URI}"><h1>{NAME}</h1>'
                 f"</div>", f'<p class="tagline">{words["title"]}</p>', f'<p class="intro">{words["intro"]}</p>',
                 f'<p id="state" role="status" data-shown="{str(snapshot["showCode"]).lower()}'
-                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating}{restarting} '
+                f'{str(snapshot["relinkOffered"]).lower()}"{paused}{updating}{restarting}{perm} '
                 f'data-closed="{words["state_closed"]}">'
                 f'{words[_state_word(snapshot, seen)]}</p>']
         link += self._update_line(words, token, updated)

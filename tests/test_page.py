@@ -1836,8 +1836,8 @@ class PairingPageTest(unittest.TestCase):
                       ".then(t=>{restarting(t);})",
                       ".then(j=>{if(asked)return;"
                       "if(follows&&j.update&&j.update.state==='ready'){restarting(s.dataset.restarting);return;}",
-                      ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:s.dataset.closed;"
-                      "s.dataset.shown='closed';})"):
+                      ".catch(()=>{if(asked)return;s.textContent=follows?s.dataset.restarting:"
+                      "(s.dataset.permRestarting||s.dataset.closed);s.dataset.shown='closed';})"):
             with self.subTest(piece=piece):
                 self.assertEqual(script.count(piece), 1)
         # «Actualizar» in notify mode: while its install runs the state line carries the words, so the restart that

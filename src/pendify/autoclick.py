@@ -7,6 +7,9 @@ a MacBook Pro's full screen; the game scales its interface with the window's hei
 Nothing is clicked unless the app is the frontmost one and its window is found. Posting a click needs the
 Accessibility permission (System Settings, Privacy & Security, Accessibility); without it nothing is clicked.
 
+A grant made while this copy runs is awaited by the switch's poller (permission.py), which then asks for the restart
+that lets the click use it.
+
 Standard library only: CoreGraphics, CoreFoundation and ApplicationServices through ctypes, and osascript (JXA) for
 the window's bounds and lsappinfo for the frontmost app.
 """
@@ -15,6 +18,8 @@ import json
 import subprocess
 import sys
 import time
+
+from . import permission
 
 APP_PATH = "/Applications/Teamfight Tactics.app"
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
@@ -179,29 +184,54 @@ def _post_click(x, y):
 
 class Switch:
     """The page's switch of the click on accept, kept in config.json, on by default; available on macOS only. While
-    on, macOS is asked for the Accessibility permission, which its person grants once in System Settings."""
+    on, macOS is asked for the Accessibility permission, which its person grants once in System Settings.
 
-    def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run):
+    While on and not granted at an ask, its poller (permission.Poller, made with `run`, `wait` and `clock`) awaits the
+    grant and then calls `restart()`, which asks for this copy's restart and answers True once asked."""
+
+    def __init__(self, store, prompt=None, granted=trusted, run=subprocess.run, restart=None, wait=None,
+                 clock=time.monotonic):
         self._store, self._granted, self._run = store, granted, run
         self._prompt = prompt if prompt is not None else (lambda: trusted(prompt=True))
+        # The poller reads the stored value itself, so a read that fails is never taken for the switch turned off.
+        self.poller = permission.Poller(self._stored, restart, run=run, wait=wait, clock=clock)
         self.available = available()
 
     def enabled(self):
+        """True when the switch reads on; a read that fails reads off."""
+        return self._stored() is True
+
+    def _stored(self):
+        """The switch as config.json holds it, True or False, or None when it cannot be read."""
         try:
-            return self._store.read_autoaccept()
+            return bool(self._store.read_autoaccept())
         except (OSError, ValueError):
-            return False
+            return None
 
     def enable(self):
+        """On, then asked: the poller an ask starts reads the switch on."""
+        on = self._set(True)
         self.ask()
-        return self._set(True)
+        return on
 
     def ask(self):
         """macOS asked for the Accessibility permission (it shows its prompt only while not granted), and the
-        answer said on one line; at each start while the switch is on, as it is by default."""
+        answer said on one line; at each start while the switch is on, as it is by default. Not granted, the poller
+        awaits the grant."""
         granted = bool(self._prompt())
         print(PERMISSION_LINES[granted], flush=True)
+        if not granted:
+            self.poller.start()
         return granted
+
+    def close(self):
+        """This copy stops: the poller's wait ends, and no restart is asked any more."""
+        self.poller.close()
+
+    def awaiting(self):
+        """True while the poller awaits the grant, whose restart ends this copy; never in a copy with no restart to
+        ask for, which starts no poller."""
+        return self.poller.awaiting()
 
     def disable(self):
         return self._set(False)

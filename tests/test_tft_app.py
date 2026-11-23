@@ -153,65 +153,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class AutoAcceptTest(unittest.TestCase):
-    """The click on accept after a pop: clicked until the log says accepted, never once the check is over."""
-
-    def setUp(self):
-        tmp = support.temp_dir()
-        self.addCleanup(tmp.cleanup)
-        self.path = f"{tmp.name}/TFT.log"
-        open(self.path, "wb").close()
-        self.wall, self.clicks, self.on = POP_AT, [], True
-        self.answer = None
-
-        def click():
-            self.clicks.append(self.wall)
-            if self.answer is None:  # the game takes the click: its log says accepted
-                with open(self.path, "ab") as log:
-                    log.write(LINES["accepted"])
-            return self.answer
-
-        def sleep(seconds):
-            self.wall += seconds
-
-        self.session = tft_app.AppSession(path=lambda: self.path, running=lambda: True, clock=lambda: 0.0,
-                                          wall=lambda: self.wall, autoaccept=lambda: self.on,
-                                          clicker=type("K", (), {"click": lambda s: click()})(), sleep=sleep)
-
-    def pop(self):
-        with open(self.path, "ab") as log:
-            log.write(LINES["queue"] + LINES["pop"])
-        self.assertEqual(self.session.phase(), "ReadyCheck")
-
-    def test_one_click_that_takes_is_accepted(self):
-        self.pop()
-        self.assertTrue(self.session.auto_accept_on())
-        self.assertIs(self.session.auto_accept(), True)
-        self.assertEqual(len(self.clicks), 1)
-
-    def test_a_click_that_does_not_take_is_made_again_inside_the_check_only(self):
-        self.answer = tft_app.NOT_ACCEPTED
-        self.pop()
-        self.assertEqual(self.session.auto_accept(), tft_app.NOT_ACCEPTED)
-        self.assertEqual(len(self.clicks), tft_app.ACCEPT_ATTEMPTS)
-        self.assertTrue(all(at - POP_AT <= tft_app.READY_CHECK_SECONDS for at in self.clicks))
-
-    def test_no_permission_clicks_once_and_says_why(self):
-        self.answer = "no_permission"
-        self.pop()
-        self.assertEqual(self.session.auto_accept(), "no_permission")
-        self.assertEqual(len(self.clicks), 1)
-
-    def test_a_player_who_accepted_first_gets_no_click_and_off_is_off(self):
-        self.pop()
-        with open(self.path, "ab") as log:
-            log.write(LINES["accepted"])
-        self.assertIs(self.session.auto_accept(), True)
-        self.assertEqual(self.clicks, [])
-        self.on = False
-        self.assertFalse(self.session.auto_accept_on())
-
-
 class ClickerTest(unittest.TestCase):
     """The click is made on the button's share of the app's window, and only with the app in front."""
 

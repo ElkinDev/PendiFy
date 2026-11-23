@@ -248,8 +248,8 @@ class Updater:
     def restart(self, opens_page=True):
         """A request only: the flag main reads after the run file's release, then the stop of this copy. With
         `opens_page`, true for every restart asked today (the page's «Reiniciar ahora», the restart after
-        «Actualizar», the icon's item), the new copy starts without --quiet, so its page opens; a restart that does not
-        ask for it keeps the run's own --quiet."""
+        «Actualizar», the icon's item, the Accessibility permission granted on macOS), the new copy starts without
+        --quiet, so its page opens; a restart that does not ask for it keeps the run's own --quiet."""
         self.restart_opens_page = opens_page
         self.restart_requested.set()
         if self._restart is not None:
