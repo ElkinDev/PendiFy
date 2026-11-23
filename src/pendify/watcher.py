@@ -4,7 +4,8 @@ Everything that touches the world is injected: the credentials reader, the addre
 getter and poster, the clock, the wall clock, the sleep, the random delay, the alert and the console.
 Its `alert` is an Alerter: snapshot() reads its last_ping(). One step() is one turn of the script's loop
 and answers the pause before the next; run() is the loop around it. The script's 15 s sleep after a ready
-check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it. The arrival of
+check (S:778, S:793) is a hold on the injected clock, so a stop never waits for it; the TFT app's pop has none, each
+of its pops handled once by its stamp, so the queue's pop again is read on the next turn. The arrival of
 InProgress after a read of another phase is the loading screen: it beeps on the PC only, once per game, and
 starts a watch that asks the game's own loopback port its clock at most once a second. The clock above zero
 is the match's true start: a beep and match_started. A game with no clock port is read from its own log, a
@@ -112,6 +113,7 @@ class Watcher:
         self._last_phase = None
         self._start_alerted = False
         self._hold_until = None
+        self._handled_pop = None  # the stamp of the TFT app's last pop handled; kept through a pause and a lost client
         self._client_state = WAITING
         self._last_alert = None
         self._watch_since = None  # the injected clock when the loading screen opened; None with no watch on
@@ -281,18 +283,7 @@ class Watcher:
 
     def _ready_check(self, base, token):
         if not getattr(self._found, "accepts", True):  # the TFT app: no API accepts for the player
-            on = getattr(self._found, "auto_accept_on", None)
-            clicking = callable(on) and on()
-            self._log(CLICKING_LINE if clicking else MANUAL_LINE)
-            self._fire(QUEUE_FOUND)  # the phone first: the click takes a few seconds
-            if clicking and not self._paused.is_set() and not self._stop.is_set():
-                result = self._found.auto_accept()
-                if result is True:
-                    self._log(CLICKED_LINE)
-                    self._note("accepted")
-                else:
-                    self._log(CLICK_FAILED_LINE.format(result))
-            self._hold()
+            self._app_pop()
             return
         if not self._accept:  # the script's --dry (S:773-777)
             self._log(DRY_LINE)
@@ -313,6 +304,28 @@ class Watcher:
             self._note("accepted")
             self._fire(QUEUE_FOUND)  # S:790
             self._hold()
+
+    def _app_pop(self):
+        """A pop of the TFT app, handled once by its stamp (the client's `pop`): the phone alerted, then the click when
+        it is on. No hold follows: a read of the pop handled (its check still open after a click that did not take)
+        does nothing, and a newer pop, the queue's pop again after a stranger declined, is handled on the turn that
+        reads it. The stamp is not kept while paused, so a pop that a pause swallowed is handled after the resume."""
+        pop = getattr(self._found, "pop", None)
+        if pop is not None and self._handled_pop is not None and pop <= self._handled_pop:
+            return
+        if not self._paused.is_set():
+            self._handled_pop = pop
+        on = getattr(self._found, "auto_accept_on", None)
+        clicking = callable(on) and on()
+        self._log(CLICKING_LINE if clicking else MANUAL_LINE)
+        self._fire(QUEUE_FOUND)  # the phone first: the click takes a few seconds
+        if clicking and not self._paused.is_set() and not self._stop.is_set():
+            result = self._found.auto_accept()
+            if result is True:
+                self._log(CLICKED_LINE)
+                self._note("accepted")
+            else:
+                self._log(CLICK_FAILED_LINE.format(result))
 
     def _loading(self):
         """The loading screen, said on the PC only; the watch for the true start begins, its first read due now.

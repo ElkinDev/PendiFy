@@ -13,8 +13,10 @@ the player accepts it in the game. Its log, ~/Library/Logs/TFT/TFT.log, says eac
 
 The phases are the League client's own names, so the watcher treats both the same. The log is read on from where
 the last read stopped, in binary, and only the last of those lines counts; nothing of it is kept, logged or sent. A
-ReadyCheck is over READY_CHECK_SECONDS after its stamp, as the game's own check is, so an old pop never alerts. The
-app's process is looked for at most once every PROCESS_CHECK_SECONDS; with the app closed the session is lost.
+ReadyCheck is over READY_CHECK_SECONDS after its stamp, as the game's own check is, so an old pop never alerts; each
+ReadyCheck read comes with its pop's stamp (`pop`), the key by which the watcher handles a pop once and the next pop
+on the turn that reads it. The app's process is looked for at most once every PROCESS_CHECK_SECONDS; with the app
+closed the session is lost.
 """
 import os
 import random
@@ -147,6 +149,12 @@ class AppSession:
         if phase == "ReadyCheck" and (self._stamp is None or self._wall() - self._stamp > READY_CHECK_SECONDS):
             return "Matchmaking"
         return phase
+
+    @property
+    def pop(self):
+        """The stamp of the pop the last ReadyCheck was read for, by which the watcher handles each pop once: the pop
+        said above, which a ReadyCheck read again while its check is open (its line the last one) is as well."""
+        return self._said_pop
 
     def auto_accept_on(self):
         """True when the click on accept is turned on and can be made."""

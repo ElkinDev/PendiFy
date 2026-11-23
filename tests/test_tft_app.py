@@ -76,11 +76,13 @@ class AppSessionTest(unittest.TestCase):
 
 
 class ManualAcceptTest(unittest.TestCase):
-    """A client that cannot accept: the pop alerts the phone at once, nothing is posted, then the hold."""
+    """A client that cannot accept: the pop alerts the phone at once and nothing is posted; read again, the same pop
+    (its stamp, `pop`) alerts nothing, with no hold: the turn reads the client."""
 
     def test_the_pop_alerts_the_queue_and_posts_nothing(self):
-        phases = iter(["Matchmaking", "ReadyCheck"])
-        found = type("App", (), {"accepts": False, "port": 0, "token": None, "phase": lambda self: next(phases)})()
+        phases = iter(["Matchmaking", "ReadyCheck", "ReadyCheck"])
+        found = type("App", (), {"accepts": False, "port": 0, "token": None, "pop": POP_AT,
+                                 "phase": lambda self: next(phases)})()
         alerts, lines = [], []
         alert = type("A", (), {"__call__": lambda self, kind: alerts.append(kind), "sound": lambda self: None,
                                "last_ping": lambda self: (None, None)})()
@@ -91,7 +93,11 @@ class ManualAcceptTest(unittest.TestCase):
         subject.step()
         self.assertEqual(alerts, [watcher.QUEUE_FOUND])
         self.assertIn(watcher.MANUAL_LINE, lines)
-        self.assertEqual(subject.step(), watcher.STEP_PAUSE)  # the hold
+        self.assertEqual(subject.step(), watcher.STEP_PAUSE)  # the third phase read: the same pop
+        self.assertEqual(alerts, [watcher.QUEUE_FOUND])
+        self.assertEqual(lines.count(watcher.MANUAL_LINE), 1)
+        with self.assertRaises(StopIteration):  # no hold: the next turn asks the client again
+            subject.step()
 
 
 if __name__ == "__main__":

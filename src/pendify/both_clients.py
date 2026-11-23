@@ -52,6 +52,11 @@ class BothClients:
     def token(self):
         return self._found.token if self._found is not None else None
 
+    @property
+    def pop(self):
+        """The app's pop stamp while the app is followed (AppSession.pop); a League client's ready check has none."""
+        return self._app.pop if self.active == "app" else None
+
     def present(self):
         """True while either answers: the League client's credentials or the app's process."""
         return self._league.read() is not None or self._app.running()
