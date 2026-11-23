@@ -35,7 +35,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from . import alert, autoclick, client, config, page, pairing, runfile, tft_app, update, watcher, worker
+from . import alert, autoclick, both_clients, client, config, page, pairing, runfile, tft_app, update, watcher, worker
 from .autostart import Autostart
 from .tray import Tray
 from .tray_macos import MenuBarIcon
@@ -151,7 +151,7 @@ def _watcher(args, store, state, base, timeout, stop, delay, beep):
     if lockfile is None:
         credentials, addresses = client.ClientCredentials(), client.real_addresses
         if client.IS_MAC:  # with no League client, the standalone TFT app read from its log
-            credentials = tft_app.EitherClient(credentials, tft_app.AppSession(
+            credentials = both_clients.EitherClient(credentials, tft_app.AppSession(
                 autoaccept=store.read_autoaccept, clicker=autoclick.Clicker()))
     else:
         credentials, addresses = client.ClientCredentials((str(lockfile),), run=None), client.loopback_addresses
