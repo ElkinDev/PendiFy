@@ -91,13 +91,16 @@ def silent_autostart():
 class silent_tray:
     """The icon by the clock a test run of the entry point outside test_main passes in place of the real one: it
     takes what main builds it with, and its start and its close do nothing and record nothing, so no real icon shows
-    during the suite and no tray line reaches a captured stderr on another platform."""
+    during the suite and no tray line reaches a captured stderr on another platform; its wait is the stop's own."""
 
     def __init__(self, *args, **kwargs):
         pass
 
     def start(self):
         pass
+
+    def wait(self, stop, seconds):
+        return stop.wait(seconds)
 
     def close(self):
         pass

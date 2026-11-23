@@ -92,17 +92,22 @@ class FakeClock:
 
 class FakeTray:
     """The icon by the clock in a test run, never a real one: it keeps what main built it with and, in `moments`,
-    its start and its close in order, each with what `watched` answered of its url at that moment (None without)."""
+    its start and its close in order, each with what `watched` answered of its url at that moment (None without);
+    in `waits`, each wait of the main loop as (the stop it was given, its seconds, the thread it ran on)."""
 
     def __init__(self, url, on_open, on_pause, on_resume, on_quit, paused, words, icon_path, update_ready=None,
                  on_restart=None, watched=None):
         self.url, self.on_open, self.on_pause, self.on_resume = url, on_open, on_pause, on_resume
         self.on_quit, self.paused, self.words, self.icon_path = on_quit, paused, words, icon_path
         self.update_ready, self.on_restart = update_ready, on_restart
-        self.watched, self.moments = watched, []
+        self.watched, self.moments, self.waits = watched, [], []
 
     def start(self):
         self.moments.append(("start", self.watched and self.watched(self.url)))
+
+    def wait(self, stop, seconds):
+        self.waits.append((stop, seconds, threading.current_thread()))
+        return stop.wait(seconds)
 
     def close(self):
         self.moments.append(("close", self.watched and self.watched(self.url)))
@@ -728,6 +733,10 @@ class MainCommandTest(unittest.TestCase):
                 self.assertFalse(thread.is_alive())
                 self.assertEqual(result["run"], (0, f"page: {icon.url}\n", ""))
                 self.assertEqual((len(made), icon.moments), (1, [("start", True), ("close", False)]))
+                # Mutation: the main loop waits on the stop alone. Red: no wait reaches the icon, so the menu bar's
+                # icon on macOS would never pump AppKit's events and never answer a click.
+                self.assertEqual({(given is stop, seconds, ran is thread) for given, seconds, ran in icon.waits},
+                                 {(True, entry.TICK_SECONDS, True)})
                 self.assertEqual(published(seen[0]),
                                  {"pid": os.getpid(), "port": port, "version": update.RUNNING_VERSION, "closing": True})
                 self.assertEqual(opened, [icon.url] * (1 if flags else 2))  # a person's start opens it as well
