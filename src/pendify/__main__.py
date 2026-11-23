@@ -8,8 +8,9 @@
     python -m <package> ping <kind>  one alert with the stored pair, one fixed line per answer
 
 The page and the watcher stop together on Ctrl+C, on Ctrl+Break, on the page's quit button and on the quit of
-the icon by the clock, which remove the run file and exit 0. One instance per config folder: a second start
-opens the running page and exits 0, and one made while that program is still closing after its quit waits for
+the icon by the clock (in the menu bar on macOS), which remove the run file and exit 0. One instance per config
+folder: a second start opens the running page and exits 0, and one made while that program is still closing
+after its quit waits for
 it to end and starts. A start of a newer version over a running older copy replaces it: the older copy is asked to
 stop through its page's /replace with the run file's secret, or ended by its pid when it has no secret or its page
 does not answer, and this start then claims the run file as a first one does. A restart the page asks for
@@ -37,6 +38,7 @@ from pathlib import Path
 from . import alert, autoclick, client, config, page, pairing, runfile, tft_app, update, watcher, worker
 from .autostart import Autostart
 from .tray import Tray
+from .tray_macos import MenuBarIcon
 
 TICK_SECONDS = 1.0
 STOP_SECONDS = 5.0
@@ -74,7 +76,8 @@ _MB_SETFOREGROUND = 0x10000
 # The restart's new copy: no console, its own process group, out of this one's.
 _DETACHED_PROCESS = 0x00000008
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
-# The icon by the clock's picture: pendify.ico beside the modules, the file install.ps1 points the shortcuts at.
+# The icon's picture, by the clock and in the menu bar: pendify.ico beside the modules, the file install.ps1 points
+# the shortcuts at.
 ICON_PATH = Path(__file__).with_name("pendify.ico")
 
 
@@ -354,8 +357,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
         # page's quit, after the flag read below once the run file is free; pip's output goes to the config folder.
         updating = updater(update.RUNNING_VERSION, mode, restart=quit_page, folder=store.path.parent)
         pairing_page.updater = updating
-        # The icon by the clock, under --quiet as well: the way to stop a copy the Run key started. Its words are
-        # the page's, in the language the page resolves with no browser to ask: the kept choice, else Spanish.
+        # The icon by the clock, or in the menu bar on macOS, under --quiet as well: the way to stop a copy the Run key
+        # or the LaunchAgent started. Its words are the page's, in the language the page resolves with no browser to
+        # ask: the kept choice, else Spanish.
         icon = tray(url, on_open=lambda: opener(url), on_pause=watch.pause, on_resume=watch.resume,
                     on_quit=quit_page, paused=lambda: watch.paused,
                     words=lambda: page.WORDS[pairing_page.language_of(None)], icon_path=ICON_PATH,
@@ -379,7 +383,9 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
             watching.start()
             while True:
                 state.tick()
-                if stop.wait(TICK_SECONDS):
+                # The icon's wait, the stop's own on Windows; on macOS it pumps AppKit's events on this, the main
+                # thread, where the menu bar's icon lives.
+                if icon.wait(stop, TICK_SECONDS):
                     break
         except KeyboardInterrupt:
             pass
@@ -409,6 +415,11 @@ def _serve(args, store, base, timeout, opener, stop, delay, beep, show, clock, s
     return 0
 
 
+def _icon_kind(platform):
+    """The icon of this platform: in the menu bar on macOS, by the clock on Windows (and none elsewhere, said)."""
+    return MenuBarIcon if platform == "darwin" else Tray
+
+
 def _break_as_interrupt():
     """Ctrl+Break stops the program as Ctrl+C does; only on Windows and only on the main thread."""
     if not hasattr(signal, "SIGBREAK") or threading.current_thread() is not threading.main_thread():
@@ -418,16 +429,17 @@ def _break_as_interrupt():
 
 def main(argv=None, *, opener=webbrowser.open, stop=None, timeout=worker.TIMEOUT_SECONDS, delay=None,
          beep=alert.beep, box=_message_box, autostart=None, console=_console_attached, clock=time.monotonic,
-         sleep=time.sleep, tray=Tray, updater=update.Updater, spawn=subprocess.Popen, terminate=runfile.terminate,
-         switch=None):
+         sleep=time.sleep, tray=_icon_kind(sys.platform), updater=update.Updater, spawn=subprocess.Popen,
+         terminate=runfile.terminate, switch=None):
     """`beep`, `box` and `autostart` are the seams of the sound, of the message box and of the start with Windows
     (the per-user Run value when None): a test run passes silent ones and a fake. `console` says whether a printed
-    line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, the
-    seam a test run fills with a fake, so no test shows a real icon. `updater` makes the update and `spawn` starts
-    the restart's new copy, the seams a test run fills with fakes, so no test reaches PyPI, runs pip or starts a
-    copy. `terminate` ends an older copy by its pid when it cannot be asked to stop, the seam every test run fakes, so
-    no test ends a process. `switch` makes the page's switch of the click on accept (autoclick.Switch when None, and
-    none under --client-lockfile), the seam a test run fills with a fake, so no test asks macOS for a permission."""
+    line reaches anybody; `clock` and `sleep` time the run file's re-reads. `tray` makes the icon by the clock, or
+    in the menu bar on macOS, the seam a test run fills with a fake, so no test shows a real icon. `updater` makes
+    the update and `spawn` starts the restart's new copy, the seams a test run fills with fakes, so no test reaches
+    PyPI, runs pip or starts a copy. `terminate` ends an older copy by its pid when it cannot be asked to stop,
+    the seam every test run fakes, so no test ends a process. `switch` makes the page's switch of the click on
+    accept (autoclick.Switch when None, and none under --client-lockfile), the seam a test run fills with a fake, so
+    no test asks macOS for a permission."""
     args = _arguments(sys.argv[1:] if argv is None else argv)
     store = config.ConfigStore(getattr(args, "data_dir", None) or config.default_base_dir())
     base = getattr(args, "worker", worker.BASE_URL)

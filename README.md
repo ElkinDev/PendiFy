@@ -52,7 +52,8 @@ PendiFy también funciona en Mac (Apple Silicon o Intel) con League of Legends /
 El instalador busca Python 3.10 o más nuevo (si no lo hay y tienes Homebrew, instala `python@3.12`), instala PendiFy en su propio entorno en `~/Library/Application Support/pendify/venv`, crea la app `PendiFy` en `~/Applications` (la encuentras con Spotlight o en Launchpad) y la inicia. Para actualizar, vuelve a pegar la misma línea.
 
 - Iniciar: abre `PendiFy` desde Spotlight o Launchpad; si ya está abierto, abre su página.
-- Detener: pulsa «Salir» en la página. En Mac no hay icono junto al reloj.
+- Detener: pulsa «Salir» en la página, o en el menú del icono de PendiFy en la barra de menús, arriba a la derecha.
+- Icono en la barra de menús: un clic en el icono de PendiFy, arriba a la derecha, abre un menú para abrir la página, pausar o reanudar los avisos y salir del programa, también con la página y el navegador cerrados. No hay icono en el Dock.
 - Iniciar con macOS: el interruptor «Iniciar con macOS» de la página crea un LaunchAgent solo para tu usuario, sin permisos de administrador.
 - Configuración: `~/Library/Application Support/pendify/config.json`; el registro del programa queda en `pendify.log` en esa misma carpeta.
 - Sonido: el aviso suena con los sonidos del sistema.
@@ -141,7 +142,8 @@ PendiFy also runs on a Mac (Apple Silicon or Intel) with League of Legends / TFT
 The installer looks for Python 3.10 or newer (with none and Homebrew present, it installs `python@3.12`), installs PendiFy in its own environment in `~/Library/Application Support/pendify/venv`, makes the `PendiFy` app in `~/Applications` (find it with Spotlight or in Launchpad) and starts it. To update, paste the same line again.
 
 - Start: open `PendiFy` from Spotlight or Launchpad; if it already runs, its page opens.
-- Stop: press "Quit" on the page. On a Mac there is no icon by the clock.
+- Stop: press "Quit" on the page, or in the menu of the PendiFy icon in the menu bar, at the top right.
+- Menu bar icon: a click on the PendiFy icon at the top right of the screen opens a menu that opens the page, pauses or resumes the alerts and quits the program, also with the page and the browser closed. There is no Dock icon.
 - Start with macOS: the page's "Start with macOS" switch makes a LaunchAgent for your user only, with no administrator rights.
 - Config: `~/Library/Application Support/pendify/config.json`; the program's log is `pendify.log` in that same folder.
 - Sound: the alert plays the system's sounds.

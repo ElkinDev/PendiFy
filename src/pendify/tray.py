@@ -7,7 +7,8 @@ of its own, a daemon, with a hidden top-level tool window (never shown, so no ta
 yet the shell's TaskbarCreated broadcast reaches it) and its message loop; a left or right click on it shows the menu
 in the page's language of that moment. A Win32 call that fails is said in one fixed stderr line, as the page says a
 failed request, and never raises out of the thread: the program runs without an icon rather than dying under
-pythonw. On a platform other than Windows, start() says so in one line and does nothing.
+pythonw. On a platform other than Windows, start() says so in one line and does nothing; macOS has an icon of its
+own, in the menu bar (tray_macos.py).
 """
 import ctypes
 import os
@@ -153,6 +154,10 @@ class Tray:
                 return
         self._thread = threading.Thread(target=self._run, name=THREAD_NAME, daemon=True)
         self._thread.start()
+
+    def wait(self, stop, seconds):
+        """The main loop's wait between two ticks: the stop's own, as this icon serves on a thread of its own."""
+        return stop.wait(seconds)
 
     def close(self):
         """Posts WM_CLOSE to the window when it exists, then waits a few seconds for the thread. A thread still held
