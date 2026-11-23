@@ -16,6 +16,8 @@ not started yet, those 120 s are held, up to 300 s from the loading screen. A re
 console gets fixed lines only: no phase, no port, no clock, no token. Once the match has started, or was already
 under way when the client was found, a turn that reads InProgress with no watch running answers IN_GAME_PAUSE, so
 the client is asked once every five seconds, only to see the game end, and a pause from the page waits up to that.
+A TFT app's match is not read at all for MATCH_HOLD_SECONDS, 15 minutes, from the alert of its start (the app at its
+loading screen is the client that cannot accept); a pause drops that hold as it drops any, and a stop never waits.
 
 pause() and resume() come from the page's thread and only set or clear an event; the loop honors it on its own
 thread. While paused run() makes no step, so nothing reads the client's files or process, its port or the game's
@@ -48,6 +50,8 @@ STEP_PAUSE = 0.3  # S:799
 # seconds is enough, about 300 in a 25 minute match where 0.3 s made 5,000. A pause from the page waits up to this
 # long; a stop does not, since the sleep is the stop event's wait.
 IN_GAME_PAUSE = 5.0
+# Once the start of a TFT app's match is alerted, nothing is read for 15 minutes: no pop can come during a match.
+MATCH_HOLD_SECONDS = 900.0
 NO_CLIENT_PAUSE = 3.0  # S:739
 LIVE_POLL_SECONDS = 1.0  # the game's clock is asked at most once a second during the watch
 LIVE_FALLBACK_SECONDS = 120.0  # restarted by each clock not above zero, the wait announces a game giving no clock
@@ -120,6 +124,7 @@ class Watcher:
         self._next_live = None  # the injected clock from which the game's clock may be asked again
         self._watch_wall = None  # the wall clock when the loading screen opened, the game's log read against it
         self._watch_began = None  # the injected clock when the loading screen opened, never moved by a clock restart
+        self._watch_app = False  # the watch is of a TFT app's game, read at its loading screen
         self._paused = threading.Event()  # set and cleared by the page's thread, read by the loop
         self._pauses = 0  # every pause counted by the page's thread, under the lock; the loop compares it
         self._honored = 0  # the count of the last pause the loop has rested for; read and written by it only
@@ -339,6 +344,7 @@ class Watcher:
         self._note(LOADING)
         self._watch_since = self._next_live = self._watch_began = self._clock()
         self._watch_wall = self._wall()
+        self._watch_app = not getattr(self._found, "accepts", True)  # the TFT app's game: its start holds
         self._game_log.reset()
 
     def _watch(self, phase):
@@ -354,23 +360,29 @@ class Watcher:
             self._next_live = now + LIVE_POLL_SECONDS
             seconds = self._game_clock(self._live())
             if seconds is not None and seconds > 0:
-                self._watch_since = None
-                self._fire(MATCH_STARTED, STARTED_LINE)
+                self._started(STARTED_LINE)
                 return
             if seconds is not None:
                 self._watch_since = now
             if self._game_log(self._watch_wall - LIVE_LOG_GRACE_SECONDS):
-                self._watch_since = None
-                self._fire(MATCH_STARTED, STARTED_LINE)
+                self._started(STARTED_LINE)
                 return
         if now >= self._watch_since + LIVE_FALLBACK_SECONDS:
             if self._game_log.joined and now < self._watch_began + LIVE_JOINED_CEILING_SECONDS:
                 return  # joined and not started yet: the watch goes on, the log still asked on each due turn
             if phase == IN_PROGRESS:
-                self._watch_since = None
-                self._fire(MATCH_STARTED, STARTED_ON_WAIT_LINE)
+                self._started(STARTED_ON_WAIT_LINE)
             elif self._found is None:
                 self._watch_since = None
+
+    def _started(self, line):
+        """The match's true start: the watch ends and its alert fires, said with `line`. A TFT app's match (the client
+        at its loading screen could not accept) then holds MATCH_HOLD_SECONDS, nothing read, which a pause drops as
+        it drops any hold and a stop never waits for."""
+        self._watch_since = None
+        self._fire(MATCH_STARTED, line)
+        if self._watch_app:
+            self._hold_until = self._clock() + MATCH_HOLD_SECONDS
 
     def _hold(self):
         self._hold_until = self._clock() + HOLD_SECONDS

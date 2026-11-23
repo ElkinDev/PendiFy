@@ -32,7 +32,8 @@ def stamped(at, text):
 
 class AppPopFixture:
     """One fake time for the watcher's clock and wall and the session's; the click takes (its log says accepted at
-    the click's time) unless `answer` is a reason; the alert records each kind with its time after the first pop."""
+    the click's time) unless `answer` is a reason; the alert records each kind with its time after the first pop;
+    `reads` counts the reads of the app's log."""
 
     def setUp(self):
         tmp = support.temp_dir()
@@ -40,7 +41,7 @@ class AppPopFixture:
         self.path = f"{tmp.name}/TFT.log"
         open(self.path, "wb").close()
         self.now, self.on, self.answer, self.landing = POP_AT - 60, True, None, None
-        self.alerts, self.lines, self.clicks = [], [], []
+        self.alerts, self.lines, self.clicks, self.reads = [], [], [], 0
         test = self
 
         class Clicker:
@@ -61,6 +62,7 @@ class AppPopFixture:
                 return None, None
 
         def path():
+            self.reads += 1
             if self.landing is not None:  # the page's pause lands while the step reads the app's log
                 landing, self.landing = self.landing, None
                 landing()
@@ -77,6 +79,24 @@ class AppPopFixture:
         kwargs.setdefault("sleep", self.advance)
         return watcher.Watcher(self.credentials, self.alert, post=lambda *a: self.fail("posted an accept to the app"),
                                clock=self.time, wall=self.time, log=self.lines.append, **kwargs)
+
+    def looped(self):
+        """A watcher whose run() is driven turn by turn on this thread, and run(count), which makes `count` turns."""
+        stop, left = threading.Event(), [0]
+
+        def turn_sleep(seconds):
+            self.now += seconds
+            left[0] -= 1
+            if left[0] <= 0:
+                stop.set()
+
+        subject = self.watcher(stop=stop, sleep=turn_sleep)
+
+        def run(count):
+            left[0] = count
+            subject.run()
+            stop.clear()
+        return subject, run
 
     def time(self):
         return self.now
@@ -164,20 +184,7 @@ class AppRepopTest(AppPopFixture, unittest.TestCase):
 
     def test_a_pop_read_by_a_step_the_pause_lands_inside_is_handled_after_the_resume_and_only_then(self):
         # Mutation: the stamp kept while paused. Red: the pop the pause swallowed is never alerted after the resume.
-        stop, left = threading.Event(), [0]
-
-        def turn_sleep(seconds):
-            self.now += seconds
-            left[0] -= 1
-            if left[0] <= 0:
-                stop.set()
-
-        self.subject = self.watcher(stop=stop, sleep=turn_sleep)  # run() driven turn by turn on this thread
-
-        def run(count):
-            left[0] = count
-            self.subject.run()
-            stop.clear()
+        self.subject, run = self.looped()
 
         self.answer = "no_window"
         self.write(LINES["queue"])
